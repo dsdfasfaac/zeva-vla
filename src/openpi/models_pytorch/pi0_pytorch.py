@@ -6,11 +6,12 @@ from torch import Tensor
 from torch import nn
 import torch.nn.functional as F  # noqa: N812
 
-import openpi.models.gemma as _gemma
+import openpi.models_pytorch.gemma_config_pytorch as _gemma
 from openpi.models_pytorch.gemma_pytorch import PaliGemmaWithExpertModel
-from openpi.BehaviorEncoder.model import BehaviorModel
-from openpi.BehaviorEncoder.config import ModelConfig
 import openpi.models_pytorch.preprocessing_pytorch as _preprocessing
+from openpi.zeva.config import ZevaConfig
+from openpi.zeva.context import MemoryContextEncoder
+from openpi.zeva.transition_encoder import CausalTransitionEncoder
 
 class ProjectionHead(nn.Module):
 
@@ -30,7 +31,9 @@ class ProjectionHead(nn.Module):
 class ActionPriorNetwork(nn.Module):    
     def __init__(
             self, 
-            behavior_dim: int, 
+            context_dim: int,
+            phase_dim: int,
+            causal_context_dim: int,
             action_dim: int, 
             hidden_dim: int = 512, 
             num_waypoints: int = 8,
@@ -43,18 +46,24 @@ class ActionPriorNetwork(nn.Module):
         self.action_dim = action_dim
 
         self.temporal_waypoint = nn.Sequential(
-            nn.Linear(behavior_dim, hidden_dim),
+            nn.Linear(context_dim, hidden_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, behavior_dim * num_waypoints),
+            nn.Linear(hidden_dim, context_dim * num_waypoints),
         )
-        self.pos_emb = nn.Parameter(torch.randn(1, num_waypoints, behavior_dim) * 0.02)
+        self.pos_emb = nn.Parameter(torch.randn(1, num_waypoints, context_dim) * 0.02)
         
-        self.attention = nn.MultiheadAttention(embed_dim=behavior_dim, num_heads=4, batch_first=True)
-        self.norm_global = nn.LayerNorm(behavior_dim)
-        self.norm_local = nn.LayerNorm(behavior_dim)
+        self.attention = nn.MultiheadAttention(embed_dim=context_dim, num_heads=4, batch_first=True)
+        self.norm_global = nn.LayerNorm(context_dim)
+        self.norm_local = nn.LayerNorm(context_dim)
+        self.phase_projector = nn.Linear(phase_dim, context_dim)
+        self.causal_fusion = nn.Sequential(
+            nn.Linear(context_dim + causal_context_dim, context_dim),
+            nn.LayerNorm(context_dim),
+            nn.SiLU(),
+        )
 
         self.dist_head = nn.Sequential(
-            nn.Linear(behavior_dim, hidden_dim),
+            nn.Linear(context_dim, hidden_dim),
             nn.GELU(),
             nn.Linear(hidden_dim, action_horizon * action_dim * 2),  # Predict mean and log-std
         )
@@ -63,20 +72,27 @@ class ActionPriorNetwork(nn.Module):
         nn.init.zeros_(self.dist_head[-1].bias)
 
 
-    def forward(self, z_global: torch.Tensor, z_local: torch.Tensor):
-        B = z_global.size(0)
+    def forward(
+        self,
+        task_schema: torch.Tensor,
+        phase_token: torch.Tensor,
+        causal_context: torch.Tensor | None = None,
+    ):
+        batch_size = task_schema.size(0)
+        if causal_context is not None:
+            task_schema = self.causal_fusion(torch.cat([task_schema, causal_context], dim=-1))
 
-        waypoints = self.temporal_waypoint(z_global)  # (B, behavior_dim * num_waypoints)
-        waypoints = waypoints.view(B, self.num_waypoints, -1)  # (B, num_waypoints, behavior_dim)
+        waypoints = self.temporal_waypoint(task_schema)
+        waypoints = waypoints.view(batch_size, self.num_waypoints, -1)
         waypoints = waypoints + self.pos_emb  # Add positional embedding
 
-        q = self.norm_local(z_local).unsqueeze(1)  # (B, 1, behavior_dim)
+        q = self.norm_local(self.phase_projector(phase_token)).unsqueeze(1)
 
         k = v = self.norm_global(waypoints)  # (B, num_waypoints, behavior_dim)
         context, _ = self.attention(q, k, v)  # (B, 1, behavior_dim)
         context = context.squeeze(1)  # (B, behavior_dim)
 
-        out = self.dist_head(context).view(B, self.action_horizon, self.action_dim, 2) 
+        out = self.dist_head(context).view(batch_size, self.action_horizon, self.action_dim, 2)
         mu = out[..., 0]  # (B, action_horizon, action_dim)
         log_std = out[..., 1]  # (B, action_horizon, action_dim)
 
@@ -173,9 +189,12 @@ class PI0Pytorch(nn.Module):
         self.action_in_proj = nn.Linear(32, action_expert_config.width)
         self.action_out_proj = nn.Linear(action_expert_config.width, 32)
 
-        self.use_behavior = config.use_behavior
-        self.use_apn = config.use_apn
-        self.behavior_dim = config.behavior_dim
+        self.use_zeva = config.use_zeva
+        self.use_action_prior = config.use_action_prior
+        # Compatibility for external OpenPI callers that inspect these flags.
+        self.use_behavior = self.use_zeva
+        self.use_apn = self.use_action_prior
+        self.schema_dim = config.schema_dim
         self.action_horizon = config.action_horizon
 
         if self.pi05:
@@ -202,155 +221,144 @@ class PI0Pytorch(nn.Module):
             raise ValueError(msg) from None
 
 
-        # self.is_training = True
-        # ---- Behavior ----
-        # Project the behavior global token to time embedding space
-        if self.use_behavior:
-            memory_bank_path = config.memory_bank_path
+        # ---- Zeva: task schema, Mamba CTE, dual memory context and policy injection ----
+        if self.use_zeva:
+            self.global_projector = nn.Linear(self.schema_dim, 2048)
+            self.task_token_projector = nn.Sequential(
+                nn.Linear(2048, self.schema_dim),
+                nn.LayerNorm(self.schema_dim),
+            )
+            self.causal_projector = nn.Linear(config.causal_context_dim, 2048)
+            self.memory_context_encoder = MemoryContextEncoder(
+                task_dim=self.schema_dim,
+                phase_dim=config.phase_dim,
+                signal_dim=config.causal_signal_dim,
+                context_dim=config.causal_context_dim,
+            )
 
-            retrieval_ckpt = config.retrieval_ckpt
-            behavior_encoder_ckpt = config.behavior_encoder_ckpt    
+            zeva_config = ZevaConfig(
+                action_dim=config.causal_action_dim,
+                action_horizon=config.action_horizon,
+                model_dim=config.causal_context_dim,
+                phase_dim=config.phase_dim,
+                signal_dim=config.causal_signal_dim,
+                vision_pretrained=False,
+                dropout=0.1 if config.is_training else 0.0,
+                use_effect_stream=config.use_effect_stream,
+                brief_memory_size=config.brief_memory_size,
+                persistent_memory_size=config.persistent_memory_size,
+                retrieval_top_k=config.causal_retrieval_top_k,
+                merge_phase_weight=config.causal_merge_phase_weight,
+                merge_signal_weight=config.causal_merge_signal_weight,
+                merge_threshold=config.causal_merge_threshold,
+                use_brief_memory=config.use_brief_memory,
+                use_persistent_memory=config.use_persistent_memory,
+            )
+            self.causal_transition_encoder = CausalTransitionEncoder(zeva_config)
 
-            # Global -> VLM Prefix(Prompt)
-            self.global_projector = nn.Linear(self.behavior_dim, 2048)
-
-            # 12.19 Action Prior Network
-            if self.use_apn:
-                self.real_action_dim = 7 # 7 for libero
+            if self.use_action_prior:
+                self.real_action_dim = config.causal_action_dim
                 self.action_prior_network = ActionPriorNetwork(
-                    behavior_dim=self.behavior_dim,
+                    context_dim=self.schema_dim,
+                    phase_dim=config.phase_dim,
+                    causal_context_dim=config.causal_context_dim,
                     action_dim=self.real_action_dim,
                     hidden_dim=512,
                     num_waypoints=8,
                     action_horizon=config.action_horizon,
                 )
                 self.prior_emb_proj = nn.Linear(self.real_action_dim, action_expert_config.width)
-                nn.init.zeros_(self.prior_emb_proj.weight)  
+                nn.init.zeros_(self.prior_emb_proj.weight)
                 nn.init.zeros_(self.prior_emb_proj.bias)
-
                 self.prior_loss_scale = 0.01
 
-            # Load memory bank for fintuning
-            if memory_bank_path is not None:
-                print(f"Loading Memory Bank from {memory_bank_path}...")
-                bank_data = torch.load(memory_bank_path, map_location="cpu")
+            self._load_schema_memory(config.schema_memory_path)
+            if config.schema_retrieval_ckpt is not None and not config.is_training:
+                self._load_schema_retriever(config.schema_retrieval_ckpt)
+            if config.causal_encoder_ckpt is not None:
+                self._load_causal_encoder(config.causal_encoder_ckpt)
+            if config.causal_adapter_ckpt is not None:
+                self._load_causal_adapter(config.causal_adapter_ckpt)
 
-                if not bank_data:
-                    raise ValueError(f"Memory bank is empty: {memory_bank_path}")
+    def _load_schema_memory(self, memory_path: str | None) -> None:
+        if memory_path is None:
+            return
+        logging.info("Loading Zeva task-schema memory from %s", memory_path)
+        memory = torch.load(memory_path, map_location="cpu")
+        if not memory:
+            raise ValueError(f"Task-schema memory is empty: {memory_path}")
 
-                def get_memory_field(item, field):
-                    if field in item:
-                        return item[field].squeeze()
-                    if "embedding" in item:
-                        # Legacy banks used one tensor as both retrieval key and value.
-                        return item["embedding"].squeeze()
-                    raise KeyError(f"Memory entry is missing '{field}': {item.keys()}")
+        def get_field(item, primary, legacy):
+            if primary in item:
+                return item[primary].squeeze()
+            if legacy in item:
+                return item[legacy].squeeze()
+            if "embedding" in item:
+                return item["embedding"].squeeze()
+            raise KeyError(f"Schema entry is missing {primary!r}: {item.keys()}")
 
-                max_id = max(item['episode_idx'] for item in bank_data)
-                retrieval_keys = torch.stack(
-                    [get_memory_field(item, "retrieval_key") for item in bank_data]
-                )
-                behavior_values = torch.stack(
-                    [get_memory_field(item, "behavior_value") for item in bank_data]
-                )
+        keys = torch.stack([get_field(item, "schema_key", "retrieval_key") for item in memory])
+        values = torch.stack([get_field(item, "task_schema", "behavior_value") for item in memory])
+        if values.shape[-1] != self.schema_dim:
+            raise ValueError(f"Task-schema dimension {values.shape[-1]} does not match {self.schema_dim}.")
+        max_episode = max(item["episode_idx"] for item in memory)
+        self.register_buffer("schema_storage", torch.zeros(max_episode + 1, self.schema_dim), persistent=False)
+        for item, value in zip(memory, values, strict=True):
+            self.schema_storage[item["episode_idx"]] = value
+        self.register_buffer("schema_keys", keys, persistent=False)
+        self.register_buffer("schema_values", values, persistent=False)
 
-                value_dim = behavior_values.shape[-1]
-                if value_dim != self.behavior_dim:
-                    raise ValueError(
-                        f"Memory behavior_value dim ({value_dim}) does not match "
-                        f"behavior_dim ({self.behavior_dim})"
-                    )
+    def _load_schema_retriever(self, checkpoint_path: str) -> None:
+        if not hasattr(self, "schema_keys"):
+            raise ValueError("Task-schema memory is required before loading its retriever.")
+        self.schema_projector = ProjectionHead(2048, self.schema_keys.shape[-1], hidden_dim=1024)
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        self.schema_projector.load_state_dict(checkpoint.get("model_state_dict", checkpoint))
+        self.schema_projector.requires_grad_(False).eval()
 
-                self.register_buffer(
-                    "global_token_storage",
-                    torch.zeros((max_id + 1, value_dim)),
-                    persistent=False,
-                )
+    def _load_causal_encoder(self, checkpoint_path: str) -> None:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        action_normalization = checkpoint.get("action_normalization", {})
+        expected_normalization = self.config.causal_action_normalization
+        if action_normalization and action_normalization.get("type") != expected_normalization:
+            raise ValueError(
+                "Zeva CTE normalization does not match the foundation processor: "
+                f"expected {expected_normalization!r}."
+            )
+        self.causal_transition_encoder.load_state_dict(checkpoint.get("model_state_dict", checkpoint))
+        self.causal_transition_encoder.requires_grad_(False).eval()
 
-                for item, behavior_value in zip(bank_data, behavior_values, strict=True):
-                    episode_idx = item['episode_idx']
-                    self.global_token_storage[episode_idx] = behavior_value
-
-                self.register_buffer("memory_keys", retrieval_keys, persistent=False)
-                self.register_buffer("memory_values", behavior_values, persistent=False)
-
-                print(
-                    f"Memory Bank Tensors: keys={self.memory_keys.shape}, "
-                    f"values={self.memory_values.shape}, storage={self.global_token_storage.shape}"
-                )
-                print(f"Loaded Memory Bank with {len(bank_data)} entries.")
-
-            # Load pretrained Projection Head for retrieval
-            if retrieval_ckpt is not None and config.is_training == False:
-                print(f"Loading Projection Head from {retrieval_ckpt}...")
-                if not hasattr(self, "memory_keys"):
-                    raise ValueError("A memory bank is required when loading a retrieval head.")
-                self.projector = ProjectionHead(
-                    input_dim=2048,
-                    output_dim=self.memory_keys.shape[-1],
-                    hidden_dim=1024,
-                )
-                checkpoint = torch.load(retrieval_ckpt, map_location="cpu")
-                self.projector.load_state_dict(checkpoint)
-                for param in self.projector.parameters():
-                    param.requires_grad = False
-                self.projector.eval()
-                print("Loaded Projection Head.")
-            
-            # The same frozen BehaviorEncoder is used to compute stateless local
-            # tokens during both pi0.5 training and inference.
-            if behavior_encoder_ckpt is not None:
-                print(f"Loading Behavior Encoder from {behavior_encoder_ckpt}...")
-                behavior_config = ModelConfig(
-                    action_dim=7, 
-                    d_model=256, 
-                    n_layers=4,
-                    dropout=0.0, 
-                    ema_decay=0.99,
-                    vision_pretrained=False,
-                )
-                self.behavior_encoder = BehaviorModel(config=behavior_config)
-                checkpoint = torch.load(behavior_encoder_ckpt, map_location="cpu")
-                action_normalization = checkpoint.get("action_normalization", {})
-                if action_normalization.get("type") != "quantile":
-                    raise ValueError(
-                        "Stateless local tokens require a BehaviorEncoder trained with quantile action normalization."
-                    )
-                self.behavior_encoder.load_state_dict(checkpoint['model_state_dict'])
-                for param in self.behavior_encoder.parameters():
-                    param.requires_grad = False
-                self.behavior_encoder.eval()
-                print("Loaded Behavior Encoder.")
+    def _load_causal_adapter(self, checkpoint_path: str) -> None:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        if "memory_context_encoder" in checkpoint:
+            if "task_token_projector" in checkpoint:
+                self.task_token_projector.load_state_dict(checkpoint["task_token_projector"])
+            self.memory_context_encoder.load_state_dict(checkpoint["memory_context_encoder"])
+            self.causal_projector.load_state_dict(checkpoint["causal_projector"])
+            if self.use_action_prior and "action_prior_network" in checkpoint:
+                self.action_prior_network.load_state_dict(checkpoint["action_prior_network"], strict=False)
+            if self.use_action_prior and "prior_emb_proj" in checkpoint:
+                self.prior_emb_proj.load_state_dict(checkpoint["prior_emb_proj"])
+        else:
+            self.load_state_dict(checkpoint.get("model_state_dict", checkpoint), strict=False)
 
     @torch.no_grad()
-    def encode_local_token(self, image, prev_action=None, has_prev_action=None):
-        if not hasattr(self, "behavior_encoder"):
-            raise RuntimeError("A BehaviorEncoder checkpoint is required to compute local tokens.")
+    def initialize_causal_phase(self, image: torch.Tensor) -> torch.Tensor:
+        self.causal_transition_encoder.eval()
+        return self.causal_transition_encoder.initialize_phase(image)
 
-        if image.ndim != 4:
-            raise ValueError(f"Expected a batched behavior image, got shape {tuple(image.shape)}.")
-        if image.shape[-1] == 3:
-            image = image.permute(0, 3, 1, 2)
-        elif image.shape[1] != 3:
-            raise ValueError(f"Behavior image must be BHWC or BCHW, got shape {tuple(image.shape)}.")
+    @torch.no_grad()
+    def encode_causal_transition(self, image_before, executed_actions, image_after, inference_params=None):
+        self.causal_transition_encoder.eval()
+        return self.causal_transition_encoder.step(
+            image_before,
+            executed_actions,
+            image_after,
+            inference_params=inference_params,
+        )
 
-        image = image.contiguous().to(dtype=torch.float32)
-        batch_size = image.shape[0]
-        action_dim = self.behavior_encoder.config.action_dim
-
-        if prev_action is None:
-            prev_action = torch.zeros((batch_size, action_dim), dtype=torch.float32, device=image.device)
-            has_prev_action = torch.zeros(batch_size, dtype=torch.bool, device=image.device)
-        else:
-            prev_action = prev_action[..., :action_dim].to(device=image.device, dtype=torch.float32)
-            if has_prev_action is None:
-                has_prev_action = torch.ones(batch_size, dtype=torch.bool, device=image.device)
-            else:
-                has_prev_action = has_prev_action.to(device=image.device, dtype=torch.bool)
-
-        # Parent model.train() would otherwise update the frozen ResNet BatchNorm statistics.
-        self.behavior_encoder.eval()
-        return self.behavior_encoder.encode_stateless(image, prev_action, has_prev_action)
+    def build_causal_context(self, task_schema, phase_token, brief_signals=None, retrieved_signals=None):
+        return self.memory_context_encoder(task_schema, phase_token, brief_signals, retrieved_signals)
 
     def gradient_checkpointing_enable(self):
         """Enable gradient checkpointing for memory optimization."""
@@ -424,7 +432,13 @@ class PI0Pytorch(nn.Module):
         return time.to(dtype=torch.float32, device=device)
 
     def embed_prefix(
-        self, images, img_masks, lang_tokens, lang_masks, z_global=None
+        self,
+        images,
+        img_masks,
+        lang_tokens,
+        lang_masks,
+        task_schema=None,
+        causal_context=None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Embed images with SigLIP and language tokens with embedding layer to prepare
         for PaliGemma transformer processing.
@@ -433,15 +447,24 @@ class PI0Pytorch(nn.Module):
         pad_masks = []
         att_masks = []
 
-        # Process behavior global token
-        if z_global is not None and self.use_behavior:
-            logging.info("Using behavior global token for prefix embedding.")
-            global_embed = self.global_projector(z_global)
+        # A stable task schema anchors the policy across the full episode.
+        if task_schema is not None and self.use_zeva:
+            global_embed = self.global_projector(task_schema)
             global_embed = global_embed.unsqueeze(1)  # (B, 1, D)
             embs.append(global_embed)
             bs = global_embed.shape[0]
             valid_mask = torch.ones((bs, 1), dtype=torch.bool, device=global_embed.device)
             pad_masks.append(valid_mask)
+            att_masks += [0]
+
+        # The causal prompt changes as BIT/PIM acquire action-effect evidence.
+        if causal_context is not None and self.use_zeva:
+            causal_embed = self.causal_projector(causal_context).unsqueeze(1)
+            embs.append(causal_embed)
+            causal_mask = torch.ones(
+                (causal_embed.shape[0], 1), dtype=torch.bool, device=causal_embed.device
+            )
+            pad_masks.append(causal_mask)
             att_masks += [0]
 
         # Process images
@@ -523,7 +546,7 @@ class PI0Pytorch(nn.Module):
 
         action_emb = self._apply_checkpoint(action_proj_func, noisy_actions)
 
-        if prior_action is not None and self.use_behavior:
+        if prior_action is not None and self.use_zeva:
             def prior_emb_proj_func(prior_action):
                 return self.prior_emb_proj(prior_action)
 
@@ -583,21 +606,19 @@ class PI0Pytorch(nn.Module):
 
         return embs, pad_masks, att_masks, adarms_cond
 
-    def forward(self, observation, actions, noise=None, time=None) -> Tensor:
+    def forward(
+        self,
+        observation,
+        actions,
+        noise=None,
+        time=None,
+        task_schema=None,
+        phase_token=None,
+        causal_context=None,
+        brief_signals=None,
+        retrieved_signals=None,
+    ) -> Tensor:
         """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
-        z_local = None
-        if self.use_behavior and self.use_apn and observation.previous_action is not None:
-            z_local = self.encode_local_token(
-                observation.images["base_0_rgb"],
-                observation.previous_action,
-                observation.has_previous_action,
-            )
-            z_local = z_local + 0.01 * torch.randn_like(z_local)
-        elif self.use_behavior and self.use_apn and self.config.is_training:
-            raise ValueError(
-                "Stateless local-token training requires previous_action and has_previous_action in Observation."
-            )
-
         images, img_masks, lang_tokens, lang_masks, state, episode_index, frame_index = self._preprocess_observation(observation, train=True)
         
         if noise is None:
@@ -610,17 +631,24 @@ class PI0Pytorch(nn.Module):
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
 
-        # Retrieve behavior global token from memory bank
-        z_global = None
-        if episode_index is not None and self.use_behavior:
-            z_global = self.global_token_storage[episode_index].detach()
+        if task_schema is None and episode_index is not None and self.use_zeva and hasattr(self, "schema_storage"):
+            task_schema = self.schema_storage[episode_index].detach()
+        if phase_token is None and self.use_zeva:
+            phase_token = self.initialize_causal_phase(observation.images["base_0_rgb"])
+            phase_token = phase_token + 0.01 * torch.randn_like(phase_token)
+        if causal_context is None and task_schema is not None and phase_token is not None and self.use_zeva:
+            causal_context = self.build_causal_context(
+                task_schema,
+                phase_token,
+                brief_signals=brief_signals,
+                retrieved_signals=retrieved_signals,
+            )
 
         # Compute action prior
         prior_loss = torch.tensor(0.0, device=actions.device)
         prior_action_mean = None
-        if self.use_behavior and self.use_apn and z_global is not None and z_local is not None:
-            # prior_dist = self.action_prior_network(z_global, z_local, state.to(torch.float32))
-            prior_dist = self.action_prior_network(z_global, z_local)
+        if self.use_zeva and self.use_action_prior and task_schema is not None and phase_token is not None:
+            prior_dist = self.action_prior_network(task_schema, phase_token, causal_context)
             gt_actions = actions[:, :self.action_horizon, :self.real_action_dim]  # Use only the real action dimensions
             logp = prior_dist.log_prob(gt_actions)
             nll = -logp.sum(dim=-1)  # Sum over action dimensions
@@ -628,7 +656,14 @@ class PI0Pytorch(nn.Module):
             logging.info(f"Prior loss: {prior_loss.item()}")
             prior_action_mean = prior_dist.loc
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, lang_tokens, lang_masks, z_global=z_global)
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+            images,
+            img_masks,
+            lang_tokens,
+            lang_masks,
+            task_schema=task_schema,
+            causal_context=causal_context,
+        )
         suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(state, x_t, time, prior_action=prior_action_mean)
         if (
             self.paligemma_with_expert.paligemma.language_model.layers[0].self_attn.q_proj.weight.dtype
@@ -675,7 +710,16 @@ class PI0Pytorch(nn.Module):
         # return F.mse_loss(u_t, v_t, reduction="none")
 
     @torch.no_grad()
-    def sample_actions(self, device, observation, noise=None, num_steps=10, z_global=None, z_local=None) -> Tensor:
+    def sample_actions(
+        self,
+        device,
+        observation,
+        noise=None,
+        num_steps=10,
+        task_schema=None,
+        phase_token=None,
+        causal_context=None,
+    ) -> Tensor:
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
         bsize = observation.state.shape[0]
         if noise is None:
@@ -684,7 +728,14 @@ class PI0Pytorch(nn.Module):
 
         images, img_masks, lang_tokens, lang_masks, state  = self._preprocess_observation(observation, train=False)
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, lang_tokens, lang_masks, z_global=z_global)
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+            images,
+            img_masks,
+            lang_tokens,
+            lang_masks,
+            task_schema=task_schema,
+            causal_context=causal_context,
+        )
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
 
@@ -704,8 +755,8 @@ class PI0Pytorch(nn.Module):
         dt = torch.tensor(dt, dtype=torch.float32, device=device)
 
         prior = None
-        if self.use_behavior and self.use_apn and z_global is not None and z_local is not None:
-            prior_dist = self.action_prior_network(z_global, z_local)
+        if self.use_zeva and self.use_action_prior and task_schema is not None and phase_token is not None:
+            prior_dist = self.action_prior_network(task_schema, phase_token, causal_context)
             prior = prior_dist.loc
 
         x_t = noise
@@ -814,21 +865,24 @@ class PI0Pytorch(nn.Module):
         
         return vlm_feature
     
-    def _retrieve_global_token(self, vlm_feat, k=5):
-        """Retrieve behavior values using a VLM query in retrieval-key space."""
-        if self.use_behavior:
-            query = F.normalize(self.projector(vlm_feat), dim=-1)
-            keys = F.normalize(self.memory_keys, dim=-1)
+    def retrieve_task_schema(self, vlm_feat, k=5):
+        """Retrieve a stable task schema before online causal adaptation begins."""
+        if self.use_zeva and hasattr(self, "schema_projector"):
+            query = F.normalize(self.schema_projector(vlm_feat), dim=-1)
+            keys = F.normalize(self.schema_keys, dim=-1)
             scores = torch.matmul(query, keys.T)
 
             k = min(k, scores.shape[1])
             topk_scores, best_indices = torch.topk(scores, k=k, dim=1)
 
-            # Retrieve rich behavior values using indices selected in key space.
-            retrieved_values = self.memory_values[best_indices]
+            retrieved_values = self.schema_values[best_indices]
             weights = F.softmax(topk_scores, dim=1)
 
-            z_global = torch.sum(weights.unsqueeze(-1) * retrieved_values, dim=1)
-            return z_global
-        else:
-            return None
+            return torch.sum(weights.unsqueeze(-1) * retrieved_values, dim=1)
+        if self.use_zeva:
+            return F.normalize(self.task_token_projector(vlm_feat), dim=-1)
+        return None
+
+    # Released checkpoints and external clients may still call the old name.
+    def _retrieve_global_token(self, vlm_feat, k=5):
+        return self.retrieve_task_schema(vlm_feat, k=k)

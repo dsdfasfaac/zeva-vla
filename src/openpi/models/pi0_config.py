@@ -32,18 +32,43 @@ class Pi0Config(_model.BaseModelConfig):
     # This config option is not used directly by the model, but it is read by the ModelTransformFactory.
     discrete_state_input: bool = None  # type: ignore
     
-    use_behavior: bool = True
-    use_apn: bool = True
-    is_training: bool = False  
-    # is_training: bool = True
+    # Zeva keeps the foundation policy frozen at deployment and adapts through
+    # Mamba-encoded action-effect evidence stored in dual-timescale memory.
+    use_zeva: bool = False
+    use_action_prior: bool = True
+    is_training: bool = False
 
-    # for libero 
-    retrieval_ckpt: str = "/path/to/retrieval/head/best_model.pth"
-    behavior_encoder_ckpt: str = "/path/to/behavior/encoder/checkpoint.pth"
-    memory_bank_path: str = "/path/to/libero/memory_bank.pt"
-    # Local tokens are computed online from the current image and previous action.
-    local_token_path: str | None = None
-    behavior_dim: int = 256
+    # Optional offline task-schema memory inherited from the pi0.5 backbone.
+    schema_retrieval_ckpt: str | None = None
+    schema_memory_path: str | None = None
+    schema_dim: int = 256
+
+    # Zeva-specific pretrained modules.
+    causal_encoder_ckpt: str | None = None
+    causal_adapter_ckpt: str | None = None
+    causal_action_dim: int = 16
+    causal_action_normalization: str = "mean_std"
+    phase_dim: int = 128
+    causal_signal_dim: int = 256
+    causal_context_dim: int = 256
+    brief_memory_size: int = 8
+    persistent_memory_size: int = 256
+    causal_retrieval_top_k: int = 5
+    causal_merge_phase_weight: float = 0.6
+    causal_merge_signal_weight: float = 0.4
+    causal_merge_threshold: float = 0.85
+    use_effect_stream: bool = True
+    use_brief_memory: bool = True
+    use_persistent_memory: bool = True
+
+    # Deprecated aliases retained so earlier checkpoints can be migrated
+    # without rewriting serialized configs.
+    use_behavior: bool | None = None
+    use_apn: bool | None = None
+    retrieval_ckpt: str | None = None
+    behavior_encoder_ckpt: str | None = None
+    memory_bank_path: str | None = None
+    behavior_dim: int | None = None
 
     num_bases: int = 4
 
@@ -52,6 +77,20 @@ class Pi0Config(_model.BaseModelConfig):
             object.__setattr__(self, "max_token_len", 200 if self.pi05 else 48)
         if self.discrete_state_input is None:
             object.__setattr__(self, "discrete_state_input", self.pi05)
+        if self.use_behavior is not None:
+            object.__setattr__(self, "use_zeva", self.use_behavior)
+        if self.use_apn is not None:
+            object.__setattr__(self, "use_action_prior", self.use_apn)
+        if self.retrieval_ckpt is not None and self.schema_retrieval_ckpt is None:
+            object.__setattr__(self, "schema_retrieval_ckpt", self.retrieval_ckpt)
+        if self.memory_bank_path is not None and self.schema_memory_path is None:
+            object.__setattr__(self, "schema_memory_path", self.memory_bank_path)
+        if self.behavior_dim is not None:
+            object.__setattr__(self, "schema_dim", self.behavior_dim)
+        if self.causal_action_dim <= 0 or self.causal_action_dim > self.action_dim:
+            raise ValueError("causal_action_dim must be within the PI0.5 padded action dimension.")
+        if self.causal_action_normalization not in {"mean_std", "quantile"}:
+            raise ValueError("Zeva action normalization must be 'mean_std' or 'quantile'.")
 
     @property
     @override

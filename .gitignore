@@ -5,6 +5,9 @@ checkpoints/
 data/
 wandb/
 
+# Local research scratch space (papers, extracted text, and ad-hoc eval probes).
+tmp/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

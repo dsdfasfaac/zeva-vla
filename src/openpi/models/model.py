@@ -110,7 +110,7 @@ class Observation(Generic[ArrayT]):
     episode_index: at.Int[ArrayT, "*b"] | None = None
     frame_index: at.Int[ArrayT, "*b"] | None = None
 
-    # Stateless BehaviorEncoder conditioning fields used during PyTorch training.
+    # Legacy previous-action fields kept for checkpoint/data compatibility.
     previous_action: at.Float[ArrayT, "*b a"] | None = None
     has_previous_action: at.Bool[ArrayT, "*b"] | None = None
            

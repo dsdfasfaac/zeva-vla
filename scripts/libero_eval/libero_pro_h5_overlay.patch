@@ -1,0 +1,130 @@
+diff --git a/src/egoscale/pi05/libero_memory_client.py b/src/egoscale/pi05/libero_memory_client.py
+--- a/src/egoscale/pi05/libero_memory_client.py
++++ b/src/egoscale/pi05/libero_memory_client.py
+@@ -69,6 +69,8 @@ class LiberoMemoryClient:
+         *,
+         start_observation: Mapping[str, Any],
+         end_observation: Mapping[str, Any],
++        causal_mid_observation: Mapping[str, Any] | None,
++        causal_h5_actions: np.ndarray,
+         predicted_actions: np.ndarray,
+         executed_model_targets: np.ndarray,
+         executed_world_targets: np.ndarray,
+@@ -95,6 +97,11 @@ class LiberoMemoryClient:
+         }
+         observation_to_arrays(start_observation, "start", arrays)
+         observation_to_arrays(end_observation, "end", arrays)
++        if causal_mid_observation is not None:
++            observation_to_arrays(causal_mid_observation, "causal_mid", arrays)
++        arrays["causal_h5_actions"] = np.ascontiguousarray(
++            causal_h5_actions, dtype=np.float32
++        )
+         meta, _ = post_npz(
+             self.server_url,
+             "/v1/commit_transition",
+diff --git a/client/evaluate_libero_pro_memory.py b/client/evaluate_libero_pro_memory.py
+--- a/client/evaluate_libero_pro_memory.py
++++ b/client/evaluate_libero_pro_memory.py
+@@ -20,6 +20,9 @@ from libero.libero.envs import OffScreenRenderEnv
+ from openpi_client import image_tools
+
+-from egoscale.pi05.eef_contract import quaternion_xyzw_to_rotation_matrix
++from egoscale.pi05.eef_contract import (
++    quaternion_xyzw_to_rotation_matrix,
++    rotation_matrix_to_quaternion_xyzw,
++)
+ from egoscale.pi05.libero_camera_frame import (
+     libero_stage1_actions_to_world_command_targets,
+     libero_states_world_to_stage1_slots,
+@@ -63,5 +63,6 @@ class PendingTransition:
+     target_offsets: list[int] = dataclasses.field(default_factory=lambda: [0])
+     target_reached: list[bool] = dataclasses.field(default_factory=list)
++    causal_mid_observation: dict[str, np.ndarray] | None = None
+
+     def append(
+         self,
+@@ -188,6 +189,14 @@ def eval_libero(args: Args) -> None:
+                         commands=commands,
+                         reached=target_reached,
+                     )
++                    if len(pending.executed_model_targets) == 5:
++                        pending.causal_mid_observation = _copy_observation(
++                            _policy_observation(
++                                obs,
++                                resize_size=args.resize_size,
++                                world_from_camera=world_from_camera,
++                            )
++                        )
+                     model_targets_executed += 1
+                     targets_reached += int(target_reached)
+                     if success:
+@@ -244,15 +252,38 @@ def _commit(
+     client.commit_transition(
+         start_observation=pending.start_observation,
+         end_observation=end_observation,
++        causal_mid_observation=pending.causal_mid_observation,
++        causal_h5_actions=_rebase_causal_h5_actions(pending),
+         predicted_actions=pending.predicted_actions,
+         executed_model_targets=np.stack(pending.executed_model_targets),
+         executed_world_targets=np.stack(pending.executed_world_targets),
+         osc_commands=np.stack(pending.osc_commands),
+         target_offsets=np.asarray(pending.target_offsets, dtype=np.int32),
+         target_reached=np.asarray(pending.target_reached, dtype=np.bool_),
+         completed=count == REPLAN_STEPS,
+         success=success,
+     )
+
+
++def _rebase_causal_h5_actions(pending: PendingTransition) -> np.ndarray:
++    """Express targets 6..10 relative to the observed B5 pose, as in training."""
++    actions = np.stack(pending.executed_model_targets).astype(np.float32, copy=True)
++    if len(actions) <= 5:
++        return actions
++    if pending.causal_mid_observation is None:
++        raise RuntimeError("cannot rebase an R10 causal chunk without its B5 observation")
++    start = np.asarray(pending.start_observation["observation/state"], dtype=np.float64)
++    midpoint = np.asarray(
++        pending.causal_mid_observation["observation/state"], dtype=np.float64
++    )
++    start_rotation = quaternion_xyzw_to_rotation_matrix(start[3:7])
++    midpoint_rotation = quaternion_xyzw_to_rotation_matrix(midpoint[3:7])
++    original_delta = quaternion_xyzw_to_rotation_matrix(actions[5:, 3:7])
++    target_rotation = original_delta @ start_rotation
++    rebased_rotation = target_rotation @ midpoint_rotation.T
++    actions[5:, :3] = start[:3] + actions[5:, :3] - midpoint[:3]
++    actions[5:, 3:7] = rotation_matrix_to_quaternion_xyzw(rebased_rotation)
++    return np.ascontiguousarray(actions)
++
++
+ def _policy_observation(
+diff --git a/server/serve_policy.py b/server/serve_policy.py
+--- a/server/serve_policy.py
++++ b/server/serve_policy.py
+@@ -72,6 +72,7 @@ class PolicyServerState:
+             "action_contract": ACTION_CONTRACT,
+             "predicted_action_horizon": PREDICTION_HORIZON,
+             "required_execution_horizon": EXECUTION_HORIZON,
++            "causal_transition_horizon": 5,
+             "episode_id": self.episode_id,
+             "attempt_id": self.attempt_id,
+             "next_replan_id": self.next_replan_id,
+@@ -157,9 +158,19 @@ class PolicyServerState:
+         completed = bool(meta.get("completed", False))
+         if completed != (len(executed) == EXECUTION_HORIZON):
+             raise ValueError("completed means exactly one full R10 chunk")
++        causal_actions = np.asarray(arrays["causal_h5_actions"], dtype=np.float32)
++        if causal_actions.shape != executed.shape or not np.isfinite(causal_actions).all():
++            raise ValueError("causal_h5_actions must be finite and match executed targets")
++        causal_mid = None
++        if "causal_mid.agentview_rgb" in arrays:
++            causal_mid = observation_from_arrays(arrays, "causal_mid")
++        if completed and causal_mid is None:
++            raise ValueError("a full R10 commit requires the observed H5 causal midpoint")
+         transition = {
+             "context": dict(meta),
+             "start_observation": observation_from_arrays(arrays, "start"),
+             "end_observation": observation_from_arrays(arrays, "end"),
++            "causal_mid_observation": causal_mid,
++            "causal_h5_actions": causal_actions,
+             "predicted_action_chunk": predicted,
+             "executed_model_targets": executed,

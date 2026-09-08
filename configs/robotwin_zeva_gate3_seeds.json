@@ -1,0 +1,28 @@
+{
+  "schema": "robotwin-expert-valid-seeds-v1",
+  "start_seed": 1000,
+  "episodes_per_task": 5,
+  "tasks": {
+    "beat_block_hammer": [
+      {"seed": 1000, "instruction": "Grab the grippy handle hammer using the right arm then pound block"},
+      {"seed": 1005, "instruction": "Take the hammer with two-tone handle and hammer the block"},
+      {"seed": 1009, "instruction": "Lift the silver curved hammer head and hit the block."},
+      {"seed": 1010, "instruction": "Lift the silver curved hammer head with the left arm then strike block"},
+      {"seed": 1011, "instruction": "Take the yellow and black hammer grip and strike the block"}
+    ],
+    "pick_dual_bottles": [
+      {"seed": 1000, "instruction": "Catch the dark drink bottle with logo in one arm, the bottle with white printed label in the other."},
+      {"seed": 1001, "instruction": "Hold the brown bottle with red label in one hand and the handheld green bottle in another."},
+      {"seed": 1002, "instruction": "Reach for the Coca-Cola bottle, then grab the smooth green bottle."},
+      {"seed": 1003, "instruction": "Grasp the bottle with ridges on bottom and the bottle with narrow top with both arms."},
+      {"seed": 1004, "instruction": "Hold the Coca-Cola bottle and the medium green bottle separately."}
+    ],
+    "stamp_seal": [
+      {"seed": 1000, "instruction": "Grab the yellow seal and press Olive"},
+      {"seed": 1001, "instruction": "Hold the stamp with red top and press Lime"},
+      {"seed": 1005, "instruction": "Take the palm-sized stamping seal and stamp it on Tan."},
+      {"seed": 1006, "instruction": "With the left arm, secure the seal with vertical textured grip and mark Lime."},
+      {"seed": 1008, "instruction": "Press the stamp with red top firmly onto Red"}
+    ]
+  }
+}

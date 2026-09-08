@@ -494,7 +494,7 @@ class TrainConfig:
     # Base directory for config assets (e.g., norm stats).
     assets_base_dir: str = "./assets"
     # Base directory for checkpoints.
-    checkpoint_base_dir: str = "/path/to/behaviorvla/checkpoints"
+    checkpoint_base_dir: str = "/path/to/zeva/checkpoints"
 
     # Random seed that will be used by random generators during training.
     seed: int = 42
@@ -737,11 +737,44 @@ _CONFIGS = [
         ema_decay=None,
     ),
     TrainConfig(
-        name="pi05_libero",
+        name="pi05_libero_base",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
         data=LeRobotLiberoDataConfig(
             repo_id="/path/to/libero/dataset",
-            base_config=DataConfig(prompt_from_task=True, include_previous_action=True),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+            assets=AssetsConfig(
+                assets_dir="/path/to/pi05_base/assets/physical-intelligence",
+                asset_id="libero"
+            )
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=5000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        pytorch_weight_path="/path/to/pi05_base",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_libero",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=10,
+            discrete_state_input=False,
+            use_zeva=True,
+            causal_action_dim=7,
+            causal_action_normalization="quantile",
+            causal_encoder_ckpt="/path/to/zeva/causal_encoder/best_model.pth",
+            causal_adapter_ckpt="/path/to/zeva/causal_adapter/best_model.pth",
+        ),
+        data=LeRobotLiberoDataConfig(
+            repo_id="/path/to/libero/dataset",
+            base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=False,
             assets=AssetsConfig(
                 assets_dir="/path/to/pi05_base/assets/physical-intelligence",

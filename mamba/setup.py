@@ -203,6 +203,15 @@ if not SKIP_CUDA_BUILD:
             cc_flag.append("-gencode")
             cc_flag.append("arch=compute_121,code=sm_121")
 
+        # The Zeva release runs on H100s. Avoid compiling every historical CUDA
+        # architecture when building the bundled extension on an offline node.
+        zeva_cuda_arch = os.getenv("ZEVA_CUDA_ARCH_ONLY", "")
+        if zeva_cuda_arch:
+            compact_arch = zeva_cuda_arch.replace(".", "")
+            cc_flag = ["-gencode", f"arch=compute_{compact_arch},code=sm_{compact_arch}"]
+        elif os.getenv("ZEVA_H100_ONLY", "FALSE") == "TRUE":
+            cc_flag = ["-gencode", "arch=compute_90,code=sm_90"]
+
 
     # HACK: The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
     # torch._C._GLIBCXX_USE_CXX11_ABI

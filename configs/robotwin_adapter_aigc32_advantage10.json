@@ -1,0 +1,22 @@
+{
+  "schema": "egoscale-robotwin-lerobot-relative-eef16-v1",
+  "dataset_root": "/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/source",
+  "eef_cache_root": "/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/eef-index",
+  "joint_cache_root": "/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/joint14-index",
+  "stats_path": "/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/mean-std-eef16-h50-stage1grip-train95-v2.json",
+  "splits": [
+    "Clean",
+    "Randomized"
+  ],
+  "tasks": null,
+  "action_horizon": 50,
+  "image_shape": [
+    480,
+    640,
+    3
+  ],
+  "video_backend": "torchcodec",
+  "return_uint8": false,
+  "validation_fraction": 0.05,
+  "split_seed": 1000
+}

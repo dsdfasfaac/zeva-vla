@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 PYTHON="${PYTHON:-$ROOT_DIR/.venv/bin/python}"
 GPU="${GPU:-7}"
 
-CHECKPOINT="${CHECKPOINT:-/path/to/behaviorvla/checkpoint}"
+CHECKPOINT="${CHECKPOINT:-/path/to/zeva/checkpoint}"
 SOURCE_PATH="${SOURCE_PATH:-/path/to/libero/source_features.pt}"
 MEMORY_BANK="${MEMORY_BANK:-/path/to/libero/memory_bank.pt}"
 SAVE_DIR="${SAVE_DIR:-/path/to/retrieval/head/output}"

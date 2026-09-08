@@ -46,14 +46,20 @@ def load_model(config: _config.TrainConfig, ckpt_path: str, device: str):
             pi05=getattr(config.model, "pi05", False),
         )
     else:
-        # Source extraction only needs the VLM. Disabling behavior modules avoids
-        # loading a retrieval head before the new head has been trained.
+        # Task-schema extraction only needs the VLM. Disable Zeva modules so
+        # online causal checkpoints are not required during offline extraction.
         model_cfg = dataclasses.replace(
             config.model,
             dtype=config.pytorch_training_precision,
-            use_behavior=False,
-            use_apn=False,
+            use_zeva=False,
+            use_action_prior=False,
             is_training=True,
+            schema_retrieval_ckpt=None,
+            schema_memory_path=None,
+            causal_encoder_ckpt=None,
+            causal_adapter_ckpt=None,
+            use_behavior=None,
+            use_apn=None,
             retrieval_ckpt=None,
             behavior_encoder_ckpt=None,
             memory_bank_path=None,
@@ -76,7 +82,7 @@ def load_model(config: _config.TrainConfig, ckpt_path: str, device: str):
     if missing:
         raise RuntimeError(f"Missing VLM checkpoint tensors: {sorted(missing)}")
     if unexpected:
-        logging.info("Ignored %d behavior-only checkpoint tensors.", len(unexpected))
+        logging.info("Ignored %d Zeva-only checkpoint tensors.", len(unexpected))
     
     # --- DEBUG OUTPUT ---
     vlm_hidden_dim = model.paligemma_with_expert.paligemma.config.text_config.hidden_size
@@ -230,7 +236,7 @@ if __name__ == "__main__":
 ''''
 CUDA_VISIBLE_DEVICES=2 python scripts/extract_source.py \
     --config-name pi05_libero \
-    --ckpt-path /path/to/behaviorvla/checkpoint \
+    --ckpt-path /path/to/zeva/checkpoint \
     --batch-size 32 \
     --save-path /path/to/libero/source_features.pt
 '''

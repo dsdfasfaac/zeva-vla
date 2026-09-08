@@ -3,7 +3,7 @@ import logging
 
 import torch
 
-from openpi.shared import image_tools
+from openpi.models_pytorch.torch_image_tools import resize_with_pad_torch
 
 logger = logging.getLogger("openpi")
 
@@ -47,7 +47,7 @@ def preprocess_observation_pytorch(
 
         if image.shape[1:3] != image_resolution:
             logger.info(f"Resizing image {key} from {image.shape[1:3]} to {image_resolution}")
-            image = image_tools.resize_with_pad_torch(image, *image_resolution)
+            image = resize_with_pad_torch(image, *image_resolution)
 
         if train:
             # Convert from [-1, 1] to [0, 1] for PyTorch augmentations

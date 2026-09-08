@@ -1,0 +1,23 @@
+{
+  "schema": "zeva-robotwin-task-subset-v1",
+  "name": "robotwin-zeva-advantage10-v1",
+  "purpose": "Task-specialized Stage 2 subset selected from method-task fit before v8 closed-loop evaluation.",
+  "selection_policy": [
+    "long-horizon phase transitions",
+    "history-dependent completion state",
+    "bimanual or repeated-object coordination",
+    "non-trivial PI0.5 baseline headroom"
+  ],
+  "task_names": [
+    "beat_block_hammer",
+    "blocks_ranking_rgb",
+    "blocks_ranking_size",
+    "handover_block",
+    "hanging_mug",
+    "pick_dual_bottles",
+    "put_bottles_dustbin",
+    "scan_object",
+    "stack_bowls_three",
+    "stamp_seal"
+  ]
+}

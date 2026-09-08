@@ -91,4 +91,5 @@ def create_trained_policy(
         metadata=train_config.policy_metadata,
         is_pytorch=is_pytorch,
         pytorch_device=pytorch_device if is_pytorch else None,
+        action_norm_stats=norm_stats.get("actions") if norm_stats is not None else None,
     )

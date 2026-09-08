@@ -1,7 +1,7 @@
 [project]
-name = "openpi"
+name = "zeva"
 version = "0.1.0"
-description = "Official implementation of BehaviorVLA"
+description = "Zeva: In-Context Causal Learning for Generalizable Embodied Manipulation"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -41,7 +41,7 @@ dependencies = [
 
 
 [project.urls]
-Repository = "https://github.com/iLearn-Lab/ICML26-BehaviorVLA"
+"Project Page" = "https://air-embodied-brain.github.io/Zeva"
 
 [dependency-groups]
 dev = [

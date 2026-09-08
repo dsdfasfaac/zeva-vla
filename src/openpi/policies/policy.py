@@ -17,6 +17,7 @@ from openpi import transforms as _transforms
 from openpi.models import model as _model
 from openpi.shared import array_typing as at
 from openpi.shared import nnx_utils
+from openpi.zeva.memory import CausalMemoryManager
 
 BasePolicy: TypeAlias = _base_policy.BasePolicy
 class Policy(BasePolicy):
@@ -31,6 +32,7 @@ class Policy(BasePolicy):
         metadata: dict[str, Any] | None = None,
         pytorch_device: str = "cpu",
         is_pytorch: bool = False,
+        action_norm_stats: Any | None = None,
     ):
         """Initialize the Policy.
 
@@ -54,6 +56,7 @@ class Policy(BasePolicy):
         self._is_pytorch_model = is_pytorch
         self._pytorch_device = pytorch_device
         self.replan_steps = 5 # 5 for libero
+        self._action_norm_stats = action_norm_stats
 
         if self._is_pytorch_model:
             self._model = self._model.to(pytorch_device)
@@ -64,18 +67,61 @@ class Policy(BasePolicy):
             self._sample_actions = nnx_utils.module_jit(model.sample_actions)
             self._rng = rng or jax.random.key(0)
         
-        self.reset()
+        self._causal_memory = None
+        if self._is_pytorch_model and getattr(self._model, "use_zeva", False):
+            config = self._model.config
+            self._causal_memory = CausalMemoryManager(
+                brief_size=config.brief_memory_size,
+                persistent_size=config.persistent_memory_size,
+                retrieval_top_k=config.causal_retrieval_top_k,
+                merge_phase_weight=config.causal_merge_phase_weight,
+                merge_signal_weight=config.causal_merge_signal_weight,
+                merge_threshold=config.causal_merge_threshold,
+                use_brief_memory=config.use_brief_memory,
+                use_persistent_memory=config.use_persistent_memory,
+            )
+        self.reset(scope="episode")
         
-    def reset(self):
+    def reset(self, scope: str = "episode"):
+        """Reset Zeva state at attempt or fixed-episode boundaries.
+
+        BIT and Mamba recurrence are attempt-local. PIM survives an attempt
+        reset and is cleared only for a new fixed episode.
+        """
+        if scope not in {"attempt", "episode"}:
+            raise ValueError(f"Unknown reset scope: {scope!r}.")
+        existing_schema = None
+        if hasattr(self, "_inference_state") and scope == "attempt":
+            existing_schema = self._inference_state.get("task_schema")
+        if self._causal_memory is not None:
+            if scope == "episode":
+                self._causal_memory.reset_episode()
+            else:
+                self._causal_memory.reset_attempt()
         self._inference_state = {
-            "z_global": None,
-            "prev_action": None,
+            "task_schema": existing_schema,
+            "phase_token": None,
+            "causal_context": None,
+            "previous_image": None,
+            "pending_normalized_actions": None,
+            "cte_inference_params": None,
         }
 
     @override
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs)
+        runtime = {
+            key: inputs.pop(key, None)
+            for key in (
+                "executed_actions",
+                "executed_actions_normalized",
+                "executed_steps",
+                "episode_id",
+                "attempt_id",
+                "observe_only",
+            )
+        }
         inputs = self._input_transform(inputs)
         if not self._is_pytorch_model:
             # Make a batch and convert to jax.Array.
@@ -97,38 +143,113 @@ class Policy(BasePolicy):
 
         observation = _model.Observation.from_dict(inputs)
 
-        if self._model.use_behavior:
-            z_global = self._inference_state.get("z_global")
-            if z_global is None:
-                vlm_feats = self._model.extract_vlm_features(observation)
-                z_global = self._model._retrieve_global_token(vlm_feats)
-                self._inference_state["z_global"] = z_global
-                
-                self._inference_state["prev_action"] = None
+        task_schema = None
+        phase_token = None
+        causal_context = None
+        use_zeva = self._is_pytorch_model and getattr(self._model, "use_zeva", False)
+        if use_zeva:
+            current_image = observation.images["base_0_rgb"]
+            causal_action_dim = self._model.config.causal_action_dim
+            with torch.no_grad():
+                task_schema = self._inference_state.get("task_schema")
+                if task_schema is None:
+                    vlm_features = self._model.extract_vlm_features(observation)
+                    task_schema = self._model.retrieve_task_schema(vlm_features)
+                    self._inference_state["task_schema"] = task_schema
 
-            if self._model.use_apn:
-                current_image = observation.images["base_0_rgb"]
-                z_local = self._model.encode_local_token(
-                    current_image,
-                    self._inference_state["prev_action"],
-                )
-            else:
-                z_local = None
-        else:
-            z_global = None
-            z_local = None
+                previous_image = self._inference_state.get("previous_image")
+                pending_actions = self._inference_state.get("pending_normalized_actions")
+                if previous_image is not None and pending_actions is not None:
+                    executed_normalized = runtime["executed_actions_normalized"]
+                    if executed_normalized is not None:
+                        executed_normalized = torch.as_tensor(
+                            executed_normalized, dtype=torch.float32, device=self._pytorch_device
+                        )
+                        if executed_normalized.ndim == 2:
+                            executed_normalized = executed_normalized.unsqueeze(0)
+                    elif runtime["executed_actions"] is not None and self._action_norm_stats is not None:
+                        executed_raw = torch.as_tensor(
+                            runtime["executed_actions"], dtype=torch.float32, device=self._pytorch_device
+                        )
+                        if executed_raw.ndim == 2:
+                            executed_raw = executed_raw.unsqueeze(0)
+                        if self._model.config.causal_action_normalization == "mean_std":
+                            mean = torch.as_tensor(
+                                self._action_norm_stats.mean[:causal_action_dim],
+                                dtype=torch.float32,
+                                device=self._pytorch_device,
+                            )
+                            std = torch.as_tensor(
+                                self._action_norm_stats.std[:causal_action_dim],
+                                dtype=torch.float32,
+                                device=self._pytorch_device,
+                            )
+                            executed_normalized = (executed_raw[..., :causal_action_dim] - mean) / (std + 1e-8)
+                        else:
+                            q01 = torch.as_tensor(
+                                self._action_norm_stats.q01[:causal_action_dim],
+                                dtype=torch.float32,
+                                device=self._pytorch_device,
+                            )
+                            q99 = torch.as_tensor(
+                                self._action_norm_stats.q99[:causal_action_dim],
+                                dtype=torch.float32,
+                                device=self._pytorch_device,
+                            )
+                            executed_normalized = (
+                                (executed_raw[..., :causal_action_dim] - q01) / (q99 - q01 + 1e-6) * 2.0 - 1.0
+                            )
+                    else:
+                        executed_steps = runtime["executed_steps"]
+                        if executed_steps is None and runtime["executed_actions"] is not None:
+                            executed_steps = len(runtime["executed_actions"])
+                        executed_steps = int(executed_steps or min(self.replan_steps, pending_actions.shape[1]))
+                        executed_normalized = pending_actions[:, :executed_steps]
+
+                    causal_encoding, inference_params = self._model.encode_causal_transition(
+                        previous_image,
+                        executed_normalized,
+                        current_image,
+                        inference_params=self._inference_state.get("cte_inference_params"),
+                    )
+                    self._inference_state["cte_inference_params"] = inference_params
+                    phase_token = causal_encoding.phase_token
+                    self._causal_memory.update(phase_token, causal_encoding.causal_signal)
+                else:
+                    phase_token = self._model.initialize_causal_phase(current_image)
+
+                brief = self._causal_memory.brief_tensor(device=self._pytorch_device)
+                retrieved = self._causal_memory.retrieve(phase_token, device=self._pytorch_device)
+                causal_context = self._model.build_causal_context(task_schema, phase_token, brief, retrieved)
+                self._inference_state["phase_token"] = phase_token
+                self._inference_state["causal_context"] = causal_context
+                self._inference_state["previous_image"] = current_image.detach().clone()
+
+            if runtime["observe_only"]:
+                return {
+                    "actions": np.empty((0, causal_action_dim), dtype=np.float32),
+                    "zeva_memory": self._causal_memory.snapshot(),
+                }
         
         start_time = time.monotonic()
+        model_kwargs = sample_kwargs
+        if use_zeva:
+            model_kwargs = {
+                **sample_kwargs,
+                "task_schema": task_schema,
+                "phase_token": phase_token,
+                "causal_context": causal_context,
+            }
         outputs = {
             "state": inputs["state"],
-            "actions": self._sample_actions(sample_rng_or_pytorch_device, observation, z_global=z_global, z_local=z_local, **sample_kwargs),
+            "actions": self._sample_actions(sample_rng_or_pytorch_device, observation, **model_kwargs),
         }
         model_time = time.monotonic() - start_time
         
-        if self._model.use_behavior:
-            actions = outputs["actions"]
-            self._inference_state["prev_action"] = actions[:, self.replan_steps - 1, :][...,:7]
-        # print(f"Sampled actions: {actions.shape}, first action: {actions[:, 0, :][...,:7]}")
+        if use_zeva:
+            self._inference_state["pending_normalized_actions"] = (
+                outputs["actions"][..., :causal_action_dim].detach().clone()
+            )
         
         if self._is_pytorch_model:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...].detach().cpu()), outputs)
@@ -140,6 +261,8 @@ class Policy(BasePolicy):
         outputs["policy_timing"] = {
             "infer_ms": model_time * 1000,
         }
+        if use_zeva:
+            outputs["zeva_memory"] = self._causal_memory.snapshot()
         return outputs
 
     @property
@@ -170,3 +293,7 @@ class PolicyRecorder(_base_policy.BasePolicy):
 
         np.save(output_path, np.asarray(data))
         return results
+
+    def reset(self, scope: str = "episode") -> None:
+        if hasattr(self._policy, "reset"):
+            self._policy.reset(scope=scope)

@@ -202,6 +202,15 @@ if not SKIP_CUDA_BUILD:
             cc_flag.append("-gencode")
             cc_flag.append("arch=compute_121,code=sm_121")
 
+        # Avoid compiling every historical architecture on deployment nodes.
+        # RTX 4090 uses sm_89; the original ZeVA training hosts use sm_90.
+        zeva_cuda_arch = os.getenv("ZEVA_CUDA_ARCH_ONLY", "")
+        if zeva_cuda_arch:
+            compact_arch = zeva_cuda_arch.replace(".", "")
+            cc_flag = ["-gencode", f"arch=compute_{compact_arch},code=sm_{compact_arch}"]
+        elif os.getenv("ZEVA_H100_ONLY", "FALSE") == "TRUE":
+            cc_flag = ["-gencode", "arch=compute_90,code=sm_90"]
+
     # HACK: The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
     # torch._C._GLIBCXX_USE_CXX11_ABI
     # https://github.com/pytorch/pytorch/blob/8472c24e3b5b60150096486616d98b7bea01500b/torch/utils/cpp_extension.py#L920

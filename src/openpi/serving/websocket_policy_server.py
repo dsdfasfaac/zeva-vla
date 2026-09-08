@@ -49,8 +49,8 @@ class WebsocketPolicyServer:
         logger.info(f"Connection from {websocket.remote_address} opened")
 
         if hasattr(self._policy, "reset"):
-            self._policy.reset()
-            logger.info("Policy state reset for new episode.")
+            self._policy.reset(scope="episode")
+            logger.info("Zeva state reset for new fixed episode.")
 
         packer = msgpack_numpy.Packer()
 
@@ -62,11 +62,17 @@ class WebsocketPolicyServer:
                 start_time = time.monotonic()
                 obs = msgpack_numpy.unpackb(await websocket.recv())
 
-                # Check and handle reset signal for retrival
-                should_reset = obs.pop("reset", False)
-                if should_reset and hasattr(self._policy, "reset"):
-                    self._policy.reset()
-                    logger.info("Policy state reset for new episode.")
+                # Legacy reset=True means a new fixed episode. Zeva additionally
+                # supports attempt resets that preserve Persistent Interaction Memory.
+                reset_scope = obs.pop("reset_scope", None)
+                legacy_reset = obs.pop("reset", False)
+                if legacy_reset and reset_scope is None:
+                    reset_scope = "episode"
+                if reset_scope is not None and hasattr(self._policy, "reset"):
+                    if reset_scope not in {"attempt", "episode"}:
+                        raise ValueError(f"reset_scope must be 'attempt' or 'episode', got {reset_scope!r}.")
+                    self._policy.reset(scope=reset_scope)
+                    logger.info("Zeva state reset at %s boundary.", reset_scope)
 
                 infer_time = time.monotonic()
                 action = self._policy.infer(obs)

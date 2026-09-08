@@ -1,0 +1,3 @@
+policy_name: stock_pi05_relative_provider
+checkpoint_path: /data1/dingxin/zeva-checkpoint-cache/pretrained_model-best-v1
+device: cuda
