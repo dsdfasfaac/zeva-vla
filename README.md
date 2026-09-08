@@ -631,6 +631,22 @@ explicit evidence review.
 bash scripts/robotwin_eval/launch_closed_loop_residual_calibration_v5.sh
 ```
 
+The two-split v5 calibration completed on 2026-09-08.  Split B used the
+frozen manifest SHA256
+`8a088aa85bee0e757a0fd74b5808a9c67c3e0a20f75e4c614307be68bcf6cff2`;
+paired Base scored `43/80`, while residual scales `0.25`, `0.5`, and `1.0`
+scored `47/80`, `47/80`, and `45/80`.  Every condition has 80 videos, ten
+successful worker exits, and exact seed/instruction pairing.  Only
+`put_bottles_dustbin` at scale `0.5` replicated: its paired gains were `+3/8`
+on split A and `+2/8` on split B, or `+5/16` in aggregate.  The calibrated
+adapter therefore sets that task to `0.5`, the other nine tasks and the
+default to `0`, records `seed_sets_pairwise_disjoint=true` and
+`test_metrics_used=false`, and has SHA256
+`8a12b0dbed2da7741aeff407e62d6eeaa676e958dc1eef1f772aafd8f95810cc`.
+After this evidence review, the fixed seed-1000 formal evaluation was started
+under `formal-calibrated-v5`; Base is imported immutably as `114/200` and Zeva
+must replay all 200 episodes before acceptance is decided.
+
 A lightweight branch audit can be run without loading PI0.5.  For the v3
 adapter, the mean-language/all-phase-bin diagnostic found injected context RMS
 `0.004881` versus prior RMS `0.0000826`, a `59.1x` ratio, while the learned
@@ -798,6 +814,10 @@ aggregate gain, breaks ties toward the smaller scale, and otherwise uses scale
 0. It records all validation/formal manifest hashes,
 `seed_sets_pairwise_disjoint=true`, and `test_metrics_used=false`; formal-test
 outcomes are never an input. Calibration stops for audit before any formal run.
+The completed v5 audit selected only `put_bottles_dustbin=0.5`; the other nine
+tasks use scale zero.  The subsequent formal run is stored in
+`formal-calibrated-v5` beneath the root below and retains the immutable
+`114/200` Base evidence.
 
 ```bash
 cd /mnt/100T/users/dingxin/VLA/zeva-vla/ICML26-BehaviorVLA

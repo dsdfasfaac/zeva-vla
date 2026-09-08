@@ -617,6 +617,18 @@ seed-1000 manifest 逐任务两两无交集。每个 split 的 Base 只评一次
 bash scripts/robotwin_eval/launch_closed_loop_residual_calibration_v5.sh
 ```
 
+v5 双 split 校准已于 2026-09-08 完成。split B 的固定 manifest SHA256 为
+`8a088aa85bee0e757a0fd74b5808a9c67c3e0a20f75e4c614307be68bcf6cff2`；
+paired Base 为 `43/80`，scale `0.25/0.5/1.0` 的 ZeVA 分别为
+`47/80、47/80、45/80`。每个条件均有 80 个视频、10 个 worker `rc=0`，且
+seed/instruction 逐条相同。只有 `put_bottles_dustbin` 的 scale `0.5` 在两个
+split 上复现：split A `+3/8`、split B `+2/8`，合计 `+5/16`。最终校准表仅将
+该任务设为 `0.5`，其余九任务及 default 均为 `0`；adapter SHA256 为
+`8a12b0dbed2da7741aeff407e62d6eeaa676e958dc1eef1f772aafd8f95810cc`，并记录
+`seed_sets_pairwise_disjoint=true`、`test_metrics_used=false`。人工审计后已在
+`formal-calibrated-v5` 启动固定 seed-1000 的 10×20 正式评测，Base 以不可变
+证据导入为 `114/200`，ZeVA 仍须实际跑满 200 个 episode 才能判定验收。
+
 同时新增不加载 PI0.5 的残差分支审计。它对十任务的平均 train-language embedding
 与 causal bank 全部 phase bins 计算门值和注入后 RMS，只用于定位结构问题，不作为
 成功率或选模指标。v3 adapter 的可复现实测为：context gate 均值 `0.02047` 且跨
@@ -662,8 +674,11 @@ Task retrieval:
 十任务 v4 独立闭环 residual trust 校准与后续正式评测：
 /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v4-closed-loop
 
-十任务 v5 双独立 split residual trust 校准（只校准，审计前不自动正式评测）：
+十任务 v5 双独立 split residual trust 校准（校准已完成；人工审计后正式评测运行中）：
 /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v5-multisplit
+
+v5 正式评测：
+/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v5-multisplit/formal-calibrated-v5
 
 十任务 safe-router v2（35/1500 预热时发现 validation 尚未逐任务落盘，主动停止，无 checkpoint）：
 /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-safe-router-v2/zeva
