@@ -603,6 +603,51 @@ This launcher evaluates Base once on the calibration split, reuses the exact
 same seeds and instructions for all three Zeva scales, writes the task-language
 trust table, and only then starts the fixed 10-task x 20-episode formal run.
 
+That single-split v4 calibration did **not** pass the formal gate.  It selected
+scale `0.5` for `put_bottles_dustbin`, scale `1.0` for
+`stack_bowls_three`, and scale `0` for the other eight tasks.  On the fixed
+formal manifest, Base remained `114/200 = 57.0%`, while calibrated Zeva fell to
+`100/200 = 50.0%`.  The protocol and structural audit passed, including 200
+videos per condition and exact seed/instruction pairing; the failure was the
+performance criterion itself.  A subsequent tensor-by-tensor audit also found
+all 813 foundation tensors bit-identical to the untouched PI0.5, ruling out a
+damaged or accidentally fine-tuned backbone.  The evidence instead shows that
+one eight-episode closed-loop split is too noisy for residual trust selection.
+
+The current v5 repair requires the gain to replicate on **two disjoint
+closed-loop validation splits**, beginning at seeds 2000 and 3000.  Each split
+contains eight expert-valid episodes per task and evaluates the preregistered
+scales `0.25`, `0.5`, and `1.0` on the exact paired Base seed/instruction
+manifest.  A task/scale is eligible only when its paired success gain is
+nonnegative on each split and at least `+3/16` in aggregate.  Selection
+maximizes aggregate gain and breaks ties toward the smaller scale; tasks with
+no eligible candidate use scale zero.  Both validation manifests must be
+pairwise disjoint from the formal seed-1000 manifest, and
+`test_metrics_used=false` is recorded.  The v5 launcher intentionally stops at
+`calibration_complete_pending_audit`; it never starts a formal run without an
+explicit evidence review.
+
+```bash
+bash scripts/robotwin_eval/launch_closed_loop_residual_calibration_v5.sh
+```
+
+A lightweight branch audit can be run without loading PI0.5.  For the v3
+adapter, the mean-language/all-phase-bin diagnostic found injected context RMS
+`0.004881` versus prior RMS `0.0000826`, a `59.1x` ratio, while the learned
+context gate was nearly constant across tasks.  This is a diagnostic over
+prototypes and bank phases, not a closed-loop success metric; it is used to
+decide whether a failed v5 run needs branch isolation or prior-strength
+retraining instead of another blind shared-scale sweep.
+
+```bash
+PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
+  --adapter /path/to/zeva_adapter.pth \
+  --goal-embeddings /path/to/pi05_task_embeddings.pt \
+  --causal-bank /path/to/train_causal_bank.pt \
+  --task-manifest configs/robotwin_zeva_advantage10.json \
+  --output /path/to/residual_branch_audit.json
+```
+
 The final comparison has two semantic conditions. `Base` is the untouched,
 already RoboTwin-trained `pretrained_model-best-v1`; its preregistered run was
 established before adapter training at 114/200. The evaluator imports that
@@ -743,19 +788,21 @@ GPU-PhysX initialization retries keep the same seed and happen before the first
 model call; a failed seed is never silently substituted. Every episode must
 produce a video whose success label agrees with the atomic progress record.
 
-Before the single formal comparison, residual trust is calibrated only on a
-disjoint closed-loop validation manifest beginning at seed 2000. Base runs once
-for eight expert-valid episodes per task; Zeva evaluates residual scales 0.25,
-0.5, and 1.0 on those exact 80 seed/instruction pairs. A task enables the best
-scale only when it gains at least 2/8 successes over Base; ties choose the
-smaller scale, and every other task uses scale 0 (an exact untouched-PI
-fallback). The selector records both manifest hashes and
-`test_metrics_used=false`; formal-test outcomes are never read by calibration.
+Before the formal comparison, residual trust is calibrated only on two
+disjoint closed-loop validation manifests beginning at seeds 2000 and 3000.
+Base runs once per split for eight expert-valid episodes per task; Zeva
+evaluates residual scales 0.25, 0.5, and 1.0 on the exact paired
+seed/instruction entries. A task/scale must have nonnegative paired gain on
+both splits and aggregate gain of at least 3/16. The selector maximizes the
+aggregate gain, breaks ties toward the smaller scale, and otherwise uses scale
+0. It records all validation/formal manifest hashes,
+`seed_sets_pairwise_disjoint=true`, and `test_metrics_used=false`; formal-test
+outcomes are never an input. Calibration stops for audit before any formal run.
 
 ```bash
 cd /mnt/100T/users/dingxin/VLA/zeva-vla/ICML26-BehaviorVLA
-nohup bash scripts/robotwin_eval/launch_closed_loop_residual_calibration_v4.sh \
-  > /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v4-closed-loop/launcher.log \
+nohup bash scripts/robotwin_eval/launch_closed_loop_residual_calibration_v5.sh \
+  > /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v5-multisplit/launcher.log \
   2>&1 < /dev/null &
 ```
 
@@ -766,7 +813,7 @@ atomic progress files and emits condition reports, a paired report, videos,
 calibration evidence, and an independent final audit under:
 
 ```text
-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v4-closed-loop
+/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v5-multisplit
 ```
 
 ## Code map
@@ -792,9 +839,12 @@ scripts/train_robotwin_stage3.py             legacy VLM retrieval experiment
 scripts/train_robotwin_stage3_8gpu.sh        legacy VLM retrieval launcher
 scripts/robotwin_eval/zeva_policy.py         official simulator/model-server adapter
 scripts/calibrate_robotwin_residual_trust.py validation-only per-task residual selector
+scripts/calibrate_robotwin_residual_trust_multisplit.py two-split non-regression selector
 scripts/make_robotwin_residual_scale_candidate.py immutable residual-scale checkpoint builder
+scripts/audit_robotwin_residual_branches.py foundation-free branch-strength diagnostic
 scripts/robotwin_eval/launch_paired_formal_eval.sh strict paired resumable evaluator
 scripts/robotwin_eval/launch_closed_loop_residual_calibration_v4.sh validation-to-formal orchestrator
+scripts/robotwin_eval/launch_closed_loop_residual_calibration_v5.sh two-split calibration-only orchestrator
 scripts/robotwin_eval/audit_advantage10_formal.py independent protocol/result audit
 scripts/train_robotwin_zeva_adapter.py      frozen-PI adapter training
 scripts/train_robotwin_zeva_8gpu.sh         eight-H100 launcher

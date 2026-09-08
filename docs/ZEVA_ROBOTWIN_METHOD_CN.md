@@ -595,6 +595,44 @@ bash scripts/robotwin_eval/launch_closed_loop_residual_calibration_v4.sh
 该流程只计算一次 validation Base，三个 scale 严格复用相同 seed 和 instruction；
 校准表落盘后才会启动固定 10×20 正式评测。
 
+v4 的实际正式结果未通过：单 split 校准选择了
+`put_bottles_dustbin=0.5`、`stack_bowls_three=1.0`，其余任务为 0；固定正式
+manifest 上 `Base=114/200=57.0%`，`ZeVA=100/200=50.0%`。两边各 200 个
+视频、seed/instruction 精确配对及物理协议审计都通过，因此不能把失败归因于
+评测错位。另对保存的 foundation 与 untouched PI0.5 做了 813 个 tensor 的逐一
+`torch.equal` 审计，差异数为 0；文件 hash 不同只来自 safetensors metadata。
+结论是单个 8-shot 闭环验证集方差过大，不能可靠决定任务级 residual trust。
+
+当前 v5 改为 **双独立闭环验证集复现门槛**：split A 从 seed 2000 开始，split B
+从 seed 3000 开始，每任务各筛 8 个 expert-valid episode；两个 split 与正式
+seed-1000 manifest 逐任务两两无交集。每个 split 的 Base 只评一次，候选
+`0.25/0.5/1.0` 严格复用各自 Base 的 seed 和 instruction。某任务某 scale 只有
+在 A、B 两个 split 的 paired gain 都不小于 0、且合计至少 `+3/16` 时才有资格；
+从合格候选中最大化总 gain，平局选更小 scale，否则回退 scale 0。选择器保存
+全部 manifest hash、`seed_sets_pairwise_disjoint=true` 和
+`test_metrics_used=false`。v5 启动器在生成 adapter 后停在
+`calibration_complete_pending_audit`，不会自动消费正式测试。
+
+```bash
+bash scripts/robotwin_eval/launch_closed_loop_residual_calibration_v5.sh
+```
+
+同时新增不加载 PI0.5 的残差分支审计。它对十任务的平均 train-language embedding
+与 causal bank 全部 phase bins 计算门值和注入后 RMS，只用于定位结构问题，不作为
+成功率或选模指标。v3 adapter 的可复现实测为：context gate 均值 `0.02047` 且跨
+任务几乎不变，prior gate 均值 `0.00803`；context residual RMS `0.004881`，prior
+residual RMS `0.0000826`，前者是后者的 `59.1×`。因此若 v5 仍失败，下一步应
+隔离 context/prior 分支并修复 prior 强度或训练，而不是继续盲目调整共同 scale。
+
+```bash
+PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
+  --adapter /path/to/zeva_adapter.pth \
+  --goal-embeddings /path/to/pi05_task_embeddings.pt \
+  --causal-bank /path/to/train_causal_bank.pt \
+  --task-manifest configs/robotwin_zeva_advantage10.json \
+  --output /path/to/residual_branch_audit.json
+```
+
 ## 14. 当前产物与实验状态
 
 当前主线产物：
@@ -623,6 +661,9 @@ Task retrieval:
 
 十任务 v4 独立闭环 residual trust 校准与后续正式评测：
 /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v4-closed-loop
+
+十任务 v5 双独立 split residual trust 校准（只校准，审计前不自动正式评测）：
+/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v5-multisplit
 
 十任务 safe-router v2（35/1500 预热时发现 validation 尚未逐任务落盘，主动停止，无 checkpoint）：
 /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-safe-router-v2/zeva
@@ -764,7 +805,7 @@ Formal-eval PI input: [-1, 0.9215686] # 正确
 5. Stage2 offline matched-flow non-regression；
 6. task retrieval 达到阈值，并报告真实 rollout 误检索率；
 7. untouched Base 与 ZeVA 使用完全相同的 episode manifest、condition 初始 RNG seed 与 continuous 口径；
-8. paired closed-loop success 不显著劣于 baseline；
+8. paired closed-loop success 必须严格高于正常 untouched baseline；
 9. 所有测试 episode 均有视频、progress JSON 和 summary 三方一致性校验；
 10. 测试数据、失败轨迹和成功标签没有进入任何训练 bank 或参数更新。
 
@@ -785,9 +826,12 @@ scripts/export_robotwin_causal_bank.py       causal bank export
 scripts/export_robotwin_live_queries.py      H15 live-query export
 scripts/train_robotwin_task_retrieval.py     Stage1.5 retrieval
 scripts/train_robotwin_stage2.py             frozen-PI protected ZeVA Stage2
+scripts/audit_robotwin_residual_branches.py  不加载 PI0.5 的双残差强度审计
+scripts/calibrate_robotwin_residual_trust_multisplit.py 双验证集 non-regression selector
 scripts/robotwin_eval/zeva_policy.py         RoboTwin 部署适配器
 scripts/robotwin_eval/launch_formal_eval.sh  正式 ZeVA-only 评测
 scripts/robotwin_eval/launch_paired_formal_eval.sh paired baseline/ZeVA 评测
+scripts/robotwin_eval/launch_closed_loop_residual_calibration_v5.sh 双 split 校准入口
 ```
 
 ## 19. 一句话总结
