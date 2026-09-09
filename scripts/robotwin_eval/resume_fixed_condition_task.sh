@@ -22,6 +22,8 @@ zeva_root=$8
 render_host=${RENDER_HOST:-aigc24}
 render_runtime=${RENDER_RUNTIME:-/data1/dingxin/robotwin-formal-eval/RoboTwin}
 max_process_attempts=${MAX_PROCESS_ATTEMPTS:-20}
+test_num=${TEST_NUM:-20}
+absolute_start_seed=${ABSOLUTE_START_SEED:-1000}
 log="$condition_root/logs/$task.log"
 progress="$condition_root/progress/$task.json"
 status="$condition_root/status/$task.json"
@@ -47,8 +49,8 @@ PY
   set +e
   ssh "$render_host" "cd '$render_runtime'; env PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$slot' PYTHONPATH='$zeva_root/scripts/robotwin_eval:$render_runtime/script:$render_runtime:$render_runtime/policy' \
     .venv_robotwin/bin/python '$zeva_root/scripts/robotwin_eval/eval_policy_client.py' --port '$port' --config '$zeva_root/scripts/robotwin_eval/client_config.yml' \
-    --overrides --task_name '$task' --task_config zeva_randomized --test_num 20 \
-    --instruction_type seen --seed 0 --absolute_start_seed 1000 \
+    --overrides --task_name '$task' --task_config zeva_randomized --test_num '$test_num' \
+    --instruction_type seen --seed 0 --absolute_start_seed '$absolute_start_seed' \
     --fixed_seed_sequence True --seed_manifest '$seed_manifest' \
     --model_seed_policy continuous --policy_name zeva_policy --ckpt_setting '$ckpt_label' \
     --eval_video_log True --result_dir '$condition_root/results/$task' \

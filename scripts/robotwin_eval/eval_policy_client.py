@@ -814,7 +814,36 @@ def eval_policy(task_name,
 
         args["render_freq"] = render_freq
 
-        TASK_ENV.setup_demo(now_ep_num=now_id, seed=now_seed, is_test=True, **args)
+        # RoboTwin initializes the environment twice: once for expert
+        # validation above and once again for the actual policy rollout.  GPU
+        # physics can mark the second initialization unstable even when the
+        # expert-validation initialization succeeded.  With a frozen paired
+        # manifest, retry that same seed here as well; changing the seed would
+        # break Base/ZeVA pairing.  This is still before reset_model or any
+        # policy query, so a retry does not advance the model RNG stream.
+        rollout_init_attempt = 0
+        while True:
+            try:
+                TASK_ENV.setup_demo(
+                    now_ep_num=now_id, seed=now_seed, is_test=True, **args
+                )
+                break
+            except UnStableError as e:
+                TASK_ENV.close_env()
+                if not fixed_seed_sequence:
+                    raise
+                rollout_init_attempt += 1
+                if rollout_init_attempt >= fixed_seed_init_max_attempts:
+                    raise RuntimeError(
+                        f"Frozen RoboTwin seed {now_seed} remained unstable during "
+                        f"rollout initialization for {rollout_init_attempt} attempts; "
+                        "refusing seed substitution."
+                    ) from e
+                print(
+                    f"Retrying frozen seed {now_seed} during rollout initialization "
+                    f"without substitution ({rollout_init_attempt}/"
+                    f"{fixed_seed_init_max_attempts})."
+                )
         episode_info_list = [episode_info["info"]]
         if fixed_instructions is None:
             results = generate_episode_descriptions(args["task_name"], episode_info_list, test_num)
