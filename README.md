@@ -682,6 +682,23 @@ bash scripts/robotwin_eval/launch_prior_guidance_validation_v6.sh
 bash scripts/robotwin_eval/launch_prior_guidance_formal_v6.sh
 ```
 
+The next training candidate removes the remaining train/deploy mismatch rather
+than changing a trained 1% gate to 50% after optimization.  The v7
+`prior_adapter` variant keeps PI0.5 (including the action expert), ZTE/Mamba,
+the causal bank, retrieval, both scalar gates, and the complete context branch
+frozen.  The context projector is exactly zero.  The prior gate is fixed at
+`0.5` from the first training step, while the zero-initialized prior projector
+keeps initialization exactly equal to PI0.5.  Only the task projector, memory
+encoder, Gaussian prior, prior action projector, and bounded task/phase router
+are optimized.  It retains prior residual dropout `0.4`, per-example matched
+PI preservation, H50 prediction/H15 recurrence, and global batch 256.  This
+candidate is trained and selected only with the existing train95/validation5
+data; no formal-test metric is an optimizer or checkpoint-selection input.
+
+```bash
+bash scripts/train_robotwin_advantage10_prior_only_v7.sh
+```
+
 ```bash
 PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
   --adapter /path/to/zeva_adapter.pth \

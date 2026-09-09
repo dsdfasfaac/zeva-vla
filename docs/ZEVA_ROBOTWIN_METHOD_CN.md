@@ -659,6 +659,20 @@ bash scripts/robotwin_eval/launch_prior_guidance_validation_v6.sh
 bash scripts/robotwin_eval/launch_prior_guidance_formal_v6.sh
 ```
 
+下一训练候选 v7 不再把训练时约 1% 的 prior gate 在训练后硬改为 50%。新增
+`prior_adapter` 训练模式，从第一步起固定 prior gate=`0.5`，同时保持
+prior projector 零初始化，因此初始化仍与 untouched PI0.5 完全一致。完整 PI0.5
+（含 action expert）、ZTE/Mamba、causal bank、task retrieval、两个 scalar gate
+以及 context 分支全部冻结，context projector 精确为零；只训练 task projector、
+memory encoder、Gaussian prior、prior action projector 和有界 task/phase router。
+训练继续使用 prior residual dropout `0.4`、逐样本 matched-PI 保护、真实 H15
+递归相位、H50 输出以及 global batch 256。checkpoint 只根据 train95/validation5
+选择，正式测试指标不进入优化或选步。
+
+```bash
+bash scripts/train_robotwin_advantage10_prior_only_v7.sh
+```
+
 ```bash
 PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
   --adapter /path/to/zeva_adapter.pth \

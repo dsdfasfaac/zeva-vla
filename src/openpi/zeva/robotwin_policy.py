@@ -1184,6 +1184,53 @@ class RobotWinZevaPolicy(nn.Module):
             self.retrieval_head.requires_grad_(False).eval()
         return [parameter for parameter in self.parameters() if parameter.requires_grad]
 
+    def configure_prior_only_adapter_stage2(
+        self, *, prior_gate_probability: float = 0.5
+    ) -> list[nn.Parameter]:
+        """Train the action-prior branch at its deployed strength with PI0.5 frozen.
+
+        The causal-context projector is kept identically zero, so this mode
+        isolates the BehaviorVLA-style action-prior residual.  The prior gate
+        is fixed rather than optimized: the zero-initialized prior projector
+        still makes step zero exactly equal to the untouched PI0.5, while all
+        subsequent projector gradients are trained at the same magnitude used
+        for deployment instead of being attenuated by the legacy 1% gate.
+        """
+        probability = float(prior_gate_probability)
+        if not math.isfinite(probability) or not 0.0 < probability < 1.0:
+            raise ValueError("prior_gate_probability must be finite and in (0, 1).")
+
+        self.requires_grad_(False)
+        with torch.no_grad():
+            self.causal_action_projector.weight.zero_()
+            self.causal_action_projector.bias.zero_()
+            self.context_gate_logit.fill_(-20.0)
+            self.prior_gate_logit.copy_(
+                torch.logit(
+                    torch.tensor(
+                        probability,
+                        device=self.prior_gate_logit.device,
+                        dtype=self.prior_gate_logit.dtype,
+                    )
+                )
+            )
+        modules = (
+            self.task_token_projector,
+            self.memory_context_encoder,
+            self.action_prior,
+            self.prior_action_projector,
+            self.residual_gate_router,
+        )
+        for module in modules:
+            module.requires_grad_(True)
+        self._full_pi05_finetune = False
+        self._action_expert_finetune = False
+        self.foundation.eval()
+        self.causal_transition_encoder.eval()
+        if self.retrieval_head is not None:
+            self.retrieval_head.requires_grad_(False).eval()
+        return [parameter for parameter in self.parameters() if parameter.requires_grad]
+
     def injection_gate_regularizer(
         self, task_schema: torch.Tensor | None = None, phase_token: torch.Tensor | None = None
     ) -> torch.Tensor:

@@ -431,7 +431,11 @@ def _baseline_losses(policy: nn.Module, processed: dict[str, torch.Tensor]) -> d
 
 
 def _assert_action_expert_finetune_gradients(
-    policy: RobotWinZevaPolicy, *, include_zeva: bool, action_expert_trainable: bool = True
+    policy: RobotWinZevaPolicy,
+    *,
+    include_zeva: bool,
+    action_expert_trainable: bool = True,
+    prior_only: bool = False,
 ) -> None:
     core = policy.foundation.model
     backbone = core.paligemma_with_expert.paligemma
@@ -460,7 +464,7 @@ def _assert_action_expert_finetune_gradients(
         parameter.grad is not None for parameter in policy.retrieval_head.parameters()
     ):
         raise RuntimeError("Stage 2 invariant failed: frozen task retrieval received gradients.")
-    zeva_modules = (
+    full_zeva_modules = (
         policy.task_token_projector,
         policy.memory_context_encoder,
         policy.action_prior,
@@ -468,17 +472,30 @@ def _assert_action_expert_finetune_gradients(
         policy.prior_action_projector,
         policy.residual_gate_router,
     )
+    prior_zeva_modules = (
+        policy.task_token_projector,
+        policy.memory_context_encoder,
+        policy.action_prior,
+        policy.prior_action_projector,
+        policy.residual_gate_router,
+    )
     if include_zeva:
+        required_modules = prior_zeva_modules if prior_only else full_zeva_modules
         if any(
             not any(parameter.grad is not None for parameter in module.parameters())
-            for module in zeva_modules
+            for module in required_modules
         ):
             raise RuntimeError("Stage 2 invariant failed: a trainable Zeva module received no gradients.")
-        if policy.context_gate_logit.grad is None or policy.prior_gate_logit.grad is None:
+        if prior_only:
+            if any(parameter.grad is not None for parameter in policy.causal_action_projector.parameters()):
+                raise RuntimeError("Prior-only Stage 2 gave gradients to the disabled context branch.")
+            if policy.context_gate_logit.grad is not None or policy.prior_gate_logit.grad is not None:
+                raise RuntimeError("Prior-only Stage 2 unexpectedly optimized a fixed scalar gate.")
+        elif policy.context_gate_logit.grad is None or policy.prior_gate_logit.grad is None:
             raise RuntimeError("Stage 2 invariant failed: residual gates received no gradients.")
     elif any(
         parameter.grad is not None
-        for module in zeva_modules
+        for module in full_zeva_modules
         for parameter in module.parameters()
     ) or policy.context_gate_logit.grad is not None or policy.prior_gate_logit.grad is not None:
         raise RuntimeError("Matched PI baseline unexpectedly received Zeva gradients.")
@@ -572,8 +589,9 @@ def _manifest(
     bank: RobotWinCausalBank,
     runtime_versions: dict[str, str],
 ) -> dict[str, Any]:
-    zeva_enabled = args.training_variant in {"zeva", "adapter"}
-    frozen_foundation = args.training_variant == "adapter"
+    zeva_enabled = args.training_variant in {"zeva", "adapter", "prior_adapter"}
+    frozen_foundation = args.training_variant in {"adapter", "prior_adapter"}
+    prior_only = args.training_variant == "prior_adapter"
     zte_checkpoint = torch.load(args.zte_checkpoint, map_location="cpu")
     if zte_checkpoint.get("schema") != "zeva-robotwin-zte-stage1-checkpoint-v5":
         raise ValueError("Aligned Stage 2 requires a Stage 1 v5 checkpoint.")
@@ -616,12 +634,16 @@ def _manifest(
         "runtime_versions": runtime_versions,
         "training_variant": args.training_variant,
         "training_mode": (
-            "frozen_pi05_zeva_task_phase_routed_dual_residual_v10"
-            if frozen_foundation
+            "frozen_pi05_zeva_prior_only_fixed_gate_v11"
+            if prior_only
             else (
-                "frozen_paligemma_action_expert_dual_residual_accelerated_v8"
-                if zeva_enabled
-                else "frozen_paligemma_action_expert_only_matched_baseline_v1"
+                "frozen_pi05_zeva_task_phase_routed_dual_residual_v10"
+                if frozen_foundation
+                else (
+                    "frozen_paligemma_action_expert_dual_residual_accelerated_v8"
+                    if zeva_enabled
+                    else "frozen_paligemma_action_expert_only_matched_baseline_v1"
+                )
             )
         ),
         "foundation_forward": {
@@ -663,6 +685,7 @@ def _manifest(
             "residual_source": "mean",
             "residual_target": "noisy_action_embedding",
             "residual_dropout_probability": args.prior_residual_dropout_probability,
+            "scalar_gate": "fixed_0.5" if prior_only else "learned_sigmoid",
         },
         "frozen": [
             "pi05_paligemma_vision_tower",
@@ -682,11 +705,21 @@ def _manifest(
         ] if args.training_variant == "baseline" else []) + ([
             "pi05_gemma_action_expert",
             "pi05_action_input_output_and_time_projections",
-        ] if frozen_foundation else []),
+        ] if frozen_foundation else []) + ([
+            "causal_action_projector",
+            "context_gate_logit",
+            "prior_gate_logit",
+        ] if prior_only else []),
         "trainable": ([] if frozen_foundation else [
             "pi05_gemma_action_expert",
             "pi05_action_input_output_and_time_projections",
-        ]) + ([
+        ]) + (([
+            "task_token_projector",
+            "memory_context_encoder",
+            "action_prior",
+            "prior_action_projector",
+            "residual_gate_router",
+        ]) if prior_only else ([
             "task_token_projector",
             "memory_context_encoder",
             "action_prior",
@@ -695,7 +728,7 @@ def _manifest(
             "context_gate_logit",
             "prior_gate_logit",
             "residual_gate_router",
-        ] if zeva_enabled else []),
+        ] if zeva_enabled else [])),
         "train_args": dataclasses.asdict(args),
         "source_sha256": {
             "trainer": _sha256(Path(__file__).resolve()),
@@ -737,7 +770,7 @@ def evaluate(
         live_retrieved = raw_batch.pop("zeva.live_retrieved")
         live_retrieved_mask = raw_batch.pop("zeva.live_retrieved_mask")
         processed = _preprocess_with_task_only_goal(policy, preprocessor, raw_batch)
-        if args.training_variant in {"zeva", "adapter"}:
+        if args.training_variant in {"zeva", "adapter", "prior_adapter"}:
             bank_batch, confidence, retrieval_accuracy = _retrieve(
                 policy,
                 processed,
@@ -769,7 +802,7 @@ def evaluate(
         else:
             losses = _baseline_losses(policy, processed)
             retrieval_accuracy = losses["flow"].detach().new_full((), float("nan"))
-        if args.training_variant in {"zeva", "adapter"}:
+        if args.training_variant in {"zeva", "adapter", "prior_adapter"}:
             gathered_task_ids = accelerator.gather_for_metrics(task_ids.detach()).cpu()
             gathered_flow = accelerator.gather_for_metrics(
                 losses["flow_per_sample"].detach()
@@ -824,9 +857,11 @@ def evaluate(
 
 def main(args: Args) -> None:
     runtime_versions = _validated_runtime_versions()
-    if args.training_variant not in {"zeva", "adapter", "baseline"}:
-        raise ValueError("training_variant must be 'zeva', 'adapter', or 'baseline'.")
-    zeva_enabled = args.training_variant in {"zeva", "adapter"}
+    if args.training_variant not in {"zeva", "adapter", "prior_adapter", "baseline"}:
+        raise ValueError(
+            "training_variant must be 'zeva', 'adapter', 'prior_adapter', or 'baseline'."
+        )
+    zeva_enabled = args.training_variant in {"zeva", "adapter", "prior_adapter"}
     if zeva_enabled and args.foundation_checkpoint is not None:
         default_checkpoint = Path(args.handoff_root).resolve() / "checkpoint" / "pretrained_model"
         if Path(args.foundation_checkpoint).resolve() != default_checkpoint and args.goal_embedding_checkpoint is None:
@@ -866,6 +901,8 @@ def main(args: Args) -> None:
         trainable = policy.configure_action_expert_finetune_stage2()
     elif args.training_variant == "adapter":
         trainable = policy.configure_adapter_stage2()
+    elif args.training_variant == "prior_adapter":
+        trainable = policy.configure_prior_only_adapter_stage2(prior_gate_probability=0.5)
     else:
         trainable = policy.configure_action_expert_only_finetune()
     core = policy.foundation.model
@@ -964,7 +1001,9 @@ def main(args: Args) -> None:
     # validation and slow subsequent steps by ~4x.  Validation is small and
     # infrequent, so read it in the rank process for this mode.
     validation_workers = (
-        0 if args.training_variant == "adapter" else max(0, min(2, args.num_workers))
+        0
+        if args.training_variant in {"adapter", "prior_adapter"}
+        else max(0, min(2, args.num_workers))
     )
     validation_loader = DataLoader(
         validation_dataset,
@@ -981,7 +1020,7 @@ def main(args: Args) -> None:
     zeva_parameters = [
         parameter for parameter in trainable if id(parameter) not in action_expert_parameter_ids
     ]
-    if args.training_variant != "adapter" and not action_expert_parameters:
+    if args.training_variant not in {"adapter", "prior_adapter"} and not action_expert_parameters:
         raise RuntimeError("Stage 2 requires a non-empty action-expert optimizer group.")
     if zeva_enabled and not zeva_parameters:
         raise RuntimeError("Zeva Stage 2 requires a non-empty Zeva optimizer group.")
@@ -1027,7 +1066,8 @@ def main(args: Args) -> None:
         checkpoint = torch.load(resume_dir / "training_state.pt", map_location="cpu")
         expected_schema = {
             "zeva": "zeva-robotwin-stage2-action-expert-training-state-v8",
-            "adapter": "zeva-robotwin-stage2-frozen-foundation-training-state-v1",
+            "adapter": "zeva-robotwin-stage2-frozen-foundation-training-state-v2",
+            "prior_adapter": "zeva-robotwin-stage2-prior-only-training-state-v1",
             "baseline": "robotwin-pi05-action-expert-baseline-training-state-v1",
         }[args.training_variant]
         if checkpoint.get("schema") != expected_schema:
@@ -1076,7 +1116,7 @@ def main(args: Args) -> None:
         policy.train()
         unwrapped_policy = accelerator.unwrap_model(policy)
         unwrapped_policy.enforce_action_expert_stage2_mode()
-        if args.training_variant == "adapter":
+        if args.training_variant in {"adapter", "prior_adapter"}:
             # ``policy.train()`` recursively flips the frozen foundation back
             # to train mode.  Restore deployment mode so dropout cannot create
             # a false teacher/student difference while gradients still flow
@@ -1151,7 +1191,9 @@ def main(args: Args) -> None:
                 _assert_action_expert_finetune_gradients(
                     accelerator.unwrap_model(policy),
                     include_zeva=zeva_enabled,
-                    action_expert_trainable=args.training_variant != "adapter",
+                    action_expert_trainable=args.training_variant
+                    not in {"adapter", "prior_adapter"},
+                    prior_only=args.training_variant == "prior_adapter",
                 )
             for name, value in micro_losses.items():
                 accumulated_losses.setdefault(name, []).append(value.detach())
@@ -1189,6 +1231,7 @@ def main(args: Args) -> None:
                         "schema": {
                             "zeva": "zeva-robotwin-stage2-action-expert-training-state-v8",
                             "adapter": "zeva-robotwin-stage2-frozen-foundation-training-state-v2",
+                            "prior_adapter": "zeva-robotwin-stage2-prior-only-training-state-v1",
                             "baseline": "robotwin-pi05-action-expert-baseline-training-state-v1",
                         }[args.training_variant],
                         "step": completed,
