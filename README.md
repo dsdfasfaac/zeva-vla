@@ -751,14 +751,18 @@ PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
 ```
 
 The final comparison has two semantic conditions. `Base` is the untouched,
-already RoboTwin-trained `pretrained_model-best-v1`; its preregistered run was
-established before adapter training at 114/200. The evaluator imports that
-immutable evidence with its source path and SHA256 instead of rerunning a
-non-bit-deterministic physics simulation until it gets a convenient number.
-`Zeva` replays the exact same 200 `(task, seed, instruction)` entries. The gate
-is therefore `Base == 114/200` and `Zeva > Base`, with 200 videos per condition
-and an independent two-condition audit. The rejected action-expert branches
-remain diagnostics and can never replace this normal Base.
+already RoboTwin-trained `pretrained_model-best-v1`; its earlier preregistered
+seed-1000 anchor was 114/200 and establishes the historical 57% floor. The v7
+validation and final launchers do not reuse that score: they rerun Base and
+Zeva contemporaneously on exactly the same fresh pairs. Both launchers use
+`baseline_bestv1_model_config.yml`, require the explicit best-v1 path, and
+verify the foundation SHA256
+`7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe`
+before rollout. The legacy `baseline_model_config.yml`, whose omitted
+foundation resolves to `checkpoint/pretrained_model`, is not valid for v7.
+The final gate is `Base >= 114/200` and `Zeva > Base`, with 200 videos per
+condition and an independent two-condition audit. Rejected action-expert
+branches remain diagnostics and can never replace this normal Base.
 
 #### Decoder and throughput configuration
 
@@ -770,10 +774,11 @@ FFmpeg backend remains available only for diagnostics.
 
 The 1.1--2 second v8 figures were short kernel-only smoke measurements and are
 not a valid end-to-end throughput estimate. The current frozen-PI adapter run
-processes global batch 256 and three video streams per sample at about 9--11
-seconds per optimizer step on eight H100s; CPU TorchCodec random access plus
-the frozen PI forward/backward path to the residual injection points dominate.
-Formal Stage 2 retains H15 recurrent samples, H50 action output, 1,500
+processes global batch 256 and three video streams per sample. After compilation
+and loader warm-up it is currently near four seconds per optimizer step on
+eight H100s; checkpoint validation briefly adds overhead. CPU TorchCodec random
+access plus the frozen PI forward path to the residual injection point remain
+the main costs. Formal Stage 2 retains H15 recurrent samples, H50 action output, 2,000
 optimizer steps, and the float32 `[0,1]` image contract.
 
 Stage 2 passes its offline gate only when task retrieval remains at least 95%

@@ -510,9 +510,9 @@ RoboTwin 的 GPU physics 不是位级确定的，因此在 Base 中已经通过 
 
 ### 十任务专项模型的本轮验收
 
-`configs/robotwin_zeva_advantage10.json` 定义的十任务模型不使用 50-task 均值冒充完整 benchmark。第一轮 1000-step scalar-gate adapter 的正式闭环没有超过 Base，因而已拒绝。当前修正版预算为 1500 optimizer steps，在每个 250-step checkpoint 上用 validation5 的逐样本 matched-noise 指标选择；末段若仍改善或闭环未达标，再续训或修正，绝不预先宣称收敛。
+`configs/robotwin_zeva_advantage10.json` 定义的十任务模型不使用 50-task 均值冒充完整 benchmark。第一轮 1000-step scalar-gate adapter 的正式闭环没有超过 Base，因而已拒绝。当前修正版预算为 2,000 optimizer steps，在每个 250-step checkpoint 上用 validation5 的逐样本 matched-noise 指标选择；末段若仍改善或闭环未达标，再续训或修正，绝不预先宣称收敛。
 
-正式比较只有两个语义条件。`Base` 就是未改动、已经在 RoboTwin 上训好的 `pretrained_model-best-v1`；它在 ZeVA adapter 训练前已经按冻结 manifest 得到 `114/200=57.0%`。最终目录透明导入这份不可变证据并记录源路径、report SHA256，而不是重新运行非位级确定的 GPU physics 直到出现有利数字。`ZeVA` 原样重放同一组每任务 20 个 expert-valid `(seed,instruction)`。两者均采用 Large_D435 640x480、Joint14、EEF16 H50 输出/H15 执行、seen instruction 和逐 episode 视频核验。扩散 RNG 在 checkpoint 完整加载后统一设为 `20260907`，随后连续消耗；episode reset 只清 recurrent/causal state。最终门槛固定为 `Base=114/200` 且 `ZeVA>Base`。ZeVA 加载 untouched foundation、adapter、冻结任务语言表、ZTE、retrieval 与 causal bank。
+正式比较只有两个语义条件。`Base` 就是未改动、已经在 RoboTwin 上训好的 `pretrained_model-best-v1`；它在 ZeVA adapter 训练前的 seed-1000 冻结 manifest 上得到 `114/200=57.0%`，由此建立历史正常下限。v7 不直接导入该成功数，而是在互斥的新 seed 上同期重新运行 Base 与 ZeVA，并原样配对每个 expert-valid `(seed,instruction)`。两者均采用 Large_D435 640x480、Joint14、EEF16 H50 输出/H15 执行、seen instruction 和逐 episode 视频核验。扩散 RNG 在 checkpoint 完整加载后统一设为 `20260907`，随后连续消耗；episode reset 只清 recurrent/causal state。v7 的两个 launcher 强制使用 `baseline_bestv1_model_config.yml`，显式检查 best-v1 路径及 foundation SHA256 `7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe`；未指定 foundation、因而默认指向旧 `pretrained_model` 的 `baseline_model_config.yml` 禁止进入 v7。最终门槛固定为同期 `Base>=114/200` 且 `ZeVA>Base`。ZeVA 加载同一个 untouched best-v1 foundation、adapter、冻结任务语言表、ZTE、retrieval 与 causal bank。
 
 三任务、每任务 5 次的 checkpoint gate 只用于发现加载错误和明显闭环退化，不作为统计验收：在固定模型初始 RNG 后，同一 Anchor 因 RoboTwin GPU physics 非位级确定而在重复 gate 中出现 `10/15` 到 `13/15` 的波动。第一轮闭环筛选保留 action-expert baseline step `1000` 和 ZeVA step `250`；诊断目录为：
 
