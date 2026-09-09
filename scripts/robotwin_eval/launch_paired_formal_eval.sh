@@ -263,9 +263,15 @@ absolute_start_seed = int(sys.argv[5])
 rows = []
 for task in (root.parent / "tasks.txt").read_text().splitlines():
     progress_path = root / "progress" / f"{task}.json"
+    status_path = root / "status" / f"{task}.json"
     if not progress_path.is_file():
         raise RuntimeError(f"{condition}/{task}: missing progress")
+    if not status_path.is_file():
+        raise RuntimeError(f"{condition}/{task}: missing terminal status")
     progress = json.loads(progress_path.read_text())
+    status = json.loads(status_path.read_text())
+    if status.get("return_code") != 0:
+        raise RuntimeError(f"{condition}/{task}: nonzero terminal status {status}")
     episodes = progress["episode_results"]
     seeds = [int(item["seed"]) for item in episodes]
     if not progress.get("complete") or len(episodes) != expected:
@@ -301,7 +307,13 @@ os.replace(temporary, root / "report.json")
 PY
   printf '{"state":"complete","condition":"%s","finished":"%s","jobs":%d}\n' \
     "$condition" "$(date -Iseconds)" "${#tasks[@]}" > "$condition_root/state.json"
-  return "$worker_rc"
+  # A task may have been resumed by an audited recovery process after its
+  # original worker exited.  In that case the historical wait status is stale;
+  # the complete progress/video/terminal-status audit above is authoritative.
+  if (( worker_rc != 0 )); then
+    echo "$condition: recovered worker failure; final condition audit passed" >&2
+  fi
+  return 0
 }
 
 cat > "$output/manifest.json" <<EOF
