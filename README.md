@@ -62,17 +62,19 @@ The Zeva path is:
   attempts in the same fixed episode.
 - Frozen PI0.5 task-language embeddings identify a ZTE task prototype through
   a calibrated retrieval head shared by training and deployment.
-- Retrieved causal context is projected once and broadcast across H50 action
-  tokens. A diagonal Gaussian head predicts normalized H50 EEF16 `mean` and
-  `log_std`; its per-step mean is projected separately. Both residuals are
-  added only to the noisy-action embeddings of the 300M action expert, while
-  Gaussian NLL supervises both prior parameters. Nothing is injected before
-  or into the frozen PaliGemma vision-language backbone.
+- A diagonal Gaussian head predicts normalized H50 EEF16 `mean` and
+  `log_std`; its per-step mean is projected into the noisy-action embeddings
+  of the 300M action expert, while Gaussian NLL supervises both prior
+  parameters. Nothing is injected before or into the frozen PaliGemma
+  vision-language backbone. The implementation also contains a broadcast-H50
+  context projector for historical ablations, but the active v7 candidate
+  zeros and freezes it after v3--v6 closed-loop regressions.
 
-The two injection projections are zero initialized. Each gate starts at 0.01
-and is multiplied by a task-language/H15-phase router bounded to `[0,2]`, then
-by retrieval confidence. Thus a routed gate begins at 1% and remains bounded
-near the protected PI path while it can suppress harmful tasks/phases. No token is inserted, and
+Both implementation-level injection projections are zero initialized. In the
+active v7 candidate, the context path stays exactly zero and the prior gate is
+fixed to `0.5` from the first training step; the zero prior projector still
+makes step-zero output bit-identical to PI0.5. The residual is multiplied by a
+task-language/H15-phase router bounded to `[0,2]` and retrieval confidence. No token is inserted, and
 the PI prefix length, masks, position IDs, and action-expert shapes remain
 unchanged. Consequently a new adapter wrapper is bit-identical to the selected
 foundation for the same random seed.
@@ -154,7 +156,7 @@ and deployment.
 | Stage | Frozen | Trainable | Required output |
 |---|---|---|---|
 | 1. ZTE and retrieval calibration | PI0.5 weights | ZTE, then a separate task-language retrieval head | `zte_best.pth`, train95 bank, H15 live-query cache, `task_retrieval.pth` |
-| 2. Protected Zeva adapter | complete PI0.5, ZTE, bank, retrieval head | task/context fusion, Gaussian prior, two action-embedding projectors, task/phase gate router | bit-identical `model.safetensors`, `zeva_adapter.pth`, optimizer state |
+| 2. Protected Zeva adapter (active v7) | complete PI0.5, ZTE, bank, retrieval head, context projector/gate | task/context fusion, Gaussian prior, prior action-embedding projector, task/phase gate router | bit-identical foundation `model.safetensors`, `zeva_adapter.pth`, optimizer state |
 | 3. Optional post-Stage2 adaptation | ZTE, bank, retrieval | selected modules determined by paired Stage2 results | selectively tuned checkpoint |
 
 ### Stage 1: train ZTE and build the training causal bank
@@ -660,7 +662,7 @@ prototypes and bank phases, not a closed-loop success metric; it is used to
 decide whether a failed v5 run needs branch isolation or prior-strength
 retraining instead of another blind shared-scale sweep.
 
-v6 follows that preregistered diagnosis.  It exactly zeros the context
+v6 followed that preregistered diagnosis.  It exactly zeroed the context
 projector and restores the Gaussian action prior to an absolute `0.5` gate,
 matching BehaviorVLA's inference guidance magnitude while retaining the
 trained task/phase router, task-language retrieval, and recurrent H15 phase.
@@ -673,16 +675,25 @@ three aggregate wins) enables only `beat_block_hammer` (`+1,+3`) and
 exactly to PI0.5.  The calibrated adapter SHA256 is
 `28d99c1fd9092310acb6fd7a9040df619de45b773e6caa5feaa1d1caafc84709`.
 Its metadata records pairwise-disjoint validation/formal seeds and
-`test_metrics_used=false`.  The fixed 10x20 formal run is active under
-`advantage10-prior-guidance-v6/formal-calibrated-prior05-v6` and must still
-beat `114/200` plus pass the independent 200-video audit before delivery.
+`test_metrics_used=false`.  A third frozen holdout split scored Base `41/80`
+and ZeVA `46/80`, but the two actually enabled tasks contributed only `+1`;
+the other `+4` came from tasks whose residual was disabled and is therefore
+physics variance, not model gain.  The fixed 10x20 formal run then completed
+under `advantage10-prior-guidance-v6/formal-calibrated-prior05-v6`: Base was
+`114/200 = 57.0%`, while ZeVA was `102/200 = 51.0%` (absolute delta `-6.0`
+points; Base-only/ZeVA-only discordant pairs `44/32`; exact McNemar
+`p=0.207`, paired bootstrap 95% CI `[-14.5,+2.5]` points).  The independent
+audit passed all structural checks: 200 episodes and videos per condition,
+ten tasks with 20 episodes each, and exact seed/instruction pairing.  v6 is
+therefore rejected as a model failure and cannot be delivered as an
+improvement.
 
 ```bash
 bash scripts/robotwin_eval/launch_prior_guidance_validation_v6.sh
 bash scripts/robotwin_eval/launch_prior_guidance_formal_v6.sh
 ```
 
-The next training candidate removes the remaining train/deploy mismatch rather
+The active training candidate removes the remaining train/deploy mismatch rather
 than changing a trained 1% gate to 50% after optimization.  The v7
 `prior_adapter` variant keeps PI0.5 (including the action expert), ZTE/Mamba,
 the causal bank, retrieval, both scalar gates, and the complete context branch
@@ -698,6 +709,14 @@ data; no formal-test metric is an optimizer or checkpoint-selection input.
 ```bash
 bash scripts/train_robotwin_advantage10_prior_only_v7.sh
 ```
+
+At the first saved checkpoint (`step 250`), complete validation5 evaluation
+gave ZeVA flow loss `0.0204545` versus matched frozen PI loss `0.0204728`, a
+mean paired improvement of `1.83e-5` with a `54.98%` paired win fraction.
+Retrieval accuracy was `99.847%`; only `scan_object` had a slightly negative
+per-task mean improvement.  These are checkpoint-selection diagnostics, not
+closed-loop success rates.  Training continues to 2,000 steps and no formal
+seed-1000 result is used for v7 optimization or checkpoint selection.
 
 ```bash
 PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
