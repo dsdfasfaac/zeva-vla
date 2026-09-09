@@ -40,28 +40,50 @@ if plan.get("closed_loop_metrics_used_for_checkpoint_selection") is not False:
 print(plan["checkpoint"])
 print(plan["checkpoint_step"])
 print(plan["adapter_sha256"])
+print(plan["model_sha256"])
+print(plan["foundation_tensor_identity"])
 PY
 )
 checkpoint=${selected[0]}
 checkpoint_step=${selected[1]}
 adapter_sha256=${selected[2]}
+model_sha256=${selected[3]}
+foundation_identity=${selected[4]}
 test -s "$checkpoint/model.safetensors"
 test -s "$checkpoint/zeva_adapter.pth"
 test "$(sha256sum "$checkpoint/zeva_adapter.pth" | awk '{print $1}')" = "$adapter_sha256"
+test "$(sha256sum "$checkpoint/model.safetensors" | awk '{print $1}')" = "$model_sha256"
+python3 - "$foundation_identity" "$checkpoint/model.safetensors" "$foundation_checkpoint/model.safetensors" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+identity = json.load(open(sys.argv[1], encoding="utf-8"))
+if identity.get("schema") != "zeva-frozen-foundation-tensor-identity-v1":
+    raise SystemExit("unexpected foundation identity schema")
+if identity.get("tensor_values_bit_identical") is not True:
+    raise SystemExit("selected checkpoint is not tensor-identical to the frozen foundation")
+if identity.get("candidate") != str(Path(sys.argv[2]).resolve()):
+    raise SystemExit("foundation identity belongs to a different selected checkpoint")
+if identity.get("foundation") != str(Path(sys.argv[3]).resolve()):
+    raise SystemExit("foundation identity belongs to a different PI foundation")
+PY
 mkdir -p "$final_root"
 
-python3 - "$final_root/final_plan.json" "$checkpoint" "$checkpoint_step" "$adapter_sha256" <<'PY'
+python3 - "$final_root/final_plan.json" "$checkpoint" "$checkpoint_step" "$adapter_sha256" "$model_sha256" "$foundation_identity" <<'PY'
 import json
 import os
 import sys
 from pathlib import Path
 
-destination, checkpoint, step, adapter_hash = sys.argv[1:]
+destination, checkpoint, step, adapter_hash, model_hash, foundation_identity = sys.argv[1:]
 payload = {
     "schema": "zeva-robotwin-v7-fresh-final-plan-v1",
     "checkpoint": checkpoint,
     "checkpoint_step": int(step),
     "adapter_sha256": adapter_hash,
+    "model_sha256": model_hash,
+    "foundation_tensor_identity": foundation_identity,
     "checkpoint_selected_with": "train95_validation5_only",
     "closed_loop_validation_passed_before_final": True,
     "final_metrics_used_for_training_or_selection": False,

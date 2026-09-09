@@ -46,14 +46,21 @@ if not selected:
 print(selected["checkpoint"])
 print(selected["step"])
 print(selected["artifact_identity"]["adapter_sha256"])
+print(selected["artifact_identity"]["model_sha256"])
 PY
 )
 checkpoint=${selected[0]}
 checkpoint_step=${selected[1]}
 adapter_sha256=${selected[2]}
+model_sha256=${selected[3]}
 test -s "$checkpoint/model.safetensors"
 test -s "$checkpoint/zeva_adapter.pth"
 test "$(sha256sum "$checkpoint/zeva_adapter.pth" | awk '{print $1}')" = "$adapter_sha256"
+test "$(sha256sum "$checkpoint/model.safetensors" | awk '{print $1}')" = "$model_sha256"
+foundation_identity=$eval_root/foundation_identity-step-${checkpoint_step}.json
+python3 "$zeva_root/scripts/verify_frozen_safetensors_identity.py" \
+  "$checkpoint/model.safetensors" "$foundation_checkpoint/model.safetensors" \
+  "$foundation_identity"
 
 config=$eval_root/configs/selected-step-${checkpoint_step}.yml
 python3 - "$config" "$checkpoint" <<'PY'
@@ -76,13 +83,13 @@ model_rng_seed: 20260907
 PY
 
 cat_plan=$eval_root/validation_plan.json
-python3 - "$cat_plan" "$selection" "$checkpoint" "$checkpoint_step" "$adapter_sha256" "$episodes" <<'PY'
+python3 - "$cat_plan" "$selection" "$checkpoint" "$checkpoint_step" "$adapter_sha256" "$model_sha256" "$foundation_identity" "$episodes" <<'PY'
 import json
 import os
 import sys
 from pathlib import Path
 
-destination, selection, checkpoint, step, adapter_hash, episodes = sys.argv[1:]
+destination, selection, checkpoint, step, adapter_hash, model_hash, foundation_identity, episodes = sys.argv[1:]
 payload = {
     "schema": "zeva-robotwin-v7-fresh-closed-loop-validation-plan-v1",
     "selection": selection,
@@ -91,6 +98,8 @@ payload = {
     "checkpoint": checkpoint,
     "checkpoint_step": int(step),
     "adapter_sha256": adapter_hash,
+    "model_sha256": model_hash,
+    "foundation_tensor_identity": foundation_identity,
     "episodes_per_task_per_split": int(episodes),
     "splits": {"a": {"start_seed": 5000}, "b": {"start_seed": 6000}},
     "reserved_final_start_seed": 10000,
