@@ -685,6 +685,22 @@ optimizer update 后强制断言 `scheduler.last_epoch == completed global steps
 干净 v7 从 PI0.5 的 step zero 重新训练至 2,000 steps；v6 的 seed-1000 正式结果
 不会进入优化或 checkpoint 选择。
 
+训练完成后，先只用 validation5 的 paired 指标执行不可变 checkpoint 选择，再跑两组
+新的闭环验证 seed；只有两个 split 均不退化且合计至少 `+6/160`，才允许启动完全未见
+的 seed-10000 最终测试：
+
+```bash
+python3 scripts/select_robotwin_prior_adapter_checkpoint.py \
+  /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-prior-only-v7-corrected/zeva
+bash scripts/robotwin_eval/launch_prior_adapter_validation_v7.sh
+bash scripts/robotwin_eval/launch_prior_adapter_fresh_final_v7.sh
+```
+
+最终测试会同期重新运行 untouched PI0.5 和 ZeVA，使用相同的十任务、每任务 20 个
+expert-valid `(seed,instruction)`、continuous model RNG 与 200 条视频/condition；门槛
+为 `Base>=57%` 且 `ZeVA>Base`。最终 manifest 必须与两组闭环验证 seed 逐任务互斥，
+最终结果不能反向修改 checkpoint、gate 或任何参数。
+
 ```bash
 PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
   --adapter /path/to/zeva_adapter.pth \

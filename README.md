@@ -721,6 +721,26 @@ global optimizer steps`.  The clean v7 run restarts from PI0.5 at step zero in
 `advantage10-prior-only-v7-corrected`; no checkpoint from the stopped directory
 may be used for evaluation.
 
+After all eight checkpoints are present, derive the deployment choice from
+validation5 only, then run two fresh closed-loop validation streams.  A fresh
+seed-10000 final run is allowed only if each validation split is nonnegative
+and their combined gain is at least six successes out of 160 episodes per
+condition:
+
+```bash
+python3 scripts/select_robotwin_prior_adapter_checkpoint.py \
+  /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-prior-only-v7-corrected/zeva
+bash scripts/robotwin_eval/launch_prior_adapter_validation_v7.sh
+bash scripts/robotwin_eval/launch_prior_adapter_fresh_final_v7.sh
+```
+
+The final launcher reruns untouched PI0.5 and ZeVA contemporaneously on the
+same 10x20 expert-valid `(seed,instruction)` pairs beginning at seed 10000.  It
+requires Base at or above the historical 57% floor, ZeVA strictly above Base,
+200 videos per condition, and a fresh independent audit.  The final manifest
+is pairwise checked against both validation streams and cannot be used to
+revise the selected checkpoint.
+
 ```bash
 PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
   --adapter /path/to/zeva_adapter.pth \
