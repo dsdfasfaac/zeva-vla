@@ -417,6 +417,22 @@ non-negative mean paired improvement on every task. Among eligible shared
 steps it first minimizes Base validation flow; closed-loop results are never
 an input.
 
+The frozen pair then runs on two new disjoint 10x8 closed-loop streams starting
+at seeds 7000 and 8000.  Each split must be non-negative and the combined gain
+must be at least `+6/160` before the seed-10000 final is reachable.  The final
+evaluates three semantic conditions on the exact same 10x20 manifest: untouched
+best-v1 Anchor, trained action-expert-only Base, and trained action expert +
+Zeva.  Its immutable gate is `Base >= max(Anchor,57%)` and `Zeva > Base`.
+
+```bash
+bash scripts/robotwin_eval/launch_action_expert_validation_v8.sh
+bash scripts/robotwin_eval/launch_action_expert_fresh_final_v8.sh
+
+# Durable coordinator used by the active run: wait for both branches, select,
+# validate, and launch final only when every preceding gate passes.
+bash scripts/robotwin_eval/wait_and_run_action_expert_v8.sh
+```
+
 The earlier 1,000-step action-expert experiment used the sequential launcher
 below. It is retained only for historical reproduction; its evaluated Base
 regressed below the untouched 57% anchor and it is not the active v8 run:
@@ -760,7 +776,7 @@ PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
   --output /path/to/residual_branch_audit.json
 ```
 
-The active v8 final comparison has two trained conditions plus a historical
+The active v8 final comparison has two trained conditions plus a same-seed
 normality anchor. `Base` is the action-expert-only branch and `Zeva` is the
 matched action-expert-plus-Zeva branch, both initialized independently from
 `pretrained_model-best-v1` with the same data order, global batch, 5,000-step
@@ -769,8 +785,9 @@ schedule and action-expert LR. The earlier untouched seed-1000 result was
 be delivered. Fresh validation/final launchers must run Base and Zeva
 contemporaneously on exactly the same pairs and verify the best-v1 parent SHA256
 `7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe`
-before rollout. The final gate remains `Base >= 114/200` and `Zeva > Base`,
-with 200 videos per condition and an independent two-condition audit. The
+before rollout. The final gate is `Base >= max(same-seed Anchor,114/200)` and
+`Zeva > Base`, with 200 videos per condition and an independent three-condition
+audit. The
 v7 result and older action-expert branches remain diagnostics and can never be
 substituted for a passing v8 comparison.
 
@@ -782,14 +799,15 @@ of launching three FFmpeg processes per sample. On a real episode, TorchCodec
 and the former FFmpeg path were verified bit-exact for all three cameras. The
 FFmpeg backend remains available only for diagnostics.
 
-The 1.1--2 second v8 figures were short kernel-only smoke measurements and are
-not a valid end-to-end throughput estimate. The current frozen-PI adapter run
-processes global batch 256 and three video streams per sample. After compilation
-and loader warm-up it is currently near four seconds per optimizer step on
-eight H100s; checkpoint validation briefly adds overhead. CPU TorchCodec random
-access plus the frozen PI forward path to the residual injection point remain
-the main costs. Formal Stage 2 retains H15 recurrent samples, H50 action output, 2,000
-optimizer steps, and the float32 `[0,1]` image contract.
+The active resumed v8 run processes global batch 256 and three video streams per
+sample at roughly 1.3--1.7 seconds per Base optimizer step and 1.6--2.1 seconds
+per Zeva step after compilation and loader warm-up. Checkpoint validation adds
+separate overhead. CPU TorchCodec random access, the joint frozen-PaliGemma /
+trainable-action-expert forward, and Zeva's sampled residual-off teacher are the
+main costs. Formal Stage 2 retains H15 recurrent samples, H50 action output,
+5,000 optimizer steps, and the float32 `[0,1]` image contract. Validation is
+forced to `num_workers=0`; this prevents forked validation workers from
+retaining a CUDA context after every 500-step checkpoint.
 
 Stage 2 passes its offline gate only when task retrieval remains at least 95%
 and held-out enhanced flow does not regress against the matched unconditioned
@@ -803,7 +821,7 @@ the wrong model domain. Stage 2 now converts every view at the dataset boundary
 to contiguous CHW float32 `[0,1]`, uses the accelerated action-only dual-residual v8
 manifest/training state, and rejects full-v5, adapter-only, or old image-
 contract checkpoints. Retrain from the original handoff into the separate
-`stage2-action-expert-v8-accelerated` directory. The stopped v7 eager run is an
+`advantage10-action-expert-v8/{baseline,zeva}` directories. The stopped v7 eager run is an
 audit artifact. The v6 run injected
 causal context into the PaliGemma prefix and is retained only as an audit
 artifact; it is structurally incompatible with v8. Before the full run, verify
@@ -858,11 +876,13 @@ from openpi.zeva.robotwin_policy import RobotWinZevaPolicy
 
 policy = RobotWinZevaPolicy.from_handoff(
     "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1",
-    zte_checkpoint="/data1/dingxin/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte/zte_best.pth",
-    stage2_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage2-action-expert-v8-accelerated/005000",
-    adapter_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage2-action-expert-v8-accelerated/005000/zeva_adapter.pth",
-    retrieval_checkpoint="/data1/dingxin/zeva-runs/robotwin-v5-h15-tasklang/stage1.5-task-retrieval/task_retrieval.pth",
-    causal_bank="/data1/dingxin/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte/train_causal_bank.pt",
+    foundation_checkpoint="/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1",
+    goal_embedding_checkpoint="/mnt/100T/users/dingxin/VLA/runtime/pretrained_model-stage1-language-v1",
+    zte_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1/stage1-zte/zte_best.pth",
+    stage2_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8/zeva/SELECTED_STEP",
+    adapter_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8/zeva/SELECTED_STEP/zeva_adapter.pth",
+    retrieval_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1/stage1.5-task-retrieval/task_retrieval.pth",
+    causal_bank="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1/stage1-zte/train_causal_bank.pt",
 )
 
 # raw_observation contains Joint14, the exact three RGB keys, and task text.
@@ -892,13 +912,17 @@ The reportable experiment is a paired comparison on the fixed ten-task subset
 in `configs/robotwin_zeva_advantage10.json`. Both conditions use
 `zeva_randomized`, seen instructions, `Large_D435` 640x480 three-view RGB,
 absolute Joint14, chunk-start-relative EEF16, H50 prediction, and H15 execution
-before replanning. The untouched `pretrained_model-best-v1` PI0.5 is the Base;
-its established normal result is 114/200 (57.0%) and must not be replaced by a
-lower checkpoint or a changed action expert.
+before replanning. The v8 `Base` is the matched action-expert-only branch; the
+untouched `pretrained_model-best-v1` is kept as an explicit same-seed Anchor.
+Its established 114/200 (57.0%) result is also a historical floor, so a trained
+Base below either the same-seed Anchor or 57.0% is rejected.
 
-For each task, the formal manifest freezes the first 20 expert-valid seeds
-selected from absolute seed 1000. Base and Zeva replay the exact same seed and
-instruction pairs. The policy's recurrent Zeva state resets once per episode,
+Checkpoint selection uses validation5 only. Two closed-loop validation streams
+freeze eight expert-valid seeds per task beginning at 7000 and 8000; the final
+is unreachable unless both are non-negative and their combined gain is at
+least +6/160. For each task, the fresh final freezes the first 20 expert-valid
+seeds selected from absolute seed 10000. Anchor, Base, and Zeva replay the exact
+same seed and instruction pairs. The policy's recurrent Zeva state resets once per episode,
 while the model flow RNG starts at 20260907 after model load and is consumed
 continuously within each condition, matching the released PI0.5 evaluator.
 GPU-PhysX initialization retries keep the same seed and happen before the first

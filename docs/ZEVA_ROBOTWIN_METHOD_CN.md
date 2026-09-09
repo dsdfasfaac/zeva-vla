@@ -507,7 +507,7 @@ Stage3 学习率应比 Stage2 小 10–20 倍，继续保留对 Stage2 anchor �
 task -> [(seed, instruction), ...]
 ```
 
-所有实际比较条件必须重放完全相同的环境 seed 和 instruction，并从相同的模型 RNG 起点启动。当前最终实验的条件是 untouched Base 与 frozen-PI ZeVA；旧 action-expert 诊断实验才包含额外 Anchor。由于不同策略可能在每个 episode 使用不同数量的 H15 replans，flow RNG 在轨迹分叉后自然连续消耗而不再逐采样强行对齐；禁止用环境 seed 每 episode 重置来改变 frozen handoff 的策略分布。20 episodes/task 可作为本轮正式表格，但小于 1–2 个百分点的差异不应在没有逐 episode paired 结果时解释为真实提升或回退。
+所有实际比较条件必须重放完全相同的环境 seed 和 instruction，并从相同的模型 RNG 起点启动。当前 v8 最终实验包含三种语义条件：untouched best-v1 `Anchor`、等预算训练的 action-expert-only `Base`、以及 action expert + ZeVA 双残差的 `ZeVA`。由于不同策略可能在每个 episode 使用不同数量的 H15 replans，flow RNG 在轨迹分叉后自然连续消耗而不再逐采样强行对齐；禁止用环境 seed 每 episode 重置来改变 frozen handoff 的策略分布。20 episodes/task 可作为本轮正式表格，但小于 1–2 个百分点的差异不应在没有逐 episode paired 结果时解释为真实提升或回退。
 
 RoboTwin 的 GPU physics 不是位级确定的，因此在 Base 中已经通过 expert filtering 的 seed，换到 Anchor/ZeVA 进程初始化同一场景时仍可能偶发 `UnStableError`。fixed-manifest 条件下必须在任何 policy inference 之前原样重试同一个 `(seed, instruction)`，最多 20 次；严禁递增 seed 或另选替代 seed。此类初始化重试发生在模型调用前，不消耗 continuous diffusion RNG。若客户端进程因此退出，恢复时保留同一模型服务和端口，从 progress 的同一 frozen seed 继续；不得重启模型服务后跳过已完成 episode。
 
@@ -525,6 +525,10 @@ bash scripts/train_robotwin_advantage10_action_expert_v8.sh zeva
 # /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8/{baseline,zeva}
 python3 scripts/select_robotwin_action_expert_pair_v8.py \
   /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8
+bash scripts/robotwin_eval/launch_action_expert_validation_v8.sh
+bash scripts/robotwin_eval/launch_action_expert_fresh_final_v8.sh
+# 持久协调器：等待两支训练完成，依次执行选步、验证和满足门槛后的 final
+bash scripts/robotwin_eval/wait_and_run_action_expert_v8.sh
 ```
 
 选择器只允许两支共同存在的同一 global step；要求十任务 validation 覆盖完整、
@@ -570,7 +574,7 @@ improvement>0、win fraction≥50%，并且十任务各自 mean improvement 都�
 
 该轮除重新评测 Anchor 外，还把既有正常 PI 下限 `0.57` 直接写入 manifest、acceptance 和独立 audit。最终门槛因此是 `Base >= max(本轮 Anchor, 0.57)` 且 `ZeVA > Base`，不能因为 GPU physics 导致本轮 Anchor 偶然偏低而放宽用户要求。
 
-该插值候选也被闭环严格淘汰：Base 运行至 `199/200` 时为 `101` 次成功，最终理论上限只有 `102/200`。三种会改变 action expert 的方案——原始微调、更小 LR 和缩小到 25% 的权重位移——都没有恢复困难任务能力。因此正式方法回到本项目真正要回答的问题：现有 RoboTwin 已训练 PI 就是正常 Base；ZeVA 必须在完全不改变 PI 权重的情况下增强它。
+该插值候选也被闭环严格淘汰：Base 运行至 `199/200` 时为 `101` 次成功，最终理论上限只有 `102/200`。这说明早期 250--1000 step 的短预算 action-expert 候选不能代表正常微调，并促成了后续 frozen-PI v7；但 v7 在两个新 split 上同样得到 `-6/160`。因此当前正式 v8 不沿用“PI 权重必须完全不变”的旧结论，而是从同一 best-v1 独立分叉、使用完整 5,000-step 等预算训练，并以同期 action-expert-only Base 和 untouched Anchor 双重约束正常能力。
 
 第一轮完整冻结 PI 的 scalar-gate adapter 已按预注册协议完成：`Base=114/200=57.0%`，`ZeVA=110/200=55.0%`，paired delta 为 -2 个百分点（ZeVA-only 31，Base-only 35，exact McNemar p=0.712）。400 个条件视频和结构审计均通过，因此是模型失败而非协议失败，只能作为诊断保留，不能交付。诊断显示原
 preservation hinge 先对 batch 求均值，会允许跨任务正负抵消；同时所有任务
@@ -853,7 +857,7 @@ Formal-eval PI input: [-1, 0.9215686] # 正确
 2. trainer 和 evaluator 共用 dtype、shape、finite、range assertion；
 3. `verify_robotwin_stage2_image_contract.py` 用真实视频帧验证训练 CHW 与评测 HWC 路径逐像素一致；
 4. 当前 frozen-PI safe-router manifest/training-state 升级到 v9/v2，代码拒绝从错误图像契约或会改变 PI 的历史 checkpoint resume；
-5. 当前训练输出隔离到 `advantage10-safe-router-v2`；v8 action-expert/v7/v6/full-v5 均已停止并仅作审计保留，随后用固定 episode manifest 做 paired Base/ZeVA rollout。
+5. frozen-PI safe-router/v7、v6 与 full-v5 均已停止并仅作审计保留；当前训练输出隔离到 `advantage10-action-expert-v8/{baseline,zeva}`，随后用固定 episode manifest 做 paired Base/ZeVA rollout。
 6. Stage2 启动时锁定并记录 handoff-native Transformers 5.5.4、tokenizers distribution metadata 0.22.2 和 host-compatible tokenizers module 0.21.4；Transformers 4.53 的 cache、attention mask、image-return 和 tokenizer shims 在 native runtime 下全部关闭。原始 best-v1 在 native runtime 的闭环 anchor 为 4/5，而 4.53 compatibility runtime 为 0/5，故旧 4.53 训练/评测产物不得进入最终结果。
 7. v8 使用 baseline 同款 TorchCodec，并以 32-entry/worker LRU 复用 decoder；实帧三相机与 FFmpeg 逐像素一致。
 8. 当前训练保持 global batch 256，每卡 16、累积 2；prior residual hook 安装后再编译原 joint forward，历史 context hook 保持精确零值。
@@ -866,9 +870,9 @@ Formal-eval PI input: [-1, 0.9215686] # 正确
 ```text
 保留 Stage1 + bank + live queries + retrieval
         -> 修正 Stage2 图像 loader/断言
-        -> 从原 PI checkpoint 训练 frozen-PI ZeVA-adapter Stage2
+        -> 从同一原 PI checkpoint 等预算训练 action-expert-only Base 与 action expert + ZeVA Stage2
         -> 冻结同一批 seed+instruction
-        -> paired PI baseline vs ZeVA
+        -> paired untouched Anchor vs trained Base vs ZeVA
         -> 若显著 non-regression 且有收益，Stage2 即最终模型
         -> 若 Stage2 稳定但提升不足，再决定 Stage3
 ```
@@ -892,14 +896,14 @@ Formal-eval PI input: [-1, 0.9215686] # 正确
         -> 重训 Stage1
         -> 重建 causal bank/live queries
         -> 重训 task retrieval
-        -> 重训 frozen-PI ZeVA-adapter Stage2
+        -> 从同一新 PI base 重训 matched action-expert Base 与 ZeVA Stage2
         -> paired closed-loop evaluation
         -> 可选 selective Stage3
 ```
 
 原因是 best-v1 的 PI language embedding table、VLM feature、action expert 和 flow behavior 均可能不同，旧 ZeVA 产物不能被视为与新 foundation 兼容。
 
-2026-09-09 的 v7 十任务实验采用显式解耦、frozen-PI 方案。逐 tensor 检查确认 best-v1 与旧 foundation 的若干语言/视觉/action 权重不同，但 tokenizer、预处理、normalization 与物理协议兼容；因此 Stage1 使用明确指定的冻结旧 task-language 坐标，而真实 policy foundation 始终是 best-v1。完整 PI0.5、ZTE/Mamba、bank、retrieval 以及 context projector/gate 均冻结；optimizer 只有 task projector、memory encoder、Gaussian prior、prior residual projector 和 task/phase router，LR `5e-5`。训练在 aigc28 的八张 H100 上运行，global batch 256，2,000 steps，250-global-step warmup；scheduler 每个全局 optimizer update 只推进一次并有运行时断言。Base 不再额外微调，而是直接使用训练前建立的 untouched best-v1 正常结果。
+2026-09-09 的 v7 十任务实验是已拒绝的显式解耦、frozen-PI 方案。逐 tensor 检查确认 best-v1 与旧 foundation 的若干语言/视觉/action 权重不同，但 tokenizer、预处理、normalization 与物理协议兼容；因此它证明 Stage1 辅助语言坐标可以显式固定，却没有证明冻结 action expert 的 prior 注入有效。当前 v8 继续复用这条 Stage1 lineage，但真实 policy foundation 始终是 best-v1；两支都训练 action expert，只有 ZeVA 支路额外训练 fusion/prior/router。
 
 ## 17. 最终模型的通过定义
 
@@ -908,11 +912,11 @@ Formal-eval PI input: [-1, 0.9215686] # 正确
 1. Stage1 representation/capability gate 全部通过；
 2. artifact hash 和 foundation lineage 完整；
 3. Stage2 train/eval preprocessing parity test 通过；
-4. ZeVA-off 与 PI baseline 相同 seed 下严格一致；
+4. ZeVA residual-on 必须在相同当前 action-expert 权重、相同 flow noise 下与 residual-off teacher 做逐样本配对；
 5. Stage2 offline matched-flow non-regression；
 6. task retrieval 达到阈值，并报告真实 rollout 误检索率；
-7. untouched Base 与 ZeVA 使用完全相同的 episode manifest、condition 初始 RNG seed 与 continuous 口径；
-8. paired closed-loop success 必须严格高于正常 untouched baseline；
+7. untouched Anchor、训练 Base 与 ZeVA 使用完全相同的 episode manifest、condition 初始 RNG seed 与 continuous 口径；
+8. 训练 Base 不低于同轮 Anchor 和历史 57% 下限，且 ZeVA paired closed-loop success 必须严格高于训练 Base；
 9. 所有测试 episode 均有视频、progress JSON 和 summary 三方一致性校验；
 10. 测试数据、失败轨迹和成功标签没有进入任何训练 bank 或参数更新。
 
@@ -932,13 +936,16 @@ scripts/eval_robotwin_stage1.py              Stage1 gate
 scripts/export_robotwin_causal_bank.py       causal bank export
 scripts/export_robotwin_live_queries.py      H15 live-query export
 scripts/train_robotwin_task_retrieval.py     Stage1.5 retrieval
-scripts/train_robotwin_stage2.py             frozen-PI protected ZeVA Stage2
+scripts/train_robotwin_stage2.py             matched action-expert Base/ZeVA Stage2
 scripts/audit_robotwin_residual_branches.py  不加载 PI0.5 的双残差强度审计
 scripts/calibrate_robotwin_residual_trust_multisplit.py 双验证集 non-regression selector
 scripts/robotwin_eval/zeva_policy.py         RoboTwin 部署适配器
 scripts/robotwin_eval/launch_formal_eval.sh  正式 ZeVA-only 评测
 scripts/robotwin_eval/launch_paired_formal_eval.sh paired baseline/ZeVA 评测
 scripts/robotwin_eval/launch_closed_loop_residual_calibration_v5.sh 双 split 校准入口
+scripts/robotwin_eval/launch_action_expert_validation_v8.sh v8 seed7000/8000 双 split 验证
+scripts/robotwin_eval/launch_action_expert_fresh_final_v8.sh v8 seed10000 三条件 final
+scripts/robotwin_eval/wait_and_run_action_expert_v8.sh v8 持久门控协调器
 ```
 
 ## 19. 一句话总结
