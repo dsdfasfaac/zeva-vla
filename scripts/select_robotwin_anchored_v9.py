@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import json
 import math
@@ -48,6 +49,24 @@ def checkpoints(root: Path) -> dict[int, Path]:
     return result
 
 
+def load_training_metadata(path: Path) -> dict[str, Any]:
+    """Read scalar/dict metadata without materializing multi-GB optimizer tensors."""
+    try:
+        from torch._subclasses.fake_tensor import FakeTensorMode
+    except ImportError:  # pragma: no cover - compatibility with older PyTorch.
+        state = torch.load(path, map_location="cpu", weights_only=False)
+    else:
+        with FakeTensorMode():
+            state = torch.load(path, map_location="cpu", weights_only=False)
+    metadata = {
+        key: state.get(key)
+        for key in ("schema", "step", "manifest", "validation")
+    }
+    del state
+    gc.collect()
+    return metadata
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("candidate_root", type=Path)
@@ -58,9 +77,7 @@ def main() -> None:
 
     candidate_root = args.candidate_root.resolve()
     base_checkpoint = args.base_checkpoint.resolve()
-    base_state = torch.load(
-        base_checkpoint / "training_state.pt", map_location="cpu", weights_only=False
-    )
+    base_state = load_training_metadata(base_checkpoint / "training_state.pt")
     if base_state.get("schema") != "robotwin-pi05-action-expert-baseline-training-state-v1":
         raise ValueError("Anchored v9 requires the matched action-expert Base schema.")
     base_step = int(base_state.get("step", -1))
@@ -71,7 +88,7 @@ def main() -> None:
 
     rows: list[dict[str, Any]] = []
     for step, path in sorted(checkpoints(candidate_root).items()):
-        state = torch.load(path / "training_state.pt", map_location="cpu", weights_only=False)
+        state = load_training_metadata(path / "training_state.pt")
         manifest = state.get("manifest", {})
         validation = state.get("validation", {})
         errors: list[str] = []
