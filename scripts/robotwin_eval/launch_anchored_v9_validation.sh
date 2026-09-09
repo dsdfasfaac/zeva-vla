@@ -15,8 +15,8 @@ episodes=${EPISODES:-8}
 foundation_checkpoint=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1
 foundation_sha256=7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe
 
-model_host_c=${MODEL_HOST_C:-aigc31}
-model_ip_c=${MODEL_IP_C:-172.16.80.165}
+model_host_c=${MODEL_HOST_C:-aigc32}
+model_ip_c=${MODEL_IP_C:-172.16.80.166}
 render_host_c=${RENDER_HOST_C:-aigc24}
 render_runtime_c=${RENDER_RUNTIME_C:-/data1/dingxin/robotwin-formal-eval/RoboTwin}
 model_host_d=${MODEL_HOST_D:-aigc32}
@@ -93,7 +93,11 @@ cache_file() {
       mv \"\$temporary\" '$destination'
     fi"
 }
-for host in "$model_host_c" "$model_host_d"; do
+model_hosts=("$model_host_c")
+if [[ "$model_host_d" != "$model_host_c" ]]; then
+  model_hosts+=("$model_host_d")
+fi
+for host in "${model_hosts[@]}"; do
   cache_file "$host" "$base_checkpoint/model.safetensors" \
     "$base_cache/model.safetensors" "$base_model_sha256"
   cache_file "$host" "$zeva_checkpoint/model.safetensors" \
@@ -172,7 +176,7 @@ payload = {
     "runtime_cache": {
         "base_checkpoint": base_cache,
         "zeva_checkpoint": zeva_cache,
-        "replicated_model_hosts": [model_host_c, model_host_d],
+        "replicated_model_hosts": list(dict.fromkeys([model_host_c, model_host_d])),
         "identity": {
             "base_model_sha256": base_hash,
             "zeva_model_sha256": zeva_hash,
@@ -186,9 +190,57 @@ payload = {
     "acceptance": "delta>=0 on each split and combined ZeVA-Base gain>=6/160",
 }
 path = Path(destination)
-if path.is_file() and json.loads(path.read_text()) != payload:
-    raise RuntimeError("existing anchored-v9 validation plan differs; refusing mutation")
-if not path.is_file():
+if path.is_file():
+    existing = json.loads(path.read_text())
+    if existing != payload:
+        # Runtime placement is not a model/seed decision.  Permit a failed
+        # host to be replaced only before split-c produced a single episode,
+        # preserve the original immutable plan, and write a separate audit
+        # record.  Every semantic field and cache identity must still match.
+        existing_semantics = json.loads(json.dumps(existing))
+        current_semantics = json.loads(json.dumps(payload))
+        previous_hosts = existing_semantics["runtime_cache"].pop(
+            "replicated_model_hosts"
+        )
+        current_hosts = current_semantics["runtime_cache"].pop(
+            "replicated_model_hosts"
+        )
+        if existing_semantics != current_semantics:
+            raise RuntimeError(
+                "existing anchored-v9 validation plan differs semantically; refusing mutation"
+            )
+        progress_root = path.parent / "split-c" / "baseline" / "progress"
+        completed = 0
+        for progress_path in progress_root.glob("*.json"):
+            progress = json.loads(progress_path.read_text())
+            completed += len(progress.get("episode_results", ()))
+        if completed:
+            raise RuntimeError(
+                "cannot change split-c model host after any episode was produced"
+            )
+        recovery = {
+            "schema": "zeva-robotwin-anchored-v9-runtime-host-recovery-v1",
+            "reason": (
+                "original split-c host failed the Mamba/PyTorch ABI preflight "
+                "before policy service readiness"
+            ),
+            "semantic_validation_plan_unchanged": True,
+            "completed_split_c_episodes_before_recovery": completed,
+            "previous_replicated_model_hosts": previous_hosts,
+            "recovery_replicated_model_hosts": current_hosts,
+            "actual_split_model_hosts": {
+                "split-c": model_host_c,
+                "split-d": model_host_d,
+            },
+        }
+        recovery_path = path.parent / "runtime_host_recovery.json"
+        if recovery_path.is_file() and json.loads(recovery_path.read_text()) != recovery:
+            raise RuntimeError("existing runtime-host recovery record differs")
+        if not recovery_path.is_file():
+            temporary = recovery_path.with_name(recovery_path.name + ".partial")
+            temporary.write_text(json.dumps(recovery, indent=2, sort_keys=True) + "\n")
+            os.replace(temporary, recovery_path)
+else:
     temporary = path.with_name(path.name + ".partial")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     os.replace(temporary, path)
@@ -215,17 +267,26 @@ run_split() {
     > "$eval_root/$name.launcher.log" 2>&1
 }
 
-run_split split-c 7000 "$model_host_c" "$model_ip_c" "$render_host_c" "$render_runtime_c" "" &
-pid_c=$!
-run_split split-d 8000 "$model_host_d" "$model_ip_d" "$render_host_d" "$render_runtime_d" \
-  /tmp/zeva-v9-split-d-mps-bypass &
-pid_d=$!
-printf '%s\n' "$pid_c" > "$eval_root/split-c.pid"
-printf '%s\n' "$pid_d" > "$eval_root/split-d.pid"
-status=0
-wait "$pid_c" || status=1
-wait "$pid_d" || status=1
-(( status == 0 )) || exit "$status"
+if [[ "$model_host_c" == "$model_host_d" ]]; then
+  # A single ABI-compatible model node can safely evaluate both disjoint
+  # splits in sequence.  Running them concurrently would collide on ports and
+  # overcommit each GPU; completed split reports are resumed/skipped above.
+  run_split split-c 7000 "$model_host_c" "$model_ip_c" "$render_host_c" "$render_runtime_c" ""
+  run_split split-d 8000 "$model_host_d" "$model_ip_d" "$render_host_d" "$render_runtime_d" \
+    /tmp/zeva-v9-split-d-mps-bypass
+else
+  run_split split-c 7000 "$model_host_c" "$model_ip_c" "$render_host_c" "$render_runtime_c" "" &
+  pid_c=$!
+  run_split split-d 8000 "$model_host_d" "$model_ip_d" "$render_host_d" "$render_runtime_d" \
+    /tmp/zeva-v9-split-d-mps-bypass &
+  pid_d=$!
+  printf '%s\n' "$pid_c" > "$eval_root/split-c.pid"
+  printf '%s\n' "$pid_d" > "$eval_root/split-d.pid"
+  status=0
+  wait "$pid_c" || status=1
+  wait "$pid_d" || status=1
+  (( status == 0 )) || exit "$status"
+fi
 
 python3 - "$eval_root" "$episodes" <<'PY'
 import json

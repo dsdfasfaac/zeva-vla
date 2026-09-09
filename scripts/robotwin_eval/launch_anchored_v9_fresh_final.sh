@@ -14,8 +14,8 @@ final_root=${FINAL_ROOT:-$eval_root/fresh-final-seed10000}
 anchor_config=${ANCHOR_CONFIG:-$zeva_root/scripts/robotwin_eval/baseline_bestv1_model_config.yml}
 foundation_checkpoint=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1
 foundation_sha256=7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe
-model_host=${MODEL_HOST:-aigc31}
-model_ip=${MODEL_IP:-172.16.80.165}
+model_host=${MODEL_HOST:-aigc32}
+model_ip=${MODEL_IP:-172.16.80.166}
 render_host=${RENDER_HOST:-aigc24}
 render_runtime=${RENDER_RUNTIME:-/data1/dingxin/robotwin-formal-eval/RoboTwin}
 
