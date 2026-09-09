@@ -643,9 +643,14 @@ adapter therefore sets that task to `0.5`, the other nine tasks and the
 default to `0`, records `seed_sets_pairwise_disjoint=true` and
 `test_metrics_used=false`, and has SHA256
 `8a12b0dbed2da7741aeff407e62d6eeaa676e958dc1eef1f772aafd8f95810cc`.
-After this evidence review, the fixed seed-1000 formal evaluation was started
-under `formal-calibrated-v5`; Base is imported immutably as `114/200` and Zeva
-must replay all 200 episodes before acceptance is decided.
+After this evidence review, the fixed seed-1000 formal evaluation ran all 200
+episodes under `formal-calibrated-v5`.  It failed the performance gate:
+Base was `114/200 = 57.0%`, while ZeVA was `109/200 = 54.5%` (absolute delta
+`-2.5` points; Base-only/ZeVA-only discordant pairs `35/30`; exact McNemar
+`p=0.620`).  The independent audit passed all protocol checks, including 200
+ZeVA videos, ten successful worker exits, and exact seed/instruction pairing.
+The v5 result is therefore a model-selection failure, not an evaluation
+misalignment, and is retained only as negative evidence.
 
 A lightweight branch audit can be run without loading PI0.5.  For the v3
 adapter, the mean-language/all-phase-bin diagnostic found injected context RMS
@@ -654,6 +659,28 @@ context gate was nearly constant across tasks.  This is a diagnostic over
 prototypes and bank phases, not a closed-loop success metric; it is used to
 decide whether a failed v5 run needs branch isolation or prior-strength
 retraining instead of another blind shared-scale sweep.
+
+v6 follows that preregistered diagnosis.  It exactly zeros the context
+projector and restores the Gaussian action prior to an absolute `0.5` gate,
+matching BehaviorVLA's inference guidance magnitude while retaining the
+trained task/phase router, task-language retrieval, and recurrent H15 phase.
+PI0.5, ZTE/Mamba, the causal bank, and retrieval remain frozen.  On two
+disjoint closed-loop validation splits the global candidate scored `50/80`
+against Base `50/80` on split A and `45/80` against `43/80` on split B.  The
+same per-task replication gate as v5 (non-negative on both splits and at least
+three aggregate wins) enables only `beat_block_hammer` (`+1,+3`) and
+`blocks_ranking_rgb` (`0,+3`); all other tasks and the default fall back
+exactly to PI0.5.  The calibrated adapter SHA256 is
+`28d99c1fd9092310acb6fd7a9040df619de45b773e6caa5feaa1d1caafc84709`.
+Its metadata records pairwise-disjoint validation/formal seeds and
+`test_metrics_used=false`.  The fixed 10x20 formal run is active under
+`advantage10-prior-guidance-v6/formal-calibrated-prior05-v6` and must still
+beat `114/200` plus pass the independent 200-video audit before delivery.
+
+```bash
+bash scripts/robotwin_eval/launch_prior_guidance_validation_v6.sh
+bash scripts/robotwin_eval/launch_prior_guidance_formal_v6.sh
+```
 
 ```bash
 PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \

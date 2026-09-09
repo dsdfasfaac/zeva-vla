@@ -626,8 +626,12 @@ split 上复现：split A `+3/8`、split B `+2/8`，合计 `+5/16`。最终校�
 该任务设为 `0.5`，其余九任务及 default 均为 `0`；adapter SHA256 为
 `8a12b0dbed2da7741aeff407e62d6eeaa676e958dc1eef1f772aafd8f95810cc`，并记录
 `seed_sets_pairwise_disjoint=true`、`test_metrics_used=false`。人工审计后已在
-`formal-calibrated-v5` 启动固定 seed-1000 的 10×20 正式评测，Base 以不可变
-证据导入为 `114/200`，ZeVA 仍须实际跑满 200 个 episode 才能判定验收。
+`formal-calibrated-v5` 完成了固定 seed-1000 的 10×20 正式评测。最终
+`Base=114/200=57.0%`，`ZeVA=109/200=54.5%`，下降 2.5 个百分点；
+Base-only/ZeVA-only 为 `35/30`，exact McNemar `p=0.620`。独立审计确认
+200 个 ZeVA 视频、10 个 worker `rc=0`、seed/instruction 逐条配对以及
+H50/H15、相机和动作协议全部正确。因此 v5 是模型/选模失败，不是评测错位，
+只能作为负结果保留。
 
 同时新增不加载 PI0.5 的残差分支审计。它对十任务的平均 train-language embedding
 与 causal bank 全部 phase bins 计算门值和注入后 RMS，只用于定位结构问题，不作为
@@ -635,6 +639,25 @@ split 上复现：split A `+3/8`、split B `+2/8`，合计 `+5/16`。最终校�
 任务几乎不变，prior gate 均值 `0.00803`；context residual RMS `0.004881`，prior
 residual RMS `0.0000826`，前者是后者的 `59.1×`。因此若 v5 仍失败，下一步应
 隔离 context/prior 分支并修复 prior 强度或训练，而不是继续盲目调整共同 scale。
+
+v6 按上述预注册诊断拆分分支：context projector 精确清零，Gaussian action
+prior 改为绝对 gate `0.5`，与 BehaviorVLA 推理 guidance 的量级一致；保留训练好
+的 task/phase router、task-language 检索和真实 H15 recurrent phase，PI0.5、
+ZTE/Mamba、causal bank 与 retrieval 仍全部冻结。两个互斥闭环验证集结果为：
+split A `Base=50/80、candidate=50/80`，split B
+`Base=43/80、candidate=45/80`。沿用“每个 split 非负且合计至少 +3”任务门槛，
+仅启用 `beat_block_hammer`（`+1,+3`）和 `blocks_ranking_rgb`（`0,+3`）；
+其余 8 个任务及 default 精确回退 PI0.5。校准 adapter SHA256 为
+`28d99c1fd9092310acb6fd7a9040df619de45b773e6caa5feaa1d1caafc84709`，
+metadata 记录 `seed_sets_pairwise_disjoint=true`、`test_metrics_used=false`。
+固定 10×20 正式评测已在
+`advantage10-prior-guidance-v6/formal-calibrated-prior05-v6` 启动；仍须严格超过
+`114/200` 并通过 200 视频独立审计后才能交付。
+
+```bash
+bash scripts/robotwin_eval/launch_prior_guidance_validation_v6.sh
+bash scripts/robotwin_eval/launch_prior_guidance_formal_v6.sh
+```
 
 ```bash
 PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
@@ -674,11 +697,14 @@ Task retrieval:
 十任务 v4 独立闭环 residual trust 校准与后续正式评测：
 /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v4-closed-loop
 
-十任务 v5 双独立 split residual trust 校准（校准已完成；人工审计后正式评测运行中）：
+十任务 v5 双独立 split residual trust 校准（正式 109/200，已拒绝）：
 /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v5-multisplit
 
 v5 正式评测：
 /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v5-multisplit/formal-calibrated-v5
+
+十任务 v6 prior-only 双 split 校准与正式评测（正式运行中）：
+/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-prior-guidance-v6
 
 十任务 safe-router v2（35/1500 预热时发现 validation 尚未逐任务落盘，主动停止，无 checkpoint）：
 /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-safe-router-v2/zeva
