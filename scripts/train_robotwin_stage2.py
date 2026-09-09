@@ -1006,16 +1006,13 @@ def main(args: Args) -> None:
         pin_memory=True,
         persistent_workers=args.num_workers > 0,
     )
-    # Creating validation workers after CUDA/compile has initialized can make
-    # forked workers inherit a large CUDA context.  For the frozen-foundation
-    # adapter run this was observed to retain 60--81 GB per GPU after the first
-    # validation and slow subsequent steps by ~4x.  Validation is small and
-    # infrequent, so read it in the rank process for this mode.
-    validation_workers = (
-        0
-        if args.training_variant in {"adapter", "prior_adapter"}
-        else max(0, min(2, args.num_workers))
-    )
+    # Creating validation workers after CUDA/compile has initialized makes
+    # forked workers inherit a large CUDA context.  This first appeared in the
+    # frozen-foundation adapter run, but the matched action-expert v8 pair
+    # showed the same 60--79 GB retention after its first validation.  Keep
+    # validation in each rank process for every formal Stage 2 variant.  This
+    # changes only input loading, not sample order or model/optimizer state.
+    validation_workers = 0
     validation_loader = DataLoader(
         validation_dataset,
         batch_size=args.batch_size,

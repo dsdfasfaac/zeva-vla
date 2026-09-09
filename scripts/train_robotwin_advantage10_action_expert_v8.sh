@@ -23,6 +23,7 @@ task_subset=${ROBOTWIN_TASK_SUBSET:-$zeva_root/configs/robotwin_zeva_advantage10
 stage1_root=${ROBOTWIN_STAGE1_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1}
 run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8}
 output=$run_root/$variant
+resume_checkpoint=${RESUME_CHECKPOINT:-}
 
 for required in \
   "$foundation/model.safetensors" \
@@ -42,20 +43,34 @@ fi
 if [[ "$variant" == zeva ]]; then
   test -s "$stage1_language/model.safetensors"
 fi
-if [[ -e "$output/manifest.json" || -e "$output/COMPLETE" ]]; then
+if [[ -e "$output/COMPLETE" ]]; then
+  echo "v8 run is already complete: $output" >&2
+  exit 0
+fi
+if [[ -e "$output/manifest.json" && -z "$resume_checkpoint" ]]; then
   echo "refusing to overwrite existing v8 run: $output" >&2
   exit 3
 fi
+if [[ -n "$resume_checkpoint" ]]; then
+  test -s "$resume_checkpoint/training_state.pt"
+  if [[ "$(realpath "$(dirname "$resume_checkpoint")")" != "$(realpath "$output")" ]]; then
+    echo "resume checkpoint must belong to $output: $resume_checkpoint" >&2
+    exit 5
+  fi
+fi
 
 mkdir -p "$output"
-printf '%s\n' "starting action-expert v8 $variant $(date --iso-8601=seconds)" \
-  | tee "$output/STARTED"
+printf '%s\n' "starting action-expert v8 $variant $(date --iso-8601=seconds) resume=${resume_checkpoint:-none}" \
+  | tee -a "$output/STARTED"
 
 extra_args=()
 if [[ "$variant" == zeva ]]; then
   # Stage 1 was learned in this frozen task-language coordinate.  It is an
   # auxiliary lookup coordinate, not a second trainable language backbone.
   extra_args+=(--goal-embedding-checkpoint "$stage1_language")
+fi
+if [[ -n "$resume_checkpoint" ]]; then
+  extra_args+=(--resume-checkpoint "$resume_checkpoint")
 fi
 
 bash "$zeva_root/scripts/train_robotwin_stage2_8gpu.sh" \
