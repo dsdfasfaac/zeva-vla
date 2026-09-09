@@ -830,17 +830,15 @@ def eval_policy(task_name,
                 break
             except UnStableError as e:
                 TASK_ENV.close_env()
-                if not fixed_seed_sequence:
-                    raise
                 rollout_init_attempt += 1
                 if rollout_init_attempt >= fixed_seed_init_max_attempts:
                     raise RuntimeError(
-                        f"Frozen RoboTwin seed {now_seed} remained unstable during "
+                        f"Selected RoboTwin seed {now_seed} remained unstable during "
                         f"rollout initialization for {rollout_init_attempt} attempts; "
                         "refusing seed substitution."
                     ) from e
                 print(
-                    f"Retrying frozen seed {now_seed} during rollout initialization "
+                    f"Retrying selected seed {now_seed} during rollout initialization "
                     f"without substitution ({rollout_init_attempt}/"
                     f"{fixed_seed_init_max_attempts})."
                 )
