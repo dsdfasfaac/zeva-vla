@@ -36,6 +36,7 @@ shared_runtime=${SHARED_RUNTIME:-/mnt/100T/users/dingxin/WAM/playground/Benchmar
 # silent fallback to a different RoboTwin installation.
 render_runtime=${RENDER_RUNTIME:-/data1/dingxin/robotwin-formal-eval/RoboTwin}
 render_vulkan_icd=${RENDER_VULKAN_ICD:-/usr/share/vulkan/icd.d/nvidia_icd.json}
+render_mps_pipe_directory=${RENDER_MPS_PIPE_DIRECTORY:-}
 handoff=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1
 release_runtime=$handoff/runtime
 native_transformers=/data1/dingxin/transformers5-runtime
@@ -85,6 +86,11 @@ if [[ -n "$anchor_config" ]]; then
 fi
 
 mkdir -p "$output"
+render_mps_env=""
+if [[ -n "$render_mps_pipe_directory" ]]; then
+  ssh "$render_host" "mkdir -p '$render_mps_pipe_directory'"
+  render_mps_env="CUDA_MPS_PIPE_DIRECTORY='$render_mps_pipe_directory'"
+fi
 
 seed_selection="baseline-selects-first-${episodes}-expert-valid-from-${absolute_start_seed};anchor-and-zeva-replay-exact-list"
 seed_manifest_source=""
@@ -215,7 +221,7 @@ run_condition() {
         local started
         started=$(date -Iseconds)
         set +e
-        ssh "$render_host" "cd '$render_runtime'; env PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$slot' VK_ICD_FILENAMES='$render_vulkan_icd' PYTHONPATH='$zeva_root/scripts/robotwin_eval:$render_runtime/script:$render_runtime:$render_runtime/policy' \
+        ssh "$render_host" "cd '$render_runtime'; env PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$slot' VK_ICD_FILENAMES='$render_vulkan_icd' $render_mps_env PYTHONPATH='$zeva_root/scripts/robotwin_eval:$render_runtime/script:$render_runtime:$render_runtime/policy' \
           .venv_robotwin/bin/python '$zeva_root/scripts/robotwin_eval/eval_policy_client.py' --port '$port' --config '$zeva_root/scripts/robotwin_eval/client_config.yml' \
           --overrides --task_name '$task' --task_config zeva_randomized --test_num '$episodes' \
           --instruction_type seen --seed 0 --absolute_start_seed '$absolute_start_seed' $seed_args \
@@ -329,6 +335,7 @@ cat > "$output/manifest.json" <<EOF
   "model_runtime": "native_handoff_transformers_5.5.4",
   "model_host": "$model_host",
   "render_host": "$render_host",
+  "render_mps_pipe_directory": "$render_mps_pipe_directory",
   "slots": $slots
 }
 EOF

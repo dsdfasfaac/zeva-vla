@@ -118,12 +118,14 @@ run_split() {
   local model_ip=$4
   local render_host=$5
   local render_runtime=$6
+  local render_mps_pipe_directory=${7:-}
   local output=$eval_root/$name
   if [[ -s "$output/paired_report.json" ]]; then
     return
   fi
   env MODEL_HOST="$model_host" MODEL_IP="$model_ip" \
     RENDER_HOST="$render_host" RENDER_RUNTIME="$render_runtime" \
+    RENDER_MPS_PIPE_DIRECTORY="$render_mps_pipe_directory" \
     OUTPUT_ROOT="$output" \
     BASELINE_CONFIG="$baseline_config" \
     REQUIRE_EXPLICIT_FOUNDATION=true FOUNDATION_MODEL_SHA256="$foundation_sha256" \
@@ -136,9 +138,10 @@ run_split() {
     > "$eval_root/$name.launcher.log" 2>&1
 }
 
-run_split split-a 5000 "$model_host_a" "$model_ip_a" "$render_host_a" "$render_runtime_a" &
+run_split split-a 5000 "$model_host_a" "$model_ip_a" "$render_host_a" "$render_runtime_a" "" &
 pid_a=$!
-run_split split-b 6000 "$model_host_b" "$model_ip_b" "$render_host_b" "$render_runtime_b" &
+run_split split-b 6000 "$model_host_b" "$model_ip_b" "$render_host_b" "$render_runtime_b" \
+  /tmp/zeva-v7-split-b-mps-bypass &
 pid_b=$!
 printf '%s\n' "$pid_a" > "$eval_root/split-a.pid"
 printf '%s\n' "$pid_b" > "$eval_root/split-b.pid"
