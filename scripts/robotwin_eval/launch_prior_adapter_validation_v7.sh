@@ -58,7 +58,8 @@ test -s "$checkpoint/zeva_adapter.pth"
 test "$(sha256sum "$checkpoint/zeva_adapter.pth" | awk '{print $1}')" = "$adapter_sha256"
 test "$(sha256sum "$checkpoint/model.safetensors" | awk '{print $1}')" = "$model_sha256"
 foundation_identity=$eval_root/foundation_identity-step-${checkpoint_step}.json
-python3 "$zeva_root/scripts/verify_frozen_safetensors_identity.py" \
+PYTHONPATH="/data1/dingxin/zeva-runtime-deps${PYTHONPATH:+:$PYTHONPATH}" \
+  python3 "$zeva_root/scripts/verify_frozen_safetensors_identity.py" \
   "$checkpoint/model.safetensors" "$foundation_checkpoint/model.safetensors" \
   "$foundation_identity"
 
