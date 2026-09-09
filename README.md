@@ -404,6 +404,19 @@ at least 95%, and matched residual-off non-regression determine the checkpoint
 before any new closed-loop rollout. The result must be reported as a 10-task
 specialized model, not as a replacement for the 50-task benchmark score.
 
+After both branches finish, freeze one shared step using validation5 only:
+
+```bash
+python3 scripts/select_robotwin_action_expert_pair_v8.py \
+  /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8
+```
+
+The selector rejects any step that lacks ten-task coverage, retrieval at least
+95%, positive matched residual improvement, at least 50% paired wins, or
+non-negative mean paired improvement on every task. Among eligible shared
+steps it first minimizes Base validation flow; closed-loop results are never
+an input.
+
 The earlier 1,000-step action-expert experiment used the sequential launcher
 below. It is retained only for historical reproduction; its evaluated Base
 regressed below the untouched 57% anchor and it is not the active v8 run:

@@ -523,7 +523,14 @@ RoboTwin 的 GPU physics 不是位级确定的，因此在 Base 中已经通过 
 bash scripts/train_robotwin_advantage10_action_expert_v8.sh baseline
 bash scripts/train_robotwin_advantage10_action_expert_v8.sh zeva
 # /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8/{baseline,zeva}
+python3 scripts/select_robotwin_action_expert_pair_v8.py \
+  /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8
 ```
+
+选择器只允许两支共同存在的同一 global step；要求十任务 validation 覆盖完整、
+retrieval≥95%、ZeVA residual-on 相对当前 action expert residual-off 的 paired
+improvement>0、win fraction≥50%，并且十任务各自 mean improvement 都不为负。
+在合格共同 step 中先最小化 Base validation flow；闭环结果不参与选 step。
 
 三任务、每任务 5 次的 checkpoint gate 只用于发现加载错误和明显闭环退化，不作为统计验收：在固定模型初始 RNG 后，同一 Anchor 因 RoboTwin GPU physics 非位级确定而在重复 gate 中出现 `10/15` 到 `13/15` 的波动。第一轮闭环筛选保留 action-expert baseline step `1000` 和 ZeVA step `250`；诊断目录为：
 
