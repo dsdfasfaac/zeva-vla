@@ -116,6 +116,7 @@ run_split() {
     RENDER_HOST="$render_host" RENDER_RUNTIME="$render_runtime" \
     OUTPUT_ROOT="$output" \
     BASELINE_CONFIG="$baseline_config" \
+    REQUIRE_EXPLICIT_FOUNDATION=true FOUNDATION_MODEL_SHA256="$foundation_sha256" \
     ZEVA_CONFIG="$config" ANCHOR_CONFIG="" BASELINE_IS_UNTOUCHED_ANCHOR=true \
     TASK_MANIFEST="$task_manifest" EPISODES="$episodes" \
     ABSOLUTE_START_SEED="$start_seed" MIN_BASELINE_SUCCESS_RATE=0 \

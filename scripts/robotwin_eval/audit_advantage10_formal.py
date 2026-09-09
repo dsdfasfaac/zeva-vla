@@ -35,6 +35,13 @@ EXPECTED_IDENTITY = {
     "execute_horizon": 15,
     "model_seed_policy": "continuous",
 }
+EXPECTED_BESTV1 = Path(
+    "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/"
+    "robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1"
+)
+EXPECTED_BESTV1_SHA256 = (
+    "7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe"
+)
 
 
 def load_json(path: Path) -> Any:
@@ -47,6 +54,18 @@ def sha256(path: Path) -> str:
         while chunk := stream.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def load_flat_yaml(path: Path) -> dict[str, str]:
+    """Read the scalar top-level fields used by RoboTwin policy configs."""
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        values[key.strip()] = value.strip().strip("'\"")
+    return values
 
 
 def main() -> int:
@@ -316,11 +335,40 @@ def main() -> int:
         path = Path(value) if value else None
         check(path is not None and path.is_file(), f"manifest {key} is missing or unreadable")
         if path is not None and path.is_file():
+            actual_config_sha256 = sha256(path)
+            recorded_config_sha256 = manifest.get(f"{key}_sha256")
+            if recorded_config_sha256 is not None:
+                check(
+                    recorded_config_sha256 == actual_config_sha256,
+                    f"manifest {key} hash differs from the rollout-time config",
+                )
             config_evidence[key] = {
                 "path": str(path),
                 "bytes": path.stat().st_size,
-                "sha256": sha256(path),
+                "sha256": actual_config_sha256,
             }
+
+    if manifest.get("model_identity_contract") == "explicit-foundation-v1":
+        check(
+            manifest.get("foundation_model_sha256") == EXPECTED_BESTV1_SHA256,
+            "explicit-foundation manifest does not identify the approved best-v1 model",
+        )
+        for key in ("baseline_config", "zeva_config"):
+            value = manifest.get(key)
+            path = Path(value) if value else None
+            if path is None or not path.is_file():
+                continue
+            config = load_flat_yaml(path)
+            check(
+                config.get("foundation_checkpoint") == str(EXPECTED_BESTV1),
+                f"{key} does not explicitly use pretrained_model-best-v1",
+            )
+        baseline_path = Path(manifest["baseline_config"])
+        if baseline_path.is_file():
+            check(
+                load_flat_yaml(baseline_path).get("baseline_only", "").lower() == "true",
+                "explicit best-v1 Base config is not baseline_only",
+            )
 
     if manifest.get("seed_selection") == (
         "all-conditions-replay-existing-frozen-expert-valid-manifest"

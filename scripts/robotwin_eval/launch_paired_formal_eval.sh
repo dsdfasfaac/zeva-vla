@@ -21,6 +21,8 @@ model_rng_seed=${MODEL_RNG_SEED:-20260907}
 # experiment protocol.
 min_baseline_success_rate=${MIN_BASELINE_SUCCESS_RATE:-0}
 baseline_is_untouched_anchor=${BASELINE_IS_UNTOUCHED_ANCHOR:-false}
+require_explicit_foundation=${REQUIRE_EXPLICIT_FOUNDATION:-false}
+foundation_model_sha256=${FOUNDATION_MODEL_SHA256:-}
 precomputed_baseline_root=${PRECOMPUTED_BASELINE_ROOT:-}
 # Formal 10x20 imports retain the historical 114-success default.  Calibration
 # launchers must pass their independently observed validation count explicitly.
@@ -63,6 +65,23 @@ fi
 if [[ "$baseline_is_untouched_anchor" != true && "$baseline_is_untouched_anchor" != false ]]; then
   echo "BASELINE_IS_UNTOUCHED_ANCHOR must be true or false" >&2
   exit 2
+fi
+if [[ "$require_explicit_foundation" != true && "$require_explicit_foundation" != false ]]; then
+  echo "REQUIRE_EXPLICIT_FOUNDATION must be true or false" >&2
+  exit 2
+fi
+if [[ "$require_explicit_foundation" == true && ! "$foundation_model_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "explicit-foundation runs require a 64-character FOUNDATION_MODEL_SHA256" >&2
+  exit 2
+fi
+test -s "$baseline_config"
+test -s "$zeva_config"
+baseline_config_sha256=$(sha256sum "$baseline_config" | awk '{print $1}')
+zeva_config_sha256=$(sha256sum "$zeva_config" | awk '{print $1}')
+anchor_config_sha256=""
+if [[ -n "$anchor_config" ]]; then
+  test -s "$anchor_config"
+  anchor_config_sha256=$(sha256sum "$anchor_config" | awk '{print $1}')
 fi
 
 mkdir -p "$output"
@@ -283,8 +302,13 @@ cat > "$output/manifest.json" <<EOF
 {
   "schema": "zeva-robotwin-formal-paired-eval-v1",
   "baseline_config": "$baseline_config",
+  "baseline_config_sha256": "$baseline_config_sha256",
   "zeva_config": "$zeva_config",
+  "zeva_config_sha256": "$zeva_config_sha256",
   "anchor_config": "$anchor_config",
+  "anchor_config_sha256": "$anchor_config_sha256",
+  "model_identity_contract": "$(if [[ "$require_explicit_foundation" == true ]]; then printf explicit-foundation-v1; else printf legacy-config-v1; fi)",
+  "foundation_model_sha256": "$foundation_model_sha256",
   "task_manifest": "$task_manifest",
   "task_count": $task_count,
   "episodes_per_task": $episodes,
