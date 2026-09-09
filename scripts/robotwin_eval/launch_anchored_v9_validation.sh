@@ -15,8 +15,8 @@ episodes=${EPISODES:-8}
 foundation_checkpoint=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1
 foundation_sha256=7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe
 
-model_host_c=${MODEL_HOST_C:-aigc29}
-model_ip_c=${MODEL_IP_C:-172.16.80.163}
+model_host_c=${MODEL_HOST_C:-aigc31}
+model_ip_c=${MODEL_IP_C:-172.16.80.165}
 render_host_c=${RENDER_HOST_C:-aigc24}
 render_runtime_c=${RENDER_RUNTIME_C:-/data1/dingxin/robotwin-formal-eval/RoboTwin}
 model_host_d=${MODEL_HOST_D:-aigc32}
