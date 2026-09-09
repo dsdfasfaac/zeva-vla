@@ -12,7 +12,7 @@ stage1_language=${ROBOTWIN_STAGE1_LANGUAGE:-/data1/dingxin/zeva-checkpoint-cache
 dataset_root=${ROBOTWIN_DATASET_ROOT:-/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/data}
 task_subset=${ROBOTWIN_TASK_SUBSET:-$zeva_root/configs/robotwin_zeva_advantage10.json}
 stage1_root=${ROBOTWIN_STAGE1_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1}
-output=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-prior-only-v7}/zeva
+output=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-prior-only-v7-corrected}/zeva
 
 mkdir -p "$output"
 printf '%s\n' "starting fixed-gate prior-only v7 $(date --iso-8601=seconds)" | tee -a "$output/STARTED"
@@ -48,4 +48,3 @@ bash "$zeva_root/scripts/train_robotwin_stage2_8gpu.sh" \
   >> "$output/train.log" 2>&1
 
 printf '%s\n' "completed fixed-gate prior-only v7 $(date --iso-8601=seconds)" | tee -a "$output/COMPLETE"
-

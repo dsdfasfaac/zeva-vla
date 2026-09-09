@@ -870,6 +870,11 @@ def main(args: Args) -> None:
                 "Stage 1 language coordinate cannot drift silently."
             )
     accelerator = Accelerator(
+        # ``AcceleratedScheduler`` otherwise advances once per process when
+        # ``split_batches=False``.  Our CLI ``warmup_steps`` is expressed in
+        # global optimizer steps, so the scheduler must advance exactly once
+        # after each synchronized optimizer update, not world_size times.
+        step_scheduler_with_optimizer=False,
         kwargs_handlers=[
             DistributedDataParallelKwargs(
                 # The v8 trainable set contains only action-path and Zeva
@@ -932,6 +937,12 @@ def main(args: Args) -> None:
     manifest["effective_global_batch_size"] = (
         args.batch_size * args.gradient_accumulation_steps * accelerator.num_processes
     )
+    manifest["lr_scheduler"] = {
+        "name": "linear_warmup_then_constant",
+        "warmup_global_optimizer_steps": args.warmup_steps,
+        "accelerate_step_scheduler_with_optimizer": False,
+        "expected_scheduler_steps_per_global_optimizer_step": 1,
+    }
     if manifest["effective_global_batch_size"] != 256:
         raise ValueError(
             "Formal Stage 2 requires global batch 256, got "
@@ -1204,6 +1215,13 @@ def main(args: Args) -> None:
         optimizer.step()
         scheduler.step()
         completed = step + 1
+        scheduler_last_epoch = int(scheduler.state_dict()["last_epoch"])
+        if scheduler_last_epoch != completed:
+            raise RuntimeError(
+                "LR scheduler/global-step drift: "
+                f"last_epoch={scheduler_last_epoch}, completed={completed}. "
+                "The scheduler must advance exactly once per global optimizer step."
+            )
         if completed % args.log_freq == 0:
             baseline_sampled = bool(float(losses["baseline_sampled"]))
             progress_bar.set_postfix(

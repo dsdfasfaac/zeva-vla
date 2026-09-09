@@ -676,12 +676,14 @@ memory encoder、Gaussian prior、prior action projector 和有界 task/phase ro
 bash scripts/train_robotwin_advantage10_prior_only_v7.sh
 ```
 
-v7 的首个 `step 250` checkpoint 已完成完整 validation5 验证：ZeVA flow loss
-`0.0204545`，matched frozen PI 为 `0.0204728`，平均 paired improvement
-`1.83e-5`，paired win fraction `54.98%`，task retrieval accuracy `99.847%`；
-仅 `scan_object` 的逐任务平均 improvement 轻微为负。这些只用于离线选模，不能
-写成 RoboTwin 成功率。训练继续至 2,000 steps，v6 的 seed-1000 正式结果不会
-进入 v7 的优化或 checkpoint 选择。
+第一轮 v7 在 `step 250` 审计时发现 Accelerate scheduler 漂移：保存状态中的
+`last_epoch=2000`，说明原定 250 个 global optimizer steps 的 warmup 每步被 8 个
+process 重复推进，实际约 step 32 已结束。因此该轮虽有表面上正的离线 paired
+指标，也已停止并禁止用于选模。修正后显式设置
+`step_scheduler_with_optimizer=False`，manifest 记录 scheduler 契约，并在每个
+optimizer update 后强制断言 `scheduler.last_epoch == completed global steps`。
+干净 v7 从 PI0.5 的 step zero 重新训练至 2,000 steps；v6 的 seed-1000 正式结果
+不会进入优化或 checkpoint 选择。
 
 ```bash
 PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
@@ -730,7 +732,10 @@ v5 正式评测：
 十任务 v6 prior-only 双 split 校准与正式评测（正式 102/200，已拒绝）：
 /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-prior-guidance-v6
 
-十任务 v7 fixed-gate prior-only Stage2（训练中，step 250 首次完整验证已落盘）：
+十任务 v7 fixed-gate prior-only Stage2（修正 scheduler 后从零重训）：
+/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-prior-only-v7-corrected/zeva
+
+十任务 v7 首轮（scheduler 每 global step 错误推进 8 次，已停止且禁止选模）：
 /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-prior-only-v7/zeva
 
 十任务 safe-router v2（35/1500 预热时发现 validation 尚未逐任务落盘，主动停止，无 checkpoint）：
@@ -860,7 +865,7 @@ Formal-eval PI input: [-1, 0.9215686] # 正确
 
 原因是 best-v1 的 PI language embedding table、VLM feature、action expert 和 flow behavior 均可能不同，旧 ZeVA 产物不能被视为与新 foundation 兼容。
 
-2026-09-09 的 v7 十任务实验采用显式解耦、frozen-PI 方案。逐 tensor 检查确认 best-v1 与旧 foundation 的若干语言/视觉/action 权重不同，但 tokenizer、预处理、normalization 与物理协议兼容；因此 Stage1 使用明确指定的冻结旧 task-language 坐标，而真实 policy foundation 始终是 best-v1。完整 PI0.5、ZTE/Mamba、bank、retrieval 以及 context projector/gate 均冻结；optimizer 只有 task projector、memory encoder、Gaussian prior、prior residual projector 和 task/phase router，LR `5e-5`。训练在 aigc28 的八张 H100 上运行，global batch 256，2,000 steps，250-step warmup。Base 不再额外微调，而是直接使用训练前建立的 untouched best-v1 正常结果。
+2026-09-09 的 v7 十任务实验采用显式解耦、frozen-PI 方案。逐 tensor 检查确认 best-v1 与旧 foundation 的若干语言/视觉/action 权重不同，但 tokenizer、预处理、normalization 与物理协议兼容；因此 Stage1 使用明确指定的冻结旧 task-language 坐标，而真实 policy foundation 始终是 best-v1。完整 PI0.5、ZTE/Mamba、bank、retrieval 以及 context projector/gate 均冻结；optimizer 只有 task projector、memory encoder、Gaussian prior、prior residual projector 和 task/phase router，LR `5e-5`。训练在 aigc28 的八张 H100 上运行，global batch 256，2,000 steps，250-global-step warmup；scheduler 每个全局 optimizer update 只推进一次并有运行时断言。Base 不再额外微调，而是直接使用训练前建立的 untouched best-v1 正常结果。
 
 ## 17. 最终模型的通过定义
 

@@ -710,13 +710,16 @@ data; no formal-test metric is an optimizer or checkpoint-selection input.
 bash scripts/train_robotwin_advantage10_prior_only_v7.sh
 ```
 
-At the first saved checkpoint (`step 250`), complete validation5 evaluation
-gave ZeVA flow loss `0.0204545` versus matched frozen PI loss `0.0204728`, a
-mean paired improvement of `1.83e-5` with a `54.98%` paired win fraction.
-Retrieval accuracy was `99.847%`; only `scan_object` had a slightly negative
-per-task mean improvement.  These are checkpoint-selection diagnostics, not
-closed-loop success rates.  Training continues to 2,000 steps and no formal
-seed-1000 result is used for v7 optimization or checkpoint selection.
+The first v7 attempt was stopped after its step-250 audit exposed an
+Accelerate scheduler error: the saved scheduler had `last_epoch=2000`, so the
+intended 250-global-step warmup had advanced eight times per step and ended at
+about step 32.  Its superficially positive offline metric is invalid for
+selection.  The corrected trainer sets
+`step_scheduler_with_optimizer=False`, records the scheduler contract in the
+manifest, and fails immediately unless `scheduler.last_epoch == completed
+global optimizer steps`.  The clean v7 run restarts from PI0.5 at step zero in
+`advantage10-prior-only-v7-corrected`; no checkpoint from the stopped directory
+may be used for evaluation.
 
 ```bash
 PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
