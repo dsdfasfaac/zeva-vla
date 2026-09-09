@@ -66,3 +66,19 @@ def test_prior_only_stage2_rejects_invalid_gate(probability: float) -> None:
             prior_gate_probability=probability
         )
 
+
+def test_fresh_dual_residual_gate_initializer_sets_both_gates() -> None:
+    policy = _stub_policy()
+
+    policy.initialize_residual_gate_probability(0.1)
+
+    assert math.isclose(float(torch.sigmoid(policy.context_gate_logit)), 0.1, abs_tol=1e-7)
+    assert math.isclose(float(torch.sigmoid(policy.prior_gate_logit)), 0.1, abs_tol=1e-7)
+
+
+@pytest.mark.parametrize("probability", [0.0, 1.0, -0.1, 1.1, float("nan")])
+def test_fresh_dual_residual_gate_initializer_rejects_invalid_probability(
+    probability: float,
+) -> None:
+    with pytest.raises(ValueError, match="initial residual gate probability"):
+        _stub_policy().initialize_residual_gate_probability(probability)

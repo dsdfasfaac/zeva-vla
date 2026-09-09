@@ -48,6 +48,14 @@ class Args:
     )
     dataset_root: str = "/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/data"
     foundation_checkpoint: str | None = None
+    # Optional weights-only Stage 2 checkpoint used to initialize the PI0.5
+    # foundation after loading the released config/processors.  This lets a
+    # ZeVA residual run start from the already specialized matched Base rather
+    # than following a second, independently drifting action-expert trajectory.
+    initial_stage2_checkpoint: str | None = None
+    # Optional immutable, independently trained Base action path used as the
+    # paired teacher while the ZeVA action expert continues to update.
+    anchor_stage2_checkpoint: str | None = None
     # Optional frozen language-coordinate source for Zeva.  This allows a new
     # PI policy checkpoint to reuse an existing Stage 1 lineage explicitly,
     # rather than silently recomputing B0 from the new PI embedding table.
@@ -90,6 +98,11 @@ class Args:
     # BehaviorVLA sums Gaussian NLL over action dimensions and scales it by 0.01.
     prior_loss_weight: float = 0.01
     preserve_loss_weight: float = 1.0
+    # Positive margin required of residual-on relative to the matched
+    # residual-off forward.  Zero preserves the historical non-regression
+    # hinge; a small positive value gives a fresh zero residual a useful
+    # optimization signal toward measurable improvement.
+    paired_improvement_margin: float = 0.0
     # Run the matched frozen teacher on one optimizer step out of every four.
     # Scaling a sampled preserve loss by the interval keeps its expected weight.
     baseline_preserve_interval: int = 4
@@ -100,6 +113,9 @@ class Args:
     # This matches BehaviorVLA's Bernoulli keep probability of 0.6 and is
     # intentionally stronger than the separate 10% whole-memory dropout.
     prior_residual_dropout_probability: float = 0.4
+    # Fresh residual branches may use a stronger gate while retaining exact
+    # step-zero Base equivalence because both injection projectors start at 0.
+    initial_residual_gate_probability: float = 0.01
     retrieval_confidence_floor: float = 0.2
     save_freq: int = 500
     save_checkpoints: bool = True
@@ -132,6 +148,26 @@ def _checkpoint_identity(path: str | Path) -> dict[str, Any]:
             identity["model_sha256"] = fields[0]
             identity["model_sha256_source"] = str(declared_hash)
     return identity
+
+
+def _initial_stage2_identity(path: str | Path | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    checkpoint = Path(path).resolve()
+    model = checkpoint / "model.safetensors"
+    training_state = checkpoint / "training_state.pt"
+    run_manifest = checkpoint.parent / "manifest.json"
+    for required in (model, training_state, run_manifest):
+        if not required.is_file() or required.stat().st_size <= 0:
+            raise FileNotFoundError(f"Missing initial Stage 2 artifact: {required}")
+    return {
+        "path": str(checkpoint),
+        "step": int(checkpoint.name),
+        "model_size": model.stat().st_size,
+        "training_state_size": training_state.stat().st_size,
+        "source_manifest": str(run_manifest),
+        "source_manifest_sha256": _sha256(run_manifest),
+    }
 
 
 def _validated_runtime_versions() -> dict[str, str]:
@@ -321,6 +357,7 @@ def _losses(
     preserve_weight: float,
     gate_regularization_weight: float,
     prior_residual_dropout_probability: float,
+    paired_improvement_margin: float = 0.0,
     preserve_scale: float = 1.0,
     *,
     training: bool,
@@ -366,7 +403,14 @@ def _losses(
         baseline = baseline_per_sample.mean()
         # Preserve every example independently.  The previous aggregate hinge
         # allowed degradation on one task to cancel improvement on another.
-        preserve = F.relu(flow_per_sample - baseline_per_sample).mean() * preserve_scale
+        preserve = (
+            F.relu(
+                flow_per_sample
+                - baseline_per_sample
+                + float(paired_improvement_margin)
+            ).mean()
+            * preserve_scale
+        )
         baseline_sampled = flow.new_ones(())
     task_schema = unwrapped._task_schema(processed)  # noqa: SLF001
     gate = unwrapped.injection_gate_regularizer(task_schema, bank_batch.phase_token)
@@ -575,8 +619,14 @@ def _matched_baseline_flow(
     cpu_state = torch.random.get_rng_state()
     cuda_state = torch.cuda.get_rng_state(processed["action"].device)
     with torch.no_grad():
+        anchor_parameters = getattr(unwrapped, "_foundation_anchor_parameters", {})
+        output = (
+            unwrapped.foundation_anchor_forward(processed, reduction="none")
+            if anchor_parameters
+            else unwrapped.foundation(processed, reduction="none")
+        )
         baseline = _foundation_loss(
-            unwrapped.foundation(processed, reduction="none"), reduction="none"
+            output, reduction="none"
         )
     torch.random.set_rng_state(cpu_state)
     torch.cuda.set_rng_state(cuda_state, processed["action"].device)
@@ -606,6 +656,12 @@ def _manifest(
         "handoff_root": str(handoff.root),
         "foundation_checkpoint": str(handoff.checkpoint),
         "foundation_identity": _checkpoint_identity(handoff.checkpoint),
+        "initial_stage2_identity": _initial_stage2_identity(
+            args.initial_stage2_checkpoint
+        ),
+        "anchor_stage2_identity": _initial_stage2_identity(
+            args.anchor_stage2_checkpoint
+        ),
         "goal_embedding_identity": _checkpoint_identity(
             args.goal_embedding_checkpoint or handoff.checkpoint
         ),
@@ -659,6 +715,11 @@ def _manifest(
         },
         "paired_baseline_preservation": {
             "enabled": zeva_enabled,
+            "teacher": (
+                "independent_frozen_base_action_path"
+                if args.anchor_stage2_checkpoint is not None
+                else ("current_student_residual_off" if zeva_enabled else "none")
+            ),
             "sampling": (
                 "fixed_optimizer_step_interval" if zeva_enabled else "none"
             ),
@@ -670,6 +731,9 @@ def _manifest(
                 "every_batch_matched_teacher" if zeva_enabled else "self_flow"
             ),
             "hinge_scope": "per_example_no_cross_task_cancellation" if zeva_enabled else None,
+            "positive_improvement_margin": (
+                args.paired_improvement_margin if zeva_enabled else None
+            ),
         },
         "causal_context_residual": {
             "source": "memory_context_encoder",
@@ -797,6 +861,7 @@ def evaluate(
                 args.preserve_loss_weight,
                 args.gate_regularization_weight,
                 args.prior_residual_dropout_probability,
+                paired_improvement_margin=0.0,
                 training=False,
             )
         else:
@@ -898,6 +963,7 @@ def main(args: Args) -> None:
         goal_embedding_checkpoint=(
             args.goal_embedding_checkpoint if zeva_enabled else None
         ),
+        stage2_checkpoint=args.initial_stage2_checkpoint,
         zte_checkpoint=args.zte_checkpoint,
         retrieval_checkpoint=args.task_retrieval,
         causal_bank=args.causal_bank,
@@ -910,6 +976,14 @@ def main(args: Args) -> None:
         trainable = policy.configure_prior_only_adapter_stage2(prior_gate_probability=0.5)
     else:
         trainable = policy.configure_action_expert_only_finetune()
+    if zeva_enabled and args.resume_checkpoint is None:
+        policy.initialize_residual_gate_probability(
+            args.initial_residual_gate_probability
+        )
+    if args.anchor_stage2_checkpoint is not None:
+        if args.training_variant != "zeva":
+            raise ValueError("An independent Base anchor is only valid for joint ZeVA training.")
+        policy.load_foundation_anchor(args.anchor_stage2_checkpoint)
     core = policy.foundation.model
     if hasattr(core, "gradient_checkpointing_disable"):
         core.gradient_checkpointing_disable()
@@ -952,6 +1026,13 @@ def main(args: Args) -> None:
         raise ValueError("Action-expert learning rate must be positive and smaller than the Zeva rate.")
     if args.prior_loss_weight <= 0:
         raise ValueError("Gaussian action-prior NLL weight must be positive.")
+    if not math.isfinite(args.paired_improvement_margin) or args.paired_improvement_margin < 0:
+        raise ValueError("Paired improvement margin must be finite and non-negative.")
+    if (
+        not math.isfinite(args.initial_residual_gate_probability)
+        or not 0.0 < args.initial_residual_gate_probability < 1.0
+    ):
+        raise ValueError("Initial residual gate probability must be finite and in (0, 1).")
     if not 0.0 <= args.prior_residual_dropout_probability < 1.0:
         raise ValueError("Prior residual dropout probability must be in [0, 1).")
     if args.baseline_preserve_interval <= 0:
@@ -1089,6 +1170,14 @@ def main(args: Args) -> None:
             raise ValueError("Stage 2 resume checkpoint uses a different task scope.")
         if checkpoint["manifest"].get("foundation_identity") != manifest.get("foundation_identity"):
             raise ValueError("Stage 2 resume checkpoint uses a different PI foundation.")
+        if checkpoint["manifest"].get("initial_stage2_identity") != manifest.get(
+            "initial_stage2_identity"
+        ):
+            raise ValueError("Stage 2 resume checkpoint uses a different initial Stage 2 Base.")
+        if checkpoint["manifest"].get("anchor_stage2_identity") != manifest.get(
+            "anchor_stage2_identity"
+        ):
+            raise ValueError("Stage 2 resume checkpoint uses a different independent Base anchor.")
         load_model(policy.foundation, resume_dir / "model.safetensors", strict=True)
         if zeva_enabled:
             policy.load_adapter(resume_dir / "zeva_adapter.pth")
@@ -1189,6 +1278,7 @@ def main(args: Args) -> None:
                         args.preserve_loss_weight,
                         args.gate_regularization_weight,
                         args.prior_residual_dropout_probability,
+                        paired_improvement_margin=args.paired_improvement_margin,
                         preserve_scale=(
                             float(args.baseline_preserve_interval) if sample_baseline else 1.0
                         ),

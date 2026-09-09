@@ -203,6 +203,11 @@ class RobotWinZevaPolicy(nn.Module):
         self._deployment_default_residual_scale = 1.0
         self._deployment_residual_calibration: dict[str, Any] | None = None
         self._foundation_rng_state_override: tuple[torch.Tensor, torch.Tensor] | None = None
+        # Optional immutable action-path weights used by Stage 2 to compare a
+        # jointly tuned ZeVA student against the independently trained Base.
+        # These tensors are deliberately outside state_dict: the source Base
+        # checkpoint is recorded in the run manifest and remains authoritative.
+        self._foundation_anchor_parameters: dict[str, torch.Tensor] = {}
         self._full_pi05_finetune = False
         self._action_expert_finetune = False
         self.retrieval_head: CausalRetrievalHead | None = None
@@ -713,6 +718,57 @@ class RobotWinZevaPolicy(nn.Module):
         """Set a rank-local one-shot RNG override for matched baseline loss."""
         self._foundation_rng_state_override = (cpu_state.cpu(), cuda_state.cpu())
 
+    def load_foundation_anchor(self, checkpoint: str | Path) -> None:
+        """Load immutable Base weights for the currently trainable action path."""
+        model_path = Path(checkpoint).resolve() / "model.safetensors"
+        if not model_path.is_file():
+            raise FileNotFoundError(f"Missing Base anchor weights: {model_path}")
+        trainable = {
+            name: parameter
+            for name, parameter in self.foundation.named_parameters()
+            if parameter.requires_grad
+        }
+        if not trainable:
+            raise RuntimeError("Base anchor requires a trainable PI0.5 action path.")
+        anchors: dict[str, torch.Tensor] = {}
+        with safe_open(model_path, framework="pt", device="cpu") as weights:
+            available = set(weights.keys())
+            missing = sorted(set(trainable).difference(available))
+            if missing:
+                raise KeyError(f"Base anchor is missing action-path tensors: {missing[:8]}")
+            for name, parameter in trainable.items():
+                anchors[name] = weights.get_tensor(name).to(
+                    device=parameter.device, dtype=parameter.dtype
+                )
+                if not torch.equal(parameter.detach(), anchors[name]):
+                    raise ValueError(
+                        f"ZeVA student did not start from its declared Base anchor: {name}"
+                    )
+        self._foundation_anchor_parameters = anchors
+
+    def foundation_anchor_forward(
+        self,
+        batch: dict[str, torch.Tensor],
+        *,
+        reduction: str = "none",
+    ):
+        """Run the immutable Base action path without duplicating PaliGemma."""
+        if not self._foundation_anchor_parameters:
+            raise RuntimeError("No independent Base anchor has been loaded.")
+        named = dict(self.foundation.named_parameters())
+        original: dict[str, torch.Tensor] = {}
+        try:
+            with torch.no_grad():
+                for name, anchor in self._foundation_anchor_parameters.items():
+                    parameter = named[name]
+                    original[name] = parameter.data
+                    parameter.data = anchor
+                return self.foundation(batch, reduction=reduction)
+        finally:
+            with torch.no_grad():
+                for name, value in original.items():
+                    named[name].data = value
+
     def _build_context(
         self,
         task_schema: torch.Tensor,
@@ -754,6 +810,31 @@ class RobotWinZevaPolicy(nn.Module):
         context = torch.sigmoid(self.context_gate_logit) * multipliers[:, 0]
         prior = torch.sigmoid(self.prior_gate_logit) * multipliers[:, 1]
         return context, prior
+
+    def initialize_residual_gate_probability(self, probability: float) -> None:
+        """Set the fresh dual-residual gate strength without changing step-zero outputs.
+
+        Both residual projectors are zero-initialized, so changing the scalar
+        gate before Stage 2 training keeps the wrapped PI0.5 exactly equal to
+        its foundation while avoiding vanishingly small projector gradients.
+        This initializer is intentionally separate from adapter loading: it is
+        only valid for a fresh residual branch.
+        """
+        probability = float(probability)
+        if not math.isfinite(probability) or not 0.0 < probability < 1.0:
+            raise ValueError(
+                "initial residual gate probability must be finite and in (0, 1)."
+            )
+        with torch.no_grad():
+            value = torch.logit(
+                torch.tensor(
+                    probability,
+                    device=self.context_gate_logit.device,
+                    dtype=self.context_gate_logit.dtype,
+                )
+            )
+            self.context_gate_logit.copy_(value)
+            self.prior_gate_logit.copy_(value)
 
     def _activate_residual_gates(
         self, task_schema: torch.Tensor, phase_token: torch.Tensor

@@ -48,11 +48,13 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 ## Zeva architecture
 
 The selected PI0.5 has already been trained on the same RoboTwin distribution.
-The active v8 Stage 2 therefore freezes the PaliGemma vision-language backbone
-but trains the PI0.5 action expert together with Zeva.  A matched Base branch
-trains the same action expert from the same `pretrained_model-best-v1`
-initialization without Zeva.  ZTE, the causal bank, and task retrieval remain
-frozen in both branches. At deployment all model parameters are frozen. The
+The active anchored-v9 pipeline first selects an action-expert-only Base using
+held-out validation5 (`v8/baseline/003000`). Zeva is initialized from that exact
+Base rather than from a second independent best-v1 fork. PaliGemma, Stage 1
+ZTE/Mamba, the causal bank, and task retrieval remain frozen. The joint v9
+candidate updates the action expert at `5e-7` and the new Zeva modules at
+`5e-5`, while an immutable copy of the selected Base action path supplies the
+same-noise paired teacher. At deployment all model parameters are frozen. The
 Zeva path is:
 
 - The Mamba Causal Transition Encoder consumes all three camera views before an
@@ -71,8 +73,10 @@ Zeva path is:
   context projector supplies the second bounded residual at the same
   action-expert input location. Neither residual enters PaliGemma.
 
-Both implementation-level injection projections are zero initialized and the
-scalar gates start at 1%, so the v8 Zeva branch begins as the selected PI0.5.
+Both implementation-level injection projections are zero initialized. The v9
+scalar gates start at 25%, but the zero projectors still make step zero exactly
+equal to the selected Base; the stronger gate avoids the vanishing residual
+gradients observed in v8.
 Each residual is multiplied by a task-language/H15-phase router bounded to
 `[0,2]` and retrieval confidence. No token is inserted, and
 the PI prefix length, masks, position IDs, and action-expert shapes remain
@@ -158,7 +162,8 @@ and deployment.
 | Stage | Frozen | Trainable | Required output |
 |---|---|---|---|
 | 1. ZTE and retrieval calibration | PI0.5 weights | ZTE, then a separate task-language retrieval head | `zte_best.pth`, train95 bank, H15 live-query cache, `task_retrieval.pth` |
-| 2. Matched action-expert adaptation (active v8) | PaliGemma vision-language backbone, ZTE, bank, retrieval head | Base: PI0.5 action expert; Zeva: the same action expert plus task/context fusion, Gaussian prior, both action-embedding projectors and task/phase router | complete `model.safetensors`; Zeva also saves `zeva_adapter.pth`; optimizer/scheduler state for both |
+| 2a. Base specialization | PaliGemma vision-language backbone, ZTE, bank, retrieval head | PI0.5 action expert and action/time projections | validation5-selected complete Base checkpoint |
+| 2b. Anchored Zeva adaptation (active v9) | PaliGemma vision-language backbone, ZTE, bank, retrieval head; immutable Base teacher | selected Base action expert at `5e-7` plus task/context fusion, Gaussian prior, both action-embedding projectors and task/phase router at `5e-5` | complete `model.safetensors`, `zeva_adapter.pth`, optimizer/scheduler state, independent-Base manifest identity |
 | 3. Optional post-Stage2 adaptation | ZTE, bank, retrieval | selected modules determined by paired Stage2 results | selectively tuned checkpoint |
 
 ### Stage 1: train ZTE and build the training causal bank
@@ -328,28 +333,29 @@ their zero baselines. Validation5 contains one episode per task, so the former
 binary minimum-per-task recall check is intentionally removed. A low weighted
 validation loss alone is not a pass.
 
-### Stage 2: frozen VLM, matched action-expert Base and Zeva training (active v8)
+### Stage 2: selected Base followed by anchored Zeva training (active v9)
 
 Stage 2 freezes the PaliGemma vision-language backbone, Stage 1 ZTE/Mamba, the
-train95 causal bank, and the task-language retrieval head. It creates two
-independent branches from the exact same `pretrained_model-best-v1`: Base tunes
-only the 430.1M-parameter PI0.5 action expert and its action/time projections;
-Zeva tunes those same parameters and additionally trains the 2.91M-parameter
-task/context fusion, diagonal-Gaussian H50 EEF16 prior, two zero-initialized
-action-embedding projectors, scalar gates, and bounded task/phase router.
-Training uses H15 decision frames and the same recurrent-phase
-`bank.retrieve()` path used in deployment. Ground-truth task IDs only measure
-retrieval accuracy and never select a bank entry.
+train95 causal bank, and the task-language retrieval head. The action-expert-
+only Base was trained for 5,000 steps from the exact best-v1 checkpoint; its
+held-out minimum-flow checkpoint is step 3000 (`0.017922`). Anchored v9 loads
+that complete Base into the Zeva student and also keeps an immutable copy of
+the same action path as the paired teacher. This fixes v8's central audit
+failure: v8 compared Zeva residual-on with its own independently drifting
+residual-off action expert, not with the separately trained Base.
 
-Both branches use action-expert LR `5e-6`; Zeva's new modules use `5e-5`.
-This is the intended BehaviorVLA-style downstream action-expert adaptation,
-while retaining Zeva's non-oracle task-language retrieval and real H15
-recurrent phase path.
+The active joint candidate trains the 430.1M PI0.5 action expert and its
+action/time projections at `5e-7`, plus the 2.91M task/context fusion,
+diagonal-Gaussian H50 EEF16 prior, two zero-initialized action-embedding
+projectors, scalar gates, and bounded task/phase router at `5e-5`. Training
+uses H15 decision frames and the same recurrent-phase `bank.retrieve()` path
+used in deployment. Ground-truth task IDs only measure retrieval accuracy and
+never select a bank entry.
 
 ```text
 L_stage2 = L_PI_flow
           + lambda_prior * L_Gaussian_NLL
-          + lambda_preserve * mean_i max(0, L_PI_flow_i - L_residual_off_i)
+          + lambda_preserve * mean_i max(0, L_ZeVA_i - L_frozen_Base_i + margin)
           + lambda_gate * L_gate
 ```
 
@@ -360,7 +366,10 @@ per-step H50. PaliGemma receives neither residual.
 During Zeva training, an independent Bernoulli mask drops the complete prior
 residual with probability 0.4 (keep probability 0.6), while the separate
 whole-memory dropout remains 0.1. The residual-off teacher uses the current
-action-expert weights and the same flow noise as the enhanced forward pass.
+action-expert weights only for historical modes. Active joint v9 instead swaps
+in the immutable Base action-path tensors for the teacher forward, then restores
+the student before backpropagation. Teacher and student consume identical flow
+noise. A positive `5e-5` margin explicitly trains toward measurable improvement.
 The hinge is evaluated per example, so a
 gain on one task cannot cancel a regression on another. To control cost, the
 matched frozen baseline runs every two optimizer steps and the sampled term is
@@ -369,9 +378,12 @@ continues to run the matched baseline on every batch, preserving the expected
 training objective and exact validation gate.
 
 ```bash
-# Launch on separate eight-H100 hosts from the same best-v1 checkpoint.
-bash scripts/train_robotwin_advantage10_action_expert_v8.sh baseline
-bash scripts/train_robotwin_advantage10_action_expert_v8.sh zeva
+# Base v8 is already complete. Launch the anchored joint candidate.
+bash scripts/train_robotwin_advantage10_anchored_v9.sh joint
+
+# Optional validation-only ablation: freeze the selected Base action path and
+# train the identical dual-residual modules.
+bash scripts/train_robotwin_advantage10_anchored_v9.sh adapter
 ```
 
 The released joint PaliGemma/action-expert attention forward and both noisy-
@@ -380,11 +392,11 @@ the action expert and action/time projections receive gradients in both
 branches. The trainer installs the residual hook before compiling the
 foundation training forward. It uses per-GPU micro-batch
 16 with two-step gradient accumulation, giving `16 x 8 GPUs x 2 = 256`. This must pass the formal
-eight-H100 one-step memory preflight before launch. The active ten-task run is
-5,000 optimizer steps (about 11.3 passes over 113,408 train95 decisions at
-global batch 256). Every checkpoint
+eight-H100 smoke test before launch. The active v9 run is 2,000 optimizer steps,
+saves every 250 steps, and starts from the validation-selected Base rather than
+relearning the Base action expert. Every checkpoint
 still stores the complete `model.safetensors` for self-contained deployment,
-plus `zeva_adapter.pth` for the Zeva branch and complete optimizer/scheduler state,
+plus `zeva_adapter.pth` and complete optimizer/scheduler state,
 manifest, and validation metrics.
 
 #### Ten-task ZeVA specialization
@@ -396,28 +408,38 @@ The fixed method-aligned subset is declared in
 Stage 2 decision samples. Stage 1's full 50-task vocabulary, ZTE, causal bank,
 and language retrieval IDs remain unchanged and frozen.
 
-The active v8 outputs are isolated under
-`advantage10-action-expert-v8/{baseline,zeva}`. This is a clean specialization
-from best-v1, not a continuation of a 50-task Zeva checkpoint. Checkpoints are
-saved every 500 steps through step 5000. Held-out validation5 flow, retrieval
-at least 95%, and matched residual-off non-regression determine the checkpoint
-before any new closed-loop rollout. The result must be reported as a 10-task
-specialized model, not as a replacement for the 50-task benchmark score.
+The completed v8 Base is under `advantage10-action-expert-v8/baseline`; v8's
+independently forked Zeva branch had no eligible offline checkpoint and is an
+explicitly rejected audit artifact. The active v9 outputs are isolated under
+`advantage10-anchored-v9/{joint,adapter}` and use Base step 3000 as both student
+initialization and independent teacher. Held-out validation5 flow, retrieval
+at least 95%, and independent-Base paired non-regression determine the Zeva
+checkpoint before any new closed-loop rollout. The result must be reported as
+a 10-task specialized model, not as a replacement for the 50-task benchmark
+score.
 
-After both branches finish, freeze one shared step using validation5 only:
+After a v9 candidate finishes, select it using validation5 only:
 
 ```bash
-python3 scripts/select_robotwin_action_expert_pair_v8.py \
-  /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8
+python3 scripts/select_robotwin_anchored_v9.py \
+  /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-anchored-v9/joint \
+  /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8/baseline/003000
 ```
 
 The selector rejects any step that lacks ten-task coverage, retrieval at least
-95%, positive matched residual improvement, at least 50% paired wins, or
-non-negative mean paired improvement on every task. Among eligible shared
-steps it first minimizes Base validation flow; closed-loop results are never
-an input.
+95%, positive independent-Base improvement, at least 50% paired wins, or
+non-negative mean paired improvement on every task. Among eligible steps it
+first maximizes the worst-task improvement; closed-loop results are never an
+input. The first v9 diagnostic at step 250 improved aggregate validation flow
+by `8.295e-5`, won `57.30%` of paired samples, and retained `99.85%` retrieval,
+but its worst task was still `-5.783e-6`; it therefore remains ineligible under
+the unchanged every-task non-regression gate. Step 500 is the first eligible
+checkpoint: aggregate improvement `+8.994e-5`, paired wins `57.29%`, and the
+worst of all ten tasks `+5.117e-5`. This is an intermediate candidate only;
+training still completes all 2,000 steps before the validation5-only selector
+freezes the deployment checkpoint.
 
-The frozen pair then runs on two new disjoint 10x8 closed-loop streams starting
+The selected Base/Zeva pair then runs on two new disjoint 10x8 closed-loop streams starting
 at seeds 7000 and 8000.  Each split must be non-negative and the combined gain
 must be at least `+6/160` before the seed-10000 final is reachable.  The final
 evaluates three semantic conditions on the exact same 10x20 manifest: untouched
@@ -425,17 +447,16 @@ best-v1 Anchor, trained action-expert-only Base, and trained action expert +
 Zeva.  Its immutable gate is `Base >= max(Anchor,57%)` and `Zeva > Base`.
 
 ```bash
-bash scripts/robotwin_eval/launch_action_expert_validation_v8.sh
-bash scripts/robotwin_eval/launch_action_expert_fresh_final_v8.sh
-
-# Durable coordinator used by the active run: wait for both branches, select,
-# validate, and launch final only when every preceding gate passes.
-bash scripts/robotwin_eval/wait_and_run_action_expert_v8.sh
+bash scripts/robotwin_eval/launch_anchored_v9_validation.sh
+bash scripts/robotwin_eval/launch_anchored_v9_fresh_final.sh
+# Or use the durable coordinator, which waits for COMPLETE and enforces the
+# offline selector -> seed7000/8000 validation -> reserved seed10000 final DAG.
+bash scripts/robotwin_eval/wait_and_run_anchored_v9.sh
 ```
 
 The earlier 1,000-step action-expert experiment used the sequential launcher
 below. It is retained only for historical reproduction; its evaluated Base
-regressed below the untouched 57% anchor and it is not the active v8 run:
+regressed below the untouched 57% anchor and it is not the active v9 run:
 
 ```bash
 bash scripts/train_robotwin_advantage10_bestv1_pair.sh
@@ -776,11 +797,10 @@ PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
   --output /path/to/residual_branch_audit.json
 ```
 
-The active v8 final comparison has two trained conditions plus a same-seed
-normality anchor. `Base` is the action-expert-only branch and `Zeva` is the
-matched action-expert-plus-Zeva branch, both initialized independently from
-`pretrained_model-best-v1` with the same data order, global batch, 5,000-step
-schedule and action-expert LR. The earlier untouched seed-1000 result was
+The active v9 final comparison will have two trained conditions plus a same-seed
+normality anchor. `Base` is the validation-selected action-expert-only step 3000;
+`Zeva` starts from that exact Base and learns the dual residual with an immutable
+Base teacher. The earlier untouched seed-1000 result was
 114/200 and establishes the 57% floor; a trained Base below that floor cannot
 be delivered. Fresh validation/final launchers must run Base and Zeva
 contemporaneously on exactly the same pairs and verify the best-v1 parent SHA256
@@ -789,23 +809,21 @@ before rollout. The final gate is `Base >= max(same-seed Anchor,114/200)` and
 `Zeva > Base`, with 200 videos per condition and an independent three-condition
 audit. The
 v7 result and older action-expert branches remain diagnostics and can never be
-substituted for a passing v8 comparison.
+substituted for a passing v9 comparison.
 
 #### Decoder and throughput configuration
 
-Formal v8 uses the same TorchCodec backend as the released RoboTwin PI0.5
+Formal v9 uses the same TorchCodec backend as the released RoboTwin PI0.5
 baseline. Each persistent worker keeps a bounded 32-entry decoder LRU instead
 of launching three FFmpeg processes per sample. On a real episode, TorchCodec
 and the former FFmpeg path were verified bit-exact for all three cameras. The
 FFmpeg backend remains available only for diagnostics.
 
-The active resumed v8 run processes global batch 256 and three video streams per
-sample at roughly 1.3--1.7 seconds per Base optimizer step and 1.6--2.1 seconds
-per Zeva step after compilation and loader warm-up. Checkpoint validation adds
-separate overhead. CPU TorchCodec random access, the joint frozen-PaliGemma /
-trainable-action-expert forward, and Zeva's sampled residual-off teacher are the
-main costs. Formal Stage 2 retains H15 recurrent samples, H50 action output,
-5,000 optimizer steps, and the float32 `[0,1]` image contract. Validation is
+The active v9 run processes global batch 256 and three video streams per sample.
+CPU TorchCodec random access, the joint frozen-PaliGemma/trainable-action-expert
+forward, and the sampled independent-Base teacher are the main costs. Formal
+Stage 2 retains H15 recurrent samples, H50 action output, 2,000 optimizer steps,
+and the float32 `[0,1]` image contract. Validation is
 forced to `num_workers=0`; this prevents forked validation workers from
 retaining a CUDA context after every 500-step checkpoint.
 
@@ -818,11 +836,11 @@ The former `stage2a-adapter/005000` checkpoint is invalid for final reporting.
 Its FFmpeg images reached the visual-identity PI0.5 processor as uint8
 `[0,255]`, so both its baseline and enhanced offline losses were measured in
 the wrong model domain. Stage 2 now converts every view at the dataset boundary
-to contiguous CHW float32 `[0,1]`, uses the accelerated action-only dual-residual v8
-manifest/training state, and rejects full-v5, adapter-only, or old image-
-contract checkpoints. Retrain from the original handoff into the separate
-`advantage10-action-expert-v8/{baseline,zeva}` directories. The stopped v7 eager run is an
-audit artifact. The v6 run injected
+to contiguous CHW float32 `[0,1]`, uses the anchored-v9 manifest/training state,
+and rejects full-v5, adapter-only, or old image-contract checkpoints. The
+active candidate is isolated under `advantage10-anchored-v9/joint`; the v8
+Base step3000 is immutable, while the rejected v8 Zeva and stopped v7 eager
+runs remain audit artifacts. The v6 run injected
 causal context into the PaliGemma prefix and is retained only as an audit
 artifact; it is structurally incompatible with v8. Before the full run, verify
 one real decoded frame on the target host:
@@ -879,8 +897,8 @@ policy = RobotWinZevaPolicy.from_handoff(
     foundation_checkpoint="/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1",
     goal_embedding_checkpoint="/mnt/100T/users/dingxin/VLA/runtime/pretrained_model-stage1-language-v1",
     zte_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1/stage1-zte/zte_best.pth",
-    stage2_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8/zeva/SELECTED_STEP",
-    adapter_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8/zeva/SELECTED_STEP/zeva_adapter.pth",
+    stage2_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-anchored-v9/joint/SELECTED_STEP",
+    adapter_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-anchored-v9/joint/SELECTED_STEP/zeva_adapter.pth",
     retrieval_checkpoint="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1/stage1.5-task-retrieval/task_retrieval.pth",
     causal_bank="/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1/stage1-zte/train_causal_bank.pt",
 )
