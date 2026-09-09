@@ -23,6 +23,7 @@ model_host_d=${MODEL_HOST_D:-aigc32}
 model_ip_d=${MODEL_IP_D:-172.16.80.166}
 render_host_d=${RENDER_HOST_D:-aigc15}
 render_runtime_d=${RENDER_RUNTIME_D:-/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin}
+model_cache_root=${MODEL_CACHE_ROOT:-/data1/dingxin/zeva-eval-cache/anchored-v9}
 
 test -s "$selection"
 test -s "$task_manifest"
@@ -74,9 +75,36 @@ test "$(sha256sum "$base_checkpoint/model.safetensors" | awk '{print $1}')" = "$
 test "$(sha256sum "$zeva_checkpoint/model.safetensors" | awk '{print $1}')" = "$zeva_model_sha256"
 test "$(sha256sum "$zeva_checkpoint/zeva_adapter.pth" | awk '{print $1}')" = "$zeva_adapter_sha256"
 
+# Each condition starts eight model servers.  Copy each immutable artifact once
+# to the model hosts' NVMe instead of making all ranks cold-read it from NFS.
+# Hash-qualified cache directories make reuse safe and preserve source lineage.
+base_cache=$model_cache_root/base-${base_step}-${base_model_sha256}
+zeva_cache=$model_cache_root/zeva-${zeva_step}-${zeva_model_sha256}
+cache_file() {
+  local host=$1 source=$2 destination=$3 expected_sha256=$4
+  ssh "$host" "set -euo pipefail
+    mkdir -p '$(dirname "$destination")'
+    if [[ -e '$destination' ]]; then
+      test \"\$(sha256sum '$destination' | awk '{print \$1}')\" = '$expected_sha256'
+    else
+      temporary='$destination.partial'
+      cp '$source' \"\$temporary\"
+      test \"\$(sha256sum \"\$temporary\" | awk '{print \$1}')\" = '$expected_sha256'
+      mv \"\$temporary\" '$destination'
+    fi"
+}
+for host in "$model_host_c" "$model_host_d"; do
+  cache_file "$host" "$base_checkpoint/model.safetensors" \
+    "$base_cache/model.safetensors" "$base_model_sha256"
+  cache_file "$host" "$zeva_checkpoint/model.safetensors" \
+    "$zeva_cache/model.safetensors" "$zeva_model_sha256"
+  cache_file "$host" "$zeva_checkpoint/zeva_adapter.pth" \
+    "$zeva_cache/zeva_adapter.pth" "$zeva_adapter_sha256"
+done
+
 base_config=$eval_root/configs/base-step-${base_step}.yml
 zeva_config=$eval_root/configs/zeva-step-${zeva_step}.yml
-python3 - "$base_config" "$zeva_config" "$base_checkpoint" "$zeva_checkpoint" <<'PY'
+python3 - "$base_config" "$zeva_config" "$base_cache" "$zeva_cache" <<'PY'
 import os
 import sys
 from pathlib import Path
@@ -112,7 +140,8 @@ PY
 validation_plan=$eval_root/validation_plan.json
 python3 - "$validation_plan" "$selection" "$base_checkpoint" "$zeva_checkpoint" \
   "$base_step" "$zeva_step" "$base_model_sha256" "$zeva_model_sha256" \
-  "$zeva_adapter_sha256" "$episodes" "$base_config" "$zeva_config" <<'PY'
+  "$zeva_adapter_sha256" "$episodes" "$base_config" "$zeva_config" \
+  "$base_cache" "$zeva_cache" "$model_host_c" "$model_host_d" <<'PY'
 import hashlib
 import json
 import os
@@ -120,7 +149,8 @@ import sys
 from pathlib import Path
 
 (destination, selection, base_checkpoint, zeva_checkpoint, base_step, zeva_step,
- base_hash, zeva_hash, adapter_hash, episodes, base_config, zeva_config) = sys.argv[1:]
+ base_hash, zeva_hash, adapter_hash, episodes, base_config, zeva_config,
+ base_cache, zeva_cache, model_host_c, model_host_d) = sys.argv[1:]
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 payload = {
@@ -139,6 +169,16 @@ payload = {
     "base_config_sha256": digest(base_config),
     "zeva_config": str(Path(zeva_config).resolve()),
     "zeva_config_sha256": digest(zeva_config),
+    "runtime_cache": {
+        "base_checkpoint": base_cache,
+        "zeva_checkpoint": zeva_cache,
+        "replicated_model_hosts": [model_host_c, model_host_d],
+        "identity": {
+            "base_model_sha256": base_hash,
+            "zeva_model_sha256": zeva_hash,
+            "zeva_adapter_sha256": adapter_hash,
+        },
+    },
     "episodes_per_task_per_split": int(episodes),
     "splits": {"c": {"start_seed": 7000}, "d": {"start_seed": 8000}},
     "excluded_prior_validation_starts": [5000, 6000],

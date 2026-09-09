@@ -42,6 +42,16 @@ for key in ("base_checkpoint", "zeva_checkpoint", "base_checkpoint_step",
             "zeva_adapter_sha256", "base_config", "zeva_config",
             "base_config_sha256", "zeva_config_sha256"):
     print(plan[key])
+cache = plan.get("runtime_cache", {})
+identity = cache.get("identity", {})
+if identity != {
+    "base_model_sha256": plan["base_model_sha256"],
+    "zeva_model_sha256": plan["zeva_model_sha256"],
+    "zeva_adapter_sha256": plan["zeva_adapter_sha256"],
+}:
+    raise SystemExit("runtime cache identity differs from selected checkpoint")
+print(cache["base_checkpoint"])
+print(cache["zeva_checkpoint"])
 PY
 )
 base_checkpoint=${selected[0]}
@@ -55,6 +65,8 @@ base_config=${selected[7]}
 zeva_config=${selected[8]}
 base_config_sha256=${selected[9]}
 zeva_config_sha256=${selected[10]}
+base_runtime_checkpoint=${selected[11]}
+zeva_runtime_checkpoint=${selected[12]}
 test "$(sha256sum "$base_checkpoint/model.safetensors" | awk '{print $1}')" = "$base_model_sha256"
 test "$(sha256sum "$zeva_checkpoint/model.safetensors" | awk '{print $1}')" = "$zeva_model_sha256"
 test "$(sha256sum "$zeva_checkpoint/zeva_adapter.pth" | awk '{print $1}')" = "$zeva_adapter_sha256"
@@ -62,9 +74,18 @@ test "$(sha256sum "$base_config" | awk '{print $1}')" = "$base_config_sha256"
 test "$(sha256sum "$zeva_config" | awk '{print $1}')" = "$zeva_config_sha256"
 mkdir -p "$final_root"
 
+verify_runtime_cache() {
+  ssh "$model_host" "set -euo pipefail
+    test \"\$(sha256sum '$base_runtime_checkpoint/model.safetensors' | awk '{print \$1}')\" = '$base_model_sha256'
+    test \"\$(sha256sum '$zeva_runtime_checkpoint/model.safetensors' | awk '{print \$1}')\" = '$zeva_model_sha256'
+    test \"\$(sha256sum '$zeva_runtime_checkpoint/zeva_adapter.pth' | awk '{print \$1}')\" = '$zeva_adapter_sha256'"
+}
+verify_runtime_cache
+
 python3 - "$final_root/final_plan.json" "$base_checkpoint" "$zeva_checkpoint" \
   "$base_step" "$zeva_step" "$base_model_sha256" "$zeva_model_sha256" \
-  "$zeva_adapter_sha256" "$base_config" "$zeva_config" "$anchor_config" <<'PY'
+  "$zeva_adapter_sha256" "$base_config" "$zeva_config" "$anchor_config" \
+  "$base_runtime_checkpoint" "$zeva_runtime_checkpoint" "$model_host" <<'PY'
 import hashlib
 import json
 import os
@@ -72,7 +93,8 @@ import sys
 from pathlib import Path
 
 (destination, base_checkpoint, zeva_checkpoint, base_step, zeva_step, base_hash,
- zeva_hash, adapter_hash, base_config, zeva_config, anchor_config) = sys.argv[1:]
+ zeva_hash, adapter_hash, base_config, zeva_config, anchor_config,
+ base_runtime_checkpoint, zeva_runtime_checkpoint, model_host) = sys.argv[1:]
 payload = {
     "schema": "zeva-robotwin-anchored-v9-fresh-final-plan-v1",
     "base_checkpoint_step": int(base_step),
@@ -86,6 +108,17 @@ payload = {
     "zeva_config": str(Path(zeva_config).resolve()),
     "anchor_config": str(Path(anchor_config).resolve()),
     "anchor_config_sha256": hashlib.sha256(Path(anchor_config).read_bytes()).hexdigest(),
+    "runtime_cache": {
+        "model_host": model_host,
+        "base_checkpoint": base_runtime_checkpoint,
+        "zeva_checkpoint": zeva_runtime_checkpoint,
+        "identity": {
+            "base_model_sha256": base_hash,
+            "zeva_model_sha256": zeva_hash,
+            "zeva_adapter_sha256": adapter_hash,
+        },
+        "verified_before_and_after_rollout": True,
+    },
     "checkpoint_selected_with": "train95_validation5_only",
     "closed_loop_validation_passed_before_final": True,
     "final_metrics_used_for_training_or_selection": False,
@@ -117,6 +150,8 @@ if [[ ! -s "$final_root/paired_report.json" ]]; then
     ZEVA_LABEL="anchored-v9-zeva-step-$zeva_step-fresh-final" \
     bash "$zeva_root/scripts/robotwin_eval/launch_paired_formal_eval.sh"
 fi
+
+verify_runtime_cache
 
 python3 - "$final_root/seed_manifest.json" \
   "$eval_root/split-c/seed_manifest.json" "$eval_root/split-d/seed_manifest.json" <<'PY'
