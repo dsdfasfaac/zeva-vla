@@ -11,6 +11,9 @@ selection=${SELECTION:-$train_root/deployment_selection.json}
 eval_root=${EVAL_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-prior-only-v7}
 task_manifest=${TASK_MANIFEST:-$zeva_root/configs/robotwin_zeva_advantage10.json}
 episodes=${EPISODES:-8}
+baseline_config=${BASELINE_CONFIG:-$zeva_root/scripts/robotwin_eval/baseline_bestv1_model_config.yml}
+foundation_checkpoint=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1
+foundation_sha256=7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe
 
 model_host_a=${MODEL_HOST_A:-aigc29}
 model_ip_a=${MODEL_IP_A:-172.16.80.163}
@@ -23,6 +26,9 @@ render_runtime_b=${RENDER_RUNTIME_B:-/mnt/100T/users/dingxin/WAM/playground/Benc
 
 test -s "$selection"
 test -s "$task_manifest"
+test -s "$baseline_config"
+grep -Fqx "foundation_checkpoint: $foundation_checkpoint" "$baseline_config"
+test "$(sha256sum "$foundation_checkpoint/model.safetensors" | awk '{print $1}')" = "$foundation_sha256"
 mkdir -p "$eval_root/configs"
 
 readarray -t selected < <(python3 - "$selection" <<'PY'
@@ -109,7 +115,7 @@ run_split() {
   env MODEL_HOST="$model_host" MODEL_IP="$model_ip" \
     RENDER_HOST="$render_host" RENDER_RUNTIME="$render_runtime" \
     OUTPUT_ROOT="$output" \
-    BASELINE_CONFIG="$zeva_root/scripts/robotwin_eval/baseline_model_config.yml" \
+    BASELINE_CONFIG="$baseline_config" \
     ZEVA_CONFIG="$config" ANCHOR_CONFIG="" BASELINE_IS_UNTOUCHED_ANCHOR=true \
     TASK_MANIFEST="$task_manifest" EPISODES="$episodes" \
     ABSOLUTE_START_SEED="$start_seed" MIN_BASELINE_SUCCESS_RATE=0 \

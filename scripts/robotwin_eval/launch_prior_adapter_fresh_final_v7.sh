@@ -12,6 +12,9 @@ validation_summary=${VALIDATION_SUMMARY:-$eval_root/validation_summary.json}
 validation_plan=${VALIDATION_PLAN:-$eval_root/validation_plan.json}
 task_manifest=${TASK_MANIFEST:-$zeva_root/configs/robotwin_zeva_advantage10.json}
 final_root=${FINAL_ROOT:-$eval_root/fresh-final-seed10000}
+baseline_config=${BASELINE_CONFIG:-$zeva_root/scripts/robotwin_eval/baseline_bestv1_model_config.yml}
+foundation_checkpoint=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1
+foundation_sha256=7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe
 model_host=${MODEL_HOST:-aigc29}
 model_ip=${MODEL_IP:-172.16.80.163}
 render_host=${RENDER_HOST:-aigc24}
@@ -19,6 +22,9 @@ render_runtime=${RENDER_RUNTIME:-/data1/dingxin/robotwin-formal-eval/RoboTwin}
 
 test -s "$validation_summary"
 test -s "$validation_plan"
+test -s "$baseline_config"
+grep -Fqx "foundation_checkpoint: $foundation_checkpoint" "$baseline_config"
+test "$(sha256sum "$foundation_checkpoint/model.safetensors" | awk '{print $1}')" = "$foundation_sha256"
 readarray -t selected < <(python3 - "$validation_summary" "$validation_plan" <<'PY'
 import json
 import sys
@@ -99,7 +105,7 @@ if [[ ! -s "$final_root/paired_report.json" ]]; then
   env MODEL_HOST="$model_host" MODEL_IP="$model_ip" \
     RENDER_HOST="$render_host" RENDER_RUNTIME="$render_runtime" \
     OUTPUT_ROOT="$final_root" \
-    BASELINE_CONFIG="$zeva_root/scripts/robotwin_eval/baseline_model_config.yml" \
+    BASELINE_CONFIG="$baseline_config" \
     ZEVA_CONFIG="$config" ANCHOR_CONFIG="" BASELINE_IS_UNTOUCHED_ANCHOR=true \
     TASK_MANIFEST="$task_manifest" EPISODES=20 ABSOLUTE_START_SEED=10000 \
     MIN_BASELINE_SUCCESS_RATE=0.57 \
