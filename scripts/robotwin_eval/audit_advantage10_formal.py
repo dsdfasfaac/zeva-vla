@@ -22,8 +22,6 @@ VIDEO_PATTERN = re.compile(
     r"^episode(?P<index>\d+)_randomized-true_success-(?P<success>true|false)\.mp4$"
 )
 EXPECTED_MANIFEST = {
-    "task_count": 10,
-    "episodes_per_task": 20,
     "instruction_type": "seen",
     "camera": "Large_D435_640x480",
     "action_contract": "chunk-start-relative-eef16-predict-h50-execute-h15",
@@ -35,9 +33,7 @@ EXPECTED_IDENTITY = {
     "task_config": "zeva_randomized",
     "instruction_type": "seen",
     "execute_horizon": 15,
-    "absolute_start_seed": 1000,
     "model_seed_policy": "continuous",
-    "target_episodes": 20,
 }
 
 
@@ -92,19 +88,31 @@ def main() -> int:
     tasks = [line.strip() for line in tasks_path.read_text().splitlines() if line.strip()]
     manifest = load_json(manifest_path)
     seed_manifest = load_json(seed_manifest_path)
+    expected_task_count = int(manifest.get("task_count", -1))
+    expected_episodes = int(manifest.get("episodes_per_task", -1))
+    expected_total = expected_task_count * expected_episodes
+    expected_start_seed = int(manifest.get("absolute_start_seed", -1))
+    expected_model_rng_seed = int(manifest.get("model_rng_seed", -1))
     baseline_is_untouched_anchor = bool(manifest.get("baseline_is_untouched_anchor", False))
     conditions = (("baseline", "zeva") if baseline_is_untouched_anchor
                   else ("baseline", "anchor", "zeva"))
-    check(len(tasks) == 10, f"expected 10 tasks, got {len(tasks)}")
+    check(expected_task_count == 10, f"formal task_count must be 10, got {expected_task_count}")
+    check(expected_episodes > 0, f"episodes_per_task must be positive, got {expected_episodes}")
+    check(expected_start_seed >= 0, f"absolute_start_seed must be non-negative, got {expected_start_seed}")
+    check(expected_model_rng_seed == 20260907,
+          f"model_rng_seed must be 20260907, got {expected_model_rng_seed}")
+    check(len(tasks) == expected_task_count,
+          f"expected {expected_task_count} tasks, got {len(tasks)}")
     check(len(tasks) == len(set(tasks)), "tasks.txt contains duplicates")
     for key, expected in EXPECTED_MANIFEST.items():
         check(manifest.get(key) == expected,
               f"manifest.{key}: expected {expected!r}, got {manifest.get(key)!r}")
     check(seed_manifest.get("schema") == "robotwin-expert-valid-seeds-v1",
           "invalid seed manifest schema")
-    check(seed_manifest.get("start_seed") == 1000, "seed manifest must start at 1000")
-    check(seed_manifest.get("episodes_per_task") == 20,
-          "seed manifest must contain 20 episodes per task")
+    check(seed_manifest.get("start_seed") == expected_start_seed,
+          f"seed manifest must start at {expected_start_seed}")
+    check(seed_manifest.get("episodes_per_task") == expected_episodes,
+          f"seed manifest must contain {expected_episodes} episodes per task")
     seed_tasks = seed_manifest.get("tasks", {})
     check(set(seed_tasks) == set(tasks), "seed manifest task set differs from tasks.txt")
 
@@ -122,11 +130,12 @@ def main() -> int:
         report = load_json(report_path) if report_path.is_file() else {}
         check(report.get("condition") == condition,
               f"{condition}: report condition mismatch")
-        check(report.get("task_count") == 10, f"{condition}: report task_count != 10")
-        check(report.get("episodes_per_task") == 20,
-              f"{condition}: report episodes_per_task != 20")
-        check(report.get("total_episodes") == 200,
-              f"{condition}: report total_episodes != 200")
+        check(report.get("task_count") == expected_task_count,
+              f"{condition}: report task_count != {expected_task_count}")
+        check(report.get("episodes_per_task") == expected_episodes,
+              f"{condition}: report episodes_per_task != {expected_episodes}")
+        check(report.get("total_episodes") == expected_total,
+              f"{condition}: report total_episodes != {expected_total}")
         check(report.get("profile") == "randomized_seen_large_d435",
               f"{condition}: report profile mismatch")
         check(report.get("action_contract") == "eef16_h50_execute_h15",
@@ -152,6 +161,10 @@ def main() -> int:
             for key, expected in EXPECTED_IDENTITY.items():
                 check(identity.get(key) == expected,
                       f"{condition}/{task}: identity.{key} mismatch")
+            check(identity.get("absolute_start_seed") == expected_start_seed,
+                  f"{condition}/{task}: identity.absolute_start_seed mismatch")
+            check(identity.get("target_episodes") == expected_episodes,
+                  f"{condition}/{task}: identity.target_episodes mismatch")
             check(identity.get("task_name") == task,
                   f"{condition}/{task}: identity task mismatch")
             replayed_frozen_manifest = manifest.get("seed_selection") == (
@@ -162,15 +175,17 @@ def main() -> int:
                   f"{condition}/{task}: fixed_seed_sequence should be {expected_fixed}")
             episodes = progress.get("episode_results", [])
             check(progress.get("complete") is True, f"{condition}/{task}: incomplete")
-            check(progress.get("completed_episodes") == 20,
-                  f"{condition}/{task}: completed_episodes != 20")
-            check(len(episodes) == 20, f"{condition}/{task}: episode list length != 20")
+            check(progress.get("completed_episodes") == expected_episodes,
+                  f"{condition}/{task}: completed_episodes != {expected_episodes}")
+            check(len(episodes) == expected_episodes,
+                  f"{condition}/{task}: episode list length != {expected_episodes}")
             indices = [item.get("episode_index") for item in episodes]
-            check(indices == list(range(20)), f"{condition}/{task}: invalid episode indices")
+            check(indices == list(range(expected_episodes)),
+                  f"{condition}/{task}: invalid episode indices")
             seeds = [int(item["seed"]) for item in episodes]
             instructions = [str(item["instruction"]) for item in episodes]
-            check(all(seed >= 1000 for seed in seeds),
-                  f"{condition}/{task}: seed below 1000")
+            check(all(seed >= expected_start_seed for seed in seeds),
+                  f"{condition}/{task}: seed below {expected_start_seed}")
             check(len(seeds) == len(set(seeds)), f"{condition}/{task}: duplicate seeds")
             expected_pairs = [
                 (int(item["seed"]), str(item["instruction"]))
@@ -199,7 +214,7 @@ def main() -> int:
                 videos[index] = match.group("success") == "true"
             check(not unexpected_videos,
                   f"{condition}/{task}: unfinished/unexpected videos {unexpected_videos}")
-            check(set(videos) == set(range(20)),
+            check(set(videos) == set(range(expected_episodes)),
                   f"{condition}/{task}: final video indices are incomplete")
             for item in episodes:
                 index = int(item["episode_index"])
@@ -218,16 +233,18 @@ def main() -> int:
             total_videos += len(videos)
             episode_tables[condition][task] = episodes
             task_rows.append({"task": task, "successes": successes,
-                              "success_rate": successes / 20, "videos": len(videos)})
+                              "success_rate": successes / expected_episodes,
+                              "videos": len(videos)})
 
-        check(total_videos == 200, f"{condition}: expected 200 final videos, got {total_videos}")
+        check(total_videos == expected_total,
+              f"{condition}: expected {expected_total} final videos, got {total_videos}")
         check(report.get("total_successes") == total_successes,
               f"{condition}: report total_successes mismatch")
-        expected_rate = total_successes / 200
+        expected_rate = total_successes / expected_total
         check(report.get("micro_success_rate") == expected_rate,
               f"{condition}: report micro rate mismatch")
         condition_summaries[condition] = {
-            "episodes": 200,
+            "episodes": expected_total,
             "successes": total_successes,
             "success_rate": expected_rate,
             "videos": total_videos,
@@ -260,8 +277,8 @@ def main() -> int:
         anchor_rate = (baseline_rate if baseline_is_untouched_anchor else
                        condition_summaries["anchor"]["success_rate"])
         zeva_rate = condition_summaries["zeva"]["success_rate"]
-        check(paired.get("total_paired_episodes") == 200,
-              "paired report does not contain 200 episodes")
+        check(paired.get("total_paired_episodes") == expected_total,
+              f"paired report does not contain {expected_total} episodes")
         expected_paired_anchor = None if baseline_is_untouched_anchor else anchor_rate
         check(paired.get("anchor_success_rate") == expected_paired_anchor,
               "paired report anchor rate mismatch")
@@ -319,7 +336,7 @@ def main() -> int:
             check(sha256(seed_manifest_path) == source_digest,
                   "copied seed manifest differs from frozen source")
 
-    if baseline_is_untouched_anchor:
+    if baseline_is_untouched_anchor and manifest.get("precomputed_baseline_root"):
         source_value = manifest.get("precomputed_baseline_root")
         source = Path(source_value) if source_value else None
         source_report = source / "report.json" if source is not None else None
@@ -329,8 +346,9 @@ def main() -> int:
             check(manifest.get("precomputed_baseline_report_sha256") == sha256(source_report),
                   "precomputed untouched PI baseline report hash mismatch")
         baseline_summary = condition_summaries.get("baseline", {})
-        check(baseline_summary.get("successes") == 114,
-              "untouched PI baseline must match preregistered normal result 114/200")
+        expected_successes = int(manifest.get("precomputed_baseline_expected_successes", -1))
+        check(baseline_summary.get("successes") == expected_successes,
+              "imported untouched PI baseline differs from its preregistered count")
 
     payload = {
         "schema": "zeva-advantage10-completion-audit-v1",
