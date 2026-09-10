@@ -1,8 +1,8 @@
 # ZeVA–RoboTwin：基于已训练 PI0.5 的因果记忆增强方法
 
-> 文档状态：当前正式方法（2026-09-09）
+> 文档状态：当前正式方法（2026-09-10）
 > 目标：在已经完成 RoboTwin 训练的 PI0.5 上加入 ZeVA 的因果表征、记忆与检索能力，同时保持 PI0.5 的物理输入输出协议和基础能力。
-> 主线定义：Stage1 训练 ZTE/Mamba 并产生 causal bank、H15 live queries 和 task-language retrieval；Stage2 先得到正常的 action-expert Base，再以该 Base 为初始化和不可变独立 teacher，训练 action expert + ZeVA 双残差。v7 frozen-PI prior adapter 已在两个互斥闭环 split 上得到合计 `-6/160`；v8 训练完成但没有 checkpoint 通过独立配对门槛。当前正式候选是 anchored-v9。
+> 主线定义：Stage1 训练 ZTE/Mamba 并产生 causal bank、H15 live queries 和 task-language retrieval；Stage2a 先得到正常的 action-expert Base，Stage2b 从该 Base 精确初始化并冻结完整 PI0.5，只训练 ZeVA 双残差、Gaussian action prior 和 task/phase router。低学习率 joint v9 在两个闭环 split 上仅提升 `+5/160`，低于预注册 `+6` 门槛，已拒绝；当前正式候选是 anchored-v9 frozen-PI adapter step1250。
 
 ## 1. 问题定义与设计原则
 
@@ -16,7 +16,7 @@ RoboTwin 的基础策略已经是一个在相同 50-task 数据分布上训练�
 
 因此，最终方案遵循四个原则：
 
-- **PI0.5 是受保护的强基线**：固定 v8 Base step3000 作为部署 Base 和独立 teacher；anchored-v9 从它逐 tensor 精确初始化，并用低学习率更新 action expert。57% untouched PI 结果仍是 Base 的硬下限。
+- **PI0.5 是受保护的强基线**：固定 v8 Base step3000 作为部署 Base；active adapter 从它逐 tensor 精确初始化并冻结完整 PI0.5，关闭残差即精确恢复 Base。57% untouched PI 结果仍是 Base 的硬下限。
 - **因果状态必须来自真实 action-effect transition**：不使用帧编号、oracle progress 或测试成功标签构造部署时状态。
 - **训练与部署使用相同递归过程**：从真实 `B0` 初始化，每执行 H15 后更新一次 Mamba、BIT 和 PIM。
 - **所有增强都是有界残差**：零初始化投影与小门控保证初始策略严格退化为原 PI0.5。
@@ -33,10 +33,10 @@ RoboTwin 的基础策略已经是一个在相同 50-task 数据分布上训练�
 | 外部知识 | 方法相关 memory/retrieval | train95-only causal bank + task/phase retrieval |
 | 在线记忆 | 历史上下文 | BIT（短期）+ PIM（持久） |
 | 接入基础模型 | 下游策略适配 | context 与 Gaussian-prior 双 residual 都只进入 action expert 的 noisy-action embedding |
-| Stage 2 | 下游策略适配 | 冻结 PaliGemma、ZTE、bank、retrieval；先固定正常 Base，再以其为初始化和独立 teacher 训练 action expert + fusion/action-prior/router |
+| Stage 2 | 下游策略适配 | 先固定正常 Base；再冻结完整 PI0.5、ZTE、bank、retrieval，只训练 fusion/action-prior/router |
 | Stage 3 | 对最终策略特征做检索对齐 | 仅在 Stage2 paired 闭环评测后决定是否需要 |
 
-这里最关键的改动是：**正式 Stage2 不在 VLM 输入前注入，而把 context 与 Gaussian action-prior 两路 residual 注入 action expert 的 noisy-action embedding；PaliGemma 不开放。anchored-v9 以固定 Base action path 作独立 teacher，避免把 ZeVA 自己漂移后的 residual-off 分支误当 Base。同时不用 BehaviorVLA 的 episode-index oracle，训练和部署都使用 ZeVA 的 task-language + H15 recurrent phase 检索。**
+这里最关键的改动是：**正式 Stage2 不在 VLM 输入前注入，而把 context 与 Gaussian action-prior 两路 residual 注入 action expert 的 noisy-action embedding；完整 PI0.5 均冻结。关闭残差的同一 forward 就是固定 Base teacher，避免 ZeVA action path 漂移。同时不用 BehaviorVLA 的 episode-index oracle，训练和部署都使用 ZeVA 的 task-language + H15 recurrent phase 检索。**
 
 ## 3. 冻结的 RoboTwin–PI0.5 契约
 
@@ -76,7 +76,7 @@ checkpoint/pretrained_model-best-v1
 
 ## 4. 方法总览（当前主线）
 
-当前方法是 anchored-v9。v8 的 Base 与 ZeVA 两支 action expert 均完成 5,000 steps，但 ZeVA 使用“自身当前 residual-off action expert”作为 teacher；两支 action expert 的漂移远大于 residual 增益，且 1% scalar gate 使残差梯度过弱。最终 v8 `eligible_count=0`，不进入闭环。v9 固定 v8 Base step3000（Base validation5 flow 最低）作为部署 Base、ZeVA 初始化和不可变独立 teacher，只训练一个 anchored ZeVA 候选，并继续冻结因果表征链：
+当前正式方法是 anchored-v9 frozen-PI adapter。v8 的 Base 与 ZeVA 两支 action expert 均完成 5,000 steps，但独立漂移使 v8 `eligible_count=0`。随后 low-LR joint v9 固定 Base step3000 作初始化和不可变 teacher，闭环得到 Base `84/160`、ZeVA `89/160`，虽提升 `+5`，仍低于预注册 `+6`，因此拒绝。active adapter 仍从 Base step3000 精确初始化，但冻结完整 PI0.5，只优化 2.91M ZeVA 参数；关闭残差时模型与 Base 逐 tensor 相同：
 
 ```text
 离线 Stage1
@@ -92,13 +92,13 @@ instruction ──► task-language retrieval ──► task prototype
 train95 bank + BIT + PIM ─────────────────────────► causal context
                                                         ├── context residual
                                                         └── EEF16 H50 Gaussian action prior residual
-三相机 + Joint14 + instruction ──► 冻结 PaliGemma + 低 LR action expert ──► EEF16 [50,16]
+三相机 + Joint14 + instruction ──► 冻结完整 PI0.5 ─────────────────────► EEF16 [50,16]
                                              ▲
-固定 Base step3000 action path ── 独立 teacher / paired positive-margin preservation
+残差关闭的同一 frozen PI0.5 ───── exact Base teacher / paired positive-margin preservation
                                                                └── 执行前 15 步后重规划
 ```
 
-anchored-v9 的 action expert/action-time 参数使用 `5e-7`，ZeVA 的 task/context fusion、Gaussian prior、两路 action-embedding projector、scalar gates 与 task-language/H15-phase router 使用 `5e-5`。PaliGemma、ZTE/Mamba、causal bank 和 task retriever全部冻结；Stage2 训完后再冻结整个最终策略用于部署。两个 projector 零初始化，因此 step0 与 Base 完全相同；scalar gate 概率从 25% 起步，让残差获得有效梯度。训练每 2 个 optimizer step 计算一次不可变 Base teacher，preservation weight 为 8，并要求正向 paired margin `5e-5`，不只要求“别变差”。
+active adapter 冻结 PI0.5 action expert、action/time projections 与 PaliGemma；ZeVA 的 task/context fusion、Gaussian prior、两路 action-embedding projector、scalar gates 与 task-language/H15-phase router 使用 `5e-5`。ZTE/Mamba、causal bank 和 task retriever同样冻结。两个 projector 零初始化，因此 step0 与 Base 完全相同；scalar gate 概率从 25% 起步。训练每 2 个 optimizer step 计算一次同噪声 residual-off Base teacher，preservation weight 为 8，并要求正向 paired margin `5e-5`。完整训练为 2,000 global steps、每卡 batch16、累积2、8卡 global batch256；validation5-only 最终选中 step1250。
 
 下图表示单次在线重规划时的注入位置：
 
@@ -118,7 +118,7 @@ anchored-v9 的 action expert/action-time 参数使用 `5e-7`，ZeVA 的 task/co
                                                              ▼
                               noisy-action embedding / action expert
                                                              │
-                  Stage2：冻结 PaliGemma，以独立 Base teacher 约束 action expert + ZeVA
+                  Stage2：冻结完整 PI0.5，以 residual-off exact Base 约束 ZeVA
                                                              │
                                                        预测 EEF16 H50
                                                              │
@@ -132,7 +132,7 @@ anchored-v9 的 action expert/action-time 参数使用 `5e-7`，ZeVA 的 task/co
 3. **Task-language retrieval**：使用 PI-base 的冻结任务语言坐标选择 task prototype，不使用 `episode_index` 或 oracle task ID。
 4. **BIT（Brief Interaction Trace）**：保存当前 attempt 的近期因果证据。
 5. **PIM（Persistent Interaction Memory）**：合并同一 episode 内跨 attempt 的相似阶段证据。
-6. **ZeVA fusion/action-prior**：将 task、phase、offline bank 与 BIT/PIM 融合；context 与 normalized H50 EEF16 Gaussian-prior mean 经过两路有界 residual，只调制 PI0.5 action expert 的 noisy-action embedding，并与 action expert 联合训练。
+6. **ZeVA fusion/action-prior**：将 task、phase、offline bank 与 BIT/PIM 融合；context 与 normalized H50 EEF16 Gaussian-prior mean 经过两路有界 residual，只调制 PI0.5 action expert 的 noisy-action embedding；active adapter 中 action expert 冻结，仅训练残差支路。
 
 Stage3 不是固定必训阶段。Stage2 训完后先使用同一批环境 seed、instruction 和固定的模型 RNG 起点做 paired PI/ZeVA 闭环评测；每个 condition 内的 flow RNG 按 handoff 口径连续消耗。只有 Stage2 不回退但收益仍不足时，才进入可选 Stage3。
 
@@ -323,7 +323,7 @@ score_merge = 0.6 * sim_phase + 0.4 * sim_signal
 - 模型参数在部署期间始终冻结；
 - 当前正式评测每个环境 seed 都执行 episode reset。
 
-## 9. Stage 2：冻结视觉—语言 backbone，配对训练 action expert 与 ZeVA
+## 9. Stage 2：从正常 Base 初始化，冻结完整 PI0.5 训练 ZeVA
 
 ### 9.1 冻结与可训练参数
 
@@ -331,16 +331,13 @@ score_merge = 0.6 * sim_phase + 0.4 * sim_signal
 
 - PI0.5 PaliGemma vision tower；
 - PI0.5 PaliGemma language backbone；
+- PI0.5 Gemma action expert；
+- PI0.5 action input/output projection 与 time MLP；
 - Stage1 ZTE/Mamba；
 - train95 causal bank；
 - task-language retrieval head。
 
-Base 分支训练：
-
-- PI0.5 Gemma action expert；
-- PI0.5 action input/output projection 与 time MLP。
-
-ZeVA 分支在相同 action-path 参数之外额外训练：
+ZeVA adapter 训练：
 
 - task token projector；
 - memory context encoder；
@@ -350,9 +347,9 @@ ZeVA 分支在相同 action-path 参数之外额外训练：
 - context/prior sigmoid gates。
 - 由 task language schema 与真实 recurrent H15 phase 驱动的两路 gate router。
 
-两个注入 projector 零初始化；两个 scalar gate 的初始值为 0.01。router 输出乘数被限制到 `[0,2]` 且零参数初始化对应乘数 1，因此初始有效门仍为 1%，可对有害任务/阶段压到接近 0，又不会无界放大。关闭 ZeVA 或在初始状态下，wrapper 对相同随机种子必须与原 PI0.5 bit-identical。
+两个注入 projector 零初始化；两个 scalar gate 的初始概率为 0.25。router 输出乘数被限制到 `[0,2]` 且零参数初始化对应乘数 1，可对有害任务/阶段压到接近 0，又不会无界放大。关闭 ZeVA 或在初始状态下，wrapper 对相同随机种子必须与 Base step3000 bit-identical。
 
-两支 action expert 均使用 `5e-6`，ZeVA fusion/action-prior/router 使用 `5e-5`。首个 backward 后断言 action expert 和所需 ZeVA 模块有梯度，而 PaliGemma、ZTE 与 retrieval 均无梯度。
+ZeVA fusion/action-prior/router 使用 `5e-5`。首个 backward 后断言所需 ZeVA 模块有梯度，而完整 PI0.5、ZTE 与 retrieval 均无梯度。梯度仍需穿过冻结 action expert 才能到达注入输入，因此真实 dropout/layer 保持 eval，同时只打开 released Gemma checkpoint scheduler 所依赖的两个 parent training flags；否则显存与速度会异常。
 
 ### 9.2 上下文与注入
 
@@ -368,7 +365,7 @@ ZeVA 分支在相同 action-path 参数之外额外训练：
 8. 将每步 `mu` 投影为另一条残差；两条 residual 都只加到 PI0.5 每轮 flow 的 noisy-action embedding，绝不进入 PaliGemma；训练时以 0.4 概率丢弃整段 prior residual；
 9. 未丢弃时，注入强度继续乘以 retrieval confidence、learned scalar gate，以及由 task-language schema 和当前 H15 phase 产生的 `[0,2]` 有界 router multiplier。
 
-训练保留 handoff 原始的 PaliGemma/action-expert 联合 attention forward；PaliGemma 参数 `requires_grad=False`，梯度同时更新 action expert 与 ZeVA 注入支路。该设计不增加 PI token 数，不改变 attention mask、position ID、prefix length 或 action-expert tensor shape。
+训练保留 handoff 原始的 PaliGemma/action-expert 联合 attention forward；完整 PI0.5 参数 `requires_grad=False`，autograd 只穿过 action expert 更新 ZeVA 注入支路。该设计不增加 PI token 数，不改变 attention mask、position ID、prefix length 或 action-expert tensor shape。
 
 ### 9.3 Stage2 损失
 
@@ -376,17 +373,17 @@ ZeVA 分支在相同 action-path 参数之外额外训练：
 L_stage2 =
     L_PI_flow
   + λ_prior    L_Gaussian_NLL
-  + λ_preserve mean_i max(0, L_PI_flow_i - L_residual_off_i)
+  + λ_preserve mean_i max(0, L_PI_flow_i - L_residual_off_i + 5e-5)
   + λ_gate     L_gate
 ```
 
-`L_Gaussian_NLL` 对 EEF16 维度求和，再对 batch 和 H50 求平均；`log_sigma` 限制在 `[-5,2]`。`L_residual_off_i` 使用当前 action-expert 权重、关闭 ZeVA residual，并与 enhanced forward 对每个样本共享完全相同的 flow noise。保护 hinge 在逐样本层面计算，禁止某一任务的改善抵消另一任务的退化。当前每 2 个 optimizer step 计算一次 matched teacher，并把该步 preservation 项乘 2；validation 逐 batch计算 matched teacher，同时报告 paired win fraction 与平均正退化。训练仍使用 phase noise 0.02、whole-memory dropout 0.1 和独立 prior-residual dropout 0.4（keep=0.6）。
+`L_Gaussian_NLL` 对 EEF16 维度求和，再对 batch 和 H50 求平均；`log_sigma` 限制在 `[-5,2]`。`L_residual_off_i` 使用冻结的 Base step3000 action expert、关闭 ZeVA residual，并与 enhanced forward 对每个样本共享完全相同的 flow noise。保护 hinge 带正 margin `5e-5`，在逐样本层面计算，禁止某一任务的改善抵消另一任务的退化。每 2 个 optimizer step 计算一次 matched teacher，并把该步 preservation 项乘 2；validation 逐 batch计算 matched teacher，同时报告 paired win fraction 与平均正退化。训练仍使用 phase noise 0.02、whole-memory dropout 0.1 和独立 prior-residual dropout 0.4（keep=0.6）。
 
 ### 9.4 Stage2 训练设置
 
 | 设置 | 当前值 |
 |---|---:|
-| steps | 5,000（约 11.3 epochs） |
+| steps | 2,000 |
 | GPU | 8×H100 |
 | 每 GPU micro-batch | 16 |
 | gradient accumulation | 2 |
@@ -394,17 +391,18 @@ L_stage2 =
 | video backend | TorchCodec，32-entry/worker decoder LRU |
 | matched teacher | 每 2 step 一次，逐样本 hinge，采样步 ×2；validation 全量覆盖十任务 |
 | foundation forward | `torch.compile(mode="default")`，hook 安装后编译 |
-| PI0.5 action expert LR | 5e-6 |
+| PI0.5 action expert LR | 冻结，不进入 optimizer |
 | ZeVA LR | 5e-5 |
 | warmup | 250 |
 | Gaussian NLL weight | 0.01 |
-| preservation weight | 4.0 |
-| gate regularization | 1e-3 |
+| preservation weight | 8.0 |
+| positive paired margin | 5e-5 |
+| gate regularization | 1e-5 |
 | phase noise | 0.02 |
 | memory dropout | 0.1 |
 | prior residual dropout | 0.4（keep=0.6） |
 
-batch 16、accumulation 2、8 张 H100 保持 global batch 256。两支都保存完整 `model.safetensors` 和 optimizer/scheduler state；ZeVA 额外保存 `zeva_adapter.pth`。审计要求 PaliGemma 与 best-v1 位级一致，同时确认 action-path 权重确实更新；不再错误要求完整模型与 untouched PI0.5 相同。
+batch 16、accumulation 2、8 张 H100 保持 global batch 256。每个 checkpoint 保存完整 `model.safetensors`、`zeva_adapter.pth` 和 optimizer/scheduler state。审计要求完整 PI0.5 与 Base step3000 位级一致，并确认八个 ZeVA 模块进入 optimizer；action path 不允许更新。
 
 ### 9.5 Stage2 通过标准
 
@@ -517,16 +515,18 @@ RoboTwin 的 GPU physics 不是位级确定的，因此在 Base 中已经通过 
 
 `configs/robotwin_zeva_advantage10.json` 定义的十任务模型不使用 50-task 均值冒充完整 benchmark。v7 step1750 仅由 train95/validation5 选出，随后在 seed5000 与 seed6000 两个互斥的闭环 split 上分别得到 `Base 47/80 vs ZeVA 44/80` 和 `Base 44/80 vs ZeVA 41/80`，合计 `-6/160`；因此 v7 已拒绝，未启动 seed10000 正式测试。
 
-v8 的两支 5,000-step 训练已经结束，但没有 checkpoint 同时满足独立 paired improvement、胜率和十任务逐项不退化，因此离线选择结果为 `eligible_count=0`，禁止进入闭环。anchored-v9 固定 v8 Base step3000，并从它初始化 ZeVA；Base action path 在训练中以不进入 `state_dict` 的不可变 tensor 保存，teacher forward 临时交换这些 tensor，执行后恢复 student，从而不复制 PaliGemma 也不把 student 自身误当 teacher。训练为 2,000 global steps、每 250 steps 保存，global batch 256；协议仍为 Large_D435 640x480、Joint14、EEF16 H50 输出/H15 执行、seen instruction 和逐 episode 视频核验。扩散 RNG 在 checkpoint 完整加载后统一设为 `20260907`，随后连续消耗；episode reset 只清 recurrent/causal state。历史 untouched best-v1 的 `114/200=57.0%` 仍是硬下限，最终门槛固定为 `Base>=max(同 seed Anchor,57%)` 且 `ZeVA>Base`。parent foundation SHA256 必须是 `7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe`。
+v8 的两支 5,000-step 训练已经结束，但没有 checkpoint 同时满足 paired improvement、胜率和十任务逐项不退化，因此 `eligible_count=0`。low-LR joint v9 固定 v8 Base step3000 并训练 action expert + ZeVA，两个新闭环 split 合计 Base `84/160`、ZeVA `89/160`，只提升 `+5`，低于预注册 `+6`，已拒绝且没有触碰 final seed10000。
+
+当前 frozen-PI adapter 仍从 Base step3000 精确初始化，但冻结完整 PI0.5，只训练 ZeVA。它完成 2,000 global steps、每 250 steps 保存，八个 checkpoint 均包含完整模型、adapter 与 optimizer state。validation5-only 选择 step1250：5 个 checkpoint 合格，选中点 aggregate paired improvement `+3.386e-5`、win fraction `58.83%`、retrieval `99.85%`、最差任务 improvement `+2.199e-5`，十任务均为正。新的闭环验证使用与 5000/6000/7000/8000/10000 均不重叠的 seed9000 和 seed12000；每 split 为 10×8，要求各自 delta≥0 且合计至少 `+6/160`。协议仍为 Large_D435 640×480、Joint14、EEF16 H50 输出/H15 执行、seen instruction 和逐 episode 视频。扩散 RNG 设为 `20260907` 后在每个 condition 内连续消耗；episode reset 只清 recurrent/causal state。历史 untouched best-v1 的 `114/200=57.0%` 仍是硬下限，最终门槛固定为 `Base>=max(同 seed Anchor,57%)` 且 `ZeVA>Base`。parent foundation SHA256 必须是 `7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe`。
 
 当前训练命令与输出：
 
 ```bash
-bash scripts/train_robotwin_advantage10_anchored_v9.sh joint
-# candidate: .../advantage10-anchored-v9/joint
+bash scripts/train_robotwin_advantage10_anchored_v9.sh adapter
+# candidate: .../advantage10-anchored-v9/adapter
 # fixed Base: .../advantage10-action-expert-v8/baseline/003000
 python3 scripts/select_robotwin_anchored_v9.py \
-  /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-anchored-v9/joint \
+  /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-anchored-v9/adapter \
   /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8/baseline/003000
 bash scripts/robotwin_eval/launch_anchored_v9_validation.sh
 bash scripts/robotwin_eval/launch_anchored_v9_fresh_final.sh
@@ -534,7 +534,7 @@ bash scripts/robotwin_eval/launch_anchored_v9_fresh_final.sh
 bash scripts/robotwin_eval/wait_and_run_anchored_v9.sh
 ```
 
-选择器固定 Base step3000，只在 anchored-v9 的 ZeVA checkpoints 中选择；要求十任务 validation 覆盖完整、retrieval≥95%、ZeVA 相对独立 Base teacher 的 paired improvement>0、win fraction≥50%，并且十任务各自 mean improvement 都不为负。合格候选先最大化最差任务 improvement，再比较 aggregate improvement、win fraction 与 ZeVA flow；闭环结果不参与选 step。step250 的早期诊断为 aggregate `+8.295e-5`、win fraction `57.30%`、retrieval `99.85%`，但最差任务 `-5.783e-6`，因此该点未过门槛。step500 首次合格：aggregate `+8.994e-5`、win fraction `57.29%`，且十任务最差 improvement 已为 `+5.117e-5`。它仍只是中间候选，必须完成全部 2,000 steps 后再由同一 validation5-only 规则冻结最终 checkpoint。
+选择器固定 Base step3000，只在 adapter checkpoints 中选择；要求十任务 validation 覆盖完整、retrieval≥95%、ZeVA 相对 exact residual-off Base 的 paired improvement>0、win fraction≥50%，并且十任务各自 mean improvement 都不为负。合格候选先最大化最差任务 improvement，再比较 aggregate improvement、win fraction 与 ZeVA flow；闭环结果不参与选 step。最终选择已冻结为 step1250，后续 seed9000/12000 闭环只决定该 checkpoint 能否进入 final，不能反向挑选其他 step。
 
 三任务、每任务 5 次的 checkpoint gate 只用于发现加载错误和明显闭环退化，不作为统计验收：在固定模型初始 RNG 后，同一 Anchor 因 RoboTwin GPU physics 非位级确定而在重复 gate 中出现 `10/15` 到 `13/15` 的波动。第一轮闭环筛选保留 action-expert baseline step `1000` 和 ZeVA step `250`；诊断目录为：
 
@@ -824,7 +824,8 @@ v5 正式评测：
 | Stage1 causal bank/live queries | hash 与 H15 递归一致 | 当前 foundation 下可保留；PI-base 替换见第 16 节 |
 | Stage1.5 retrieval | validation 99.704% | 可保留；正式评测仍有 4/1000 episode 误检索 |
 | Stage2 frozen-PI prior adapter v7 | 已拒绝 | 两个互斥 split 均为 -3/80，合计 -6/160；未进入 final |
-| Stage2 anchored-v9 | 当前正式候选 | 固定 v8 Base step3000；ZeVA 从该 Base 初始化并由独立不可变 Base teacher 约束；冻结 PaliGemma，训练低 LR action expert + 双 residual；2000 steps，batch16/accum2，global batch 256 |
+| Stage2 anchored-v9 joint | 已拒绝 | Base 84/160、ZeVA 89/160，仅 +5，低于预注册 +6；未进入 final |
+| Stage2 anchored-v9 adapter | 当前正式候选 | 固定 v8 Base step3000并冻结完整 PI0.5；只训练双 residual/Gaussian prior/router；2000 steps完成，validation5-only选中step1250，正在seed9000/12000闭环验证 |
 | Stage2 action-expert-v8 | 已拒绝 | 两支均完成 5000 steps，但自身 residual-off teacher 无法约束跨分支漂移，`eligible_count=0`，不得进入闭环 |
 | Stage2 action-expert-v7 | 历史 eager/FFmpeg 主线 | **已停止；保留审计，不作为 v8 续训点** |
 | Stage2 action-expert-v6 | 历史 prefix/action 双位置注入 | **已停止；结构与 v8 不兼容，不得续训** |
@@ -858,11 +859,11 @@ Formal-eval PI input: [-1, 0.9215686] # 正确
 2. trainer 和 evaluator 共用 dtype、shape、finite、range assertion；
 3. `verify_robotwin_stage2_image_contract.py` 用真实视频帧验证训练 CHW 与评测 HWC 路径逐像素一致；
 4. 当前 action-expert/anchored-v9 manifest 和 training-state 会记录 foundation、初始 Base、独立 anchor teacher、冻结集合与数据协议，代码拒绝从错误图像契约或身份不匹配的 checkpoint resume；
-5. frozen-PI safe-router/v7、v6、full-v5 与 action-expert-v8 ZeVA 均已停止并仅作审计保留；当前训练输出隔离到 `advantage10-anchored-v9/joint`，随后用固定 episode manifest 做 paired Anchor/Base/ZeVA rollout。
+5. frozen-PI safe-router/v7、v6、full-v5、action-expert-v8 ZeVA 与 joint v9 均已停止并仅作审计保留；当前候选位于 `advantage10-anchored-v9/adapter/001250`，随后用固定 episode manifest 做 paired Anchor/Base/ZeVA rollout。
 6. Stage2 启动时锁定并记录 handoff-native Transformers 5.5.4、tokenizers distribution metadata 0.22.2 和 host-compatible tokenizers module 0.21.4；Transformers 4.53 的 cache、attention mask、image-return 和 tokenizer shims 在 native runtime 下全部关闭。原始 best-v1 在 native runtime 的闭环 anchor 为 4/5，而 4.53 compatibility runtime 为 0/5，故旧 4.53 训练/评测产物不得进入最终结果。
 7. v8/v9 使用 baseline 同款 TorchCodec，并以 32-entry/worker LRU 复用 decoder；实帧三相机与 FFmpeg 逐像素一致。
 8. anchored-v9 保持 global batch 256，每卡 16、累积 2；双 residual hook 安装后再编译原 joint forward，两个 projector 在初始化时保持精确零值。
-9. 不可变 Base teacher 每 2 个 optimizer step 运行一次；preservation weight 为 8，hinge 目标包含 `5e-5` 正 margin，validation 仍逐 batch paired。
+9. residual-off exact Base teacher 每 2 个 optimizer step 运行一次；preservation weight 为 8，hinge 目标包含 `5e-5` 正 margin，validation 仍逐 batch paired。
 
 ## 16. 当前最终训练流水线与 PI base 替换规则
 
@@ -872,7 +873,7 @@ Formal-eval PI input: [-1, 0.9215686] # 正确
 保留 Stage1 + bank + live queries + retrieval
         -> 修正 Stage2 图像 loader/断言
         -> 先固定已训练且 held-out flow 最优的 Base action expert
-        -> 从该 Base 初始化 ZeVA，并用独立不可变 Base action path 做 paired preservation
+        -> 从该 Base 初始化 ZeVA，冻结完整 PI0.5并用residual-off路径做paired preservation
         -> 冻结同一批 seed+instruction
         -> paired untouched Anchor vs trained Base vs ZeVA
         -> 若显著 non-regression 且有收益，Stage2 即最终模型
@@ -886,7 +887,7 @@ Formal-eval PI input: [-1, 0.9215686] # 正确
 
 当前代码支持把实际 PI foundation 与 ZeVA 的冻结辅助语言坐标显式分开：
 
-- `--foundation-checkpoint` 决定真正参与视觉—语言前向和 action-expert 优化的 PI0.5；
+- `--foundation-checkpoint` 决定真正参与视觉—语言前向的 PI0.5；是否优化 action expert 由 Stage2 variant 决定，active adapter 不优化；
 - `--goal-embedding-checkpoint` 只为 ZeVA 的 task schema、task retrieval 和 Stage1 `B0` 提供冻结 token embedding table，并在 tokenizer 不完全一致时拒绝启动。
 
 因此，当新 PI base 的物理协议和 tokenizer 完全兼容时，可以让 foundation 使用 `pretrained_model-best-v1`，同时将 `goal_embedding_checkpoint` 固定为旧 Stage1 的 `pretrained_model`。这属于上面的“policy-only 替换”：旧 ZTE/bank/live queries/retrieval 可以复用，只重训 Stage2，但 manifest 必须同时记录两条 lineage。普通 PI baseline 不读取这一辅助语言表。
@@ -905,7 +906,7 @@ Formal-eval PI input: [-1, 0.9215686] # 正确
 
 原因是 best-v1 的 PI language embedding table、VLM feature、action expert 和 flow behavior 均可能不同，旧 ZeVA 产物不能被视为与新 foundation 兼容。
 
-2026-09-09 的 v7 十任务实验是已拒绝的显式解耦、frozen-PI 方案。逐 tensor 检查确认 best-v1 与旧 foundation 的若干语言/视觉/action 权重不同，但 tokenizer、预处理、normalization 与物理协议兼容；因此它证明 Stage1 辅助语言坐标可以显式固定，却没有证明冻结 action expert 的 prior 注入有效。v8/v9 继续复用这条 Stage1 lineage，但真实 policy foundation 始终是 best-v1；当前 anchored-v9 只开放低 LR action path 和 ZeVA fusion/prior/router，并由固定 Base action path 监督。
+2026-09-09 的 v7 十任务实验是已拒绝的显式解耦、frozen-PI 方案。逐 tensor 检查确认 best-v1 与旧 foundation 的若干语言/视觉/action 权重不同，但 tokenizer、预处理、normalization 与物理协议兼容；因此它证明 Stage1 辅助语言坐标可以显式固定，却没有证明当时的 prior-only 注入有效。v8/v9 继续复用这条 Stage1 lineage，但真实 policy foundation 始终是 best-v1；当前 anchored-v9 adapter 冻结完整 PI0.5，只开放 ZeVA fusion/prior/projectors/gates/router，并由 residual-off exact Base path 监督。
 
 ## 17. 最终模型的通过定义
 
@@ -947,11 +948,11 @@ scripts/robotwin_eval/zeva_policy.py         RoboTwin 部署适配器
 scripts/robotwin_eval/launch_formal_eval.sh  正式 ZeVA-only 评测
 scripts/robotwin_eval/launch_paired_formal_eval.sh paired baseline/ZeVA 评测
 scripts/robotwin_eval/launch_closed_loop_residual_calibration_v5.sh 双 split 校准入口
-scripts/robotwin_eval/launch_anchored_v9_validation.sh v9 seed7000/8000 双 split 验证
+scripts/robotwin_eval/launch_anchored_v9_validation.sh 参数化的 v9 双 split 验证；active adapter 用 seed9000/12000
 scripts/robotwin_eval/launch_anchored_v9_fresh_final.sh v9 seed10000 三条件 final
 scripts/robotwin_eval/wait_and_run_anchored_v9.sh v9 持久门控协调器
 ```
 
 ## 19. 一句话总结
 
-本方法先用 Mamba 从真实 H15 action-effect transition 学习任务阶段与因果变化，再通过 train95 causal bank、BIT/PIM 和 task-language retrieval 形成与部署同口径的在线因果上下文；当前 anchored-v9 固定 held-out-selected Base step3000，并从该 Base 初始化 ZeVA。context 与逐步 H50 Gaussian-prior mean 两路 residual 都只注入 noisy-action embedding，由 task-language/H15-phase router 有界控制；冻结的独立 Base action path 和带正 margin 的逐样本 paired hinge 同时约束 action-expert 漂移。训完后冻结整个策略，仅递归更新当前 episode 的因果状态；是否进入可选 Stage3，由严格 paired 闭环 non-regression 结果决定。v7 的 `-6/160` 与 v8 的 `eligible_count=0` 只作失败审计。
+本方法先用 Mamba 从真实 H15 action-effect transition 学习任务阶段与因果变化，再通过 train95 causal bank、BIT/PIM 和 task-language retrieval 形成与部署同口径的在线因果上下文；当前 anchored-v9 adapter 固定 held-out-selected Base step3000，并从该 Base 初始化 ZeVA。context 与逐步 H50 Gaussian-prior mean 两路 residual 都只注入 noisy-action embedding，由 task-language/H15-phase router 有界控制；完整 PI0.5 冻结，residual-off 路径精确等于 Base，带正 margin 的逐样本 paired hinge 只训练 ZeVA 支路。训完后冻结整个策略，仅递归更新当前 episode 的因果状态；是否进入可选 Stage3，由严格 paired 闭环 non-regression 结果决定。v7 的 `-6/160`、v8 的 `eligible_count=0` 和 joint v9 的 `+5/160` 均只作失败审计。
