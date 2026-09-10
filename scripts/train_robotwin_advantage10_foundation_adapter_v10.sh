@@ -91,7 +91,7 @@ bash "$zeva_root/scripts/train_robotwin_stage2_8gpu.sh" \
   --eval-batches "${EVAL_BATCHES:-64}" \
   --compile-model \
   --compile-mode default \
-  --action-expert-learning-rate 0 \
+  --action-expert-learning-rate "${ACTION_EXPERT_LR:-5e-7}" \
   --learning-rate "${ZEVA_LR:-5e-5}" \
   "${extra_args[@]}" \
   >> "$output/train.log" 2>&1
