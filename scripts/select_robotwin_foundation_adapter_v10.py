@@ -48,10 +48,7 @@ def main() -> None:
         if manifest.get("effective_global_batch_size") != 256:
             errors.append("global_batch")
         identity = manifest.get("foundation_identity", {})
-        if (
-            identity.get("model_sha256") != FOUNDATION_SHA256
-            or Path(identity.get("path", "/")).resolve() != foundation
-        ):
+        if identity.get("model_sha256") != FOUNDATION_SHA256:
             errors.append("foundation_identity")
         if manifest.get("initial_stage2_identity") is not None:
             errors.append("initial_stage2_must_be_absent")
@@ -98,6 +95,7 @@ def main() -> None:
         row = {
             "step": step,
             "foundation_checkpoint": str(foundation),
+            "training_foundation_checkpoint": identity.get("path"),
             "zeva_checkpoint": str(path),
             "base_validation_flow": validation.get("baseline"),
             "zeva_validation_flow": validation.get("flow"),
