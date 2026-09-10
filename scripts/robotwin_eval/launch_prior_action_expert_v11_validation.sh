@@ -120,6 +120,7 @@ run_split() {
   if [[ -s "$output/paired_report.json" ]]; then return; fi
   env MODEL_HOST="$model_host" MODEL_IP="$model_ip" RENDER_HOST="$render_host" \
     RENDER_RUNTIME="$render_runtime" RENDER_MPS_PIPE_DIRECTORY="/tmp/zeva-v11-step-${step}-${name}-mps" \
+    RENDER_WARP_CACHE_ROOT="/tmp/zeva-v11-step-${step}-${name}-warp" \
     RENDER_VULKAN_ICD="$render_vulkan_icd" \
     RENDER_LD_LIBRARY_PATH="$render_ld_library_path" \
     OUTPUT_ROOT="$output" BASELINE_CONFIG="$eval_root/configs/base-${name}.yml" \
