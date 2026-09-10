@@ -47,9 +47,25 @@ def main() -> None:
     acceptance = load_json(root / "acceptance.json")
     audit = load_json(root / "completion_audit.json")
     manifest = load_json(root / "manifest.json")
+    baseline_report = load_json(root / "baseline" / "report.json")
+    zeva_report = load_json(root / "zeva" / "report.json")
+    anchor_path = root / "anchor" / "report.json"
+    if anchor_path.is_file():
+        anchor_report = load_json(anchor_path)
+        anchor_is_base = False
+    elif manifest.get("baseline_is_untouched_anchor") is True:
+        # A precomputed untouched PI Base is itself the anchor.  Keep one
+        # authoritative rollout rather than manufacturing a duplicate
+        # condition directory merely to satisfy the renderer.
+        anchor_report = dict(baseline_report)
+        anchor_report["condition"] = "anchor"
+        anchor_is_base = True
+    else:
+        raise FileNotFoundError(f"required result is missing: {anchor_path}")
     condition_reports = {
-        condition: load_json(root / condition / "report.json")
-        for condition in ("anchor", "baseline", "zeva")
+        "anchor": anchor_report,
+        "baseline": baseline_report,
+        "zeva": zeva_report,
     }
     conditions = {
         condition: task_map(condition_reports[condition], condition)
@@ -84,6 +100,8 @@ def main() -> None:
             f"expert-valid seeds、模型 RNG `{manifest['model_seed_policy']}`。"
         ),
         "",
+        *( ["说明：该次评测的 Base 即未改动 PI Anchor，两列来自同一份经审计的 rollout。", ""]
+           if anchor_is_base else [] ),
         "| 条件 | 成功次数 | 成功率 |",
         "|---|---:|---:|",
     ]

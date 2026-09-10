@@ -17,7 +17,7 @@ split_g_name=${SPLIT_G_NAME:-split-g}
 split_h_name=${SPLIT_H_NAME:-split-h}
 start_seed_g=${START_SEED_G:-13000}
 start_seed_h=${START_SEED_H:-14000}
-reserved_final_seed=${RESERVED_FINAL_SEED:-15000}
+reserved_final_seed=${RESERVED_FINAL_SEED:-1000}
 model_host_g=${MODEL_HOST_G:-aigc01}
 model_ip_g=${MODEL_IP_G:-172.16.80.135}
 render_host_g=${RENDER_HOST_G:-aigc29}
@@ -153,8 +153,9 @@ payload = {
     "zeva_adapter_sha256": adapter_hash,
     "episodes_per_task_per_split": int(episodes),
     "splits": {"g": {"start_seed": int(seed_g)}, "h": {"start_seed": int(seed_h)}},
-    "excluded_prior_seed_starts": [1000, 5000, 6000, 7000, 8000, 9000, 10000, 12000],
+    "prior_evaluation_seed_starts": [1000, 5000, 6000, 7000, 8000, 9000, 10000, 12000],
     "reserved_final_start_seed": int(final_seed),
+    "reserved_final_role": "confirmatory user-required seed-1000 evaluation against an immutable pre-adapter untouched-PI Base",
     "acceptance": "delta>=0 on each split and combined ZeVA-Base gain>=6/160",
 }
 path = Path(destination)

@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Durable contingency coordinator. It never reads v9 closed-loop results when
 # selecting a checkpoint: training completion -> validation5-only selection ->
-# two fresh disjoint closed-loop validation streams.
+# two fresh disjoint closed-loop validation streams -> confirmatory seed-1000
+# ZeVA rollout against the immutable, audited untouched-PI Base.
 
 zeva_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 candidate_root=${CANDIDATE_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-foundation-adapter-v10/adapter}
@@ -45,4 +46,16 @@ if ! TRAIN_ROOT="$candidate_root" EVAL_ROOT="$eval_root" \
   exit 4
 fi
 
-write_state ready_for_fresh_final
+write_state running_confirmatory_final
+if ! TRAIN_ROOT="$candidate_root" EVAL_ROOT="$eval_root" \
+  bash "$zeva_root/scripts/robotwin_eval/launch_foundation_adapter_v10_final.sh" \
+  > "$eval_root/final.launcher.log" 2>&1; then
+  if [[ -s "$eval_root/final-seed1000-precomputed-base/acceptance.json" ]]; then
+    write_state confirmatory_final_rejected
+  else
+    write_state confirmatory_final_failed
+  fi
+  exit 5
+fi
+
+write_state accepted_for_delivery
