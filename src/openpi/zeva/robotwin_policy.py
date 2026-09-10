@@ -1242,6 +1242,35 @@ class RobotWinZevaPolicy(nn.Module):
         if self.retrieval_head is not None:
             self.retrieval_head.eval()
 
+    def enforce_frozen_foundation_checkpointing_mode(self) -> None:
+        """Keep a frozen PI0.5 deterministic while checkpointing its gradient path.
+
+        Adapter training still needs gradients with respect to the injected
+        action-token residuals, so autograd must traverse the frozen Gemma
+        expert.  A recursive ``foundation.eval()`` is required to keep the
+        matched residual-off teacher deterministic, but the released PI0.5
+        implementation also (unnecessarily) keys gradient checkpointing off
+        the training flags of two parent scheduler modules.  Set only those
+        parent flags after recursively putting every child in eval mode.  The
+        actual dropout/layer modules therefore remain in eval mode while the
+        memory-efficient checkpoint path is restored.
+        """
+        if self._full_pi05_finetune or self._action_expert_finetune:
+            raise RuntimeError(
+                "Frozen-foundation checkpointing mode is only valid for adapter training."
+            )
+        self.foundation.eval()
+        core = self.foundation.model
+        core.gradient_checkpointing_enable()
+        core.training = True
+        core.paligemma_with_expert.training = True
+        # These are the modules whose stochastic behavior must remain disabled.
+        core.paligemma_with_expert.paligemma.eval()
+        core.paligemma_with_expert.gemma_expert.model.eval()
+        self.causal_transition_encoder.eval()
+        if self.retrieval_head is not None:
+            self.retrieval_head.eval()
+
     def configure_adapter_stage2(self) -> list[nn.Parameter]:
         """Freeze the trained RoboTwin PI0.5 and ZTE; train only residual ZeVA fusion."""
         self.requires_grad_(False)

@@ -1215,10 +1215,10 @@ def main(args: Args) -> None:
         unwrapped_policy.enforce_action_expert_stage2_mode()
         if args.training_variant in {"adapter", "prior_adapter"}:
             # ``policy.train()`` recursively flips the frozen foundation back
-            # to train mode.  Restore deployment mode so dropout cannot create
-            # a false teacher/student difference while gradients still flow
-            # through the frozen action expert into the residual inputs.
-            unwrapped_policy.foundation.eval()
+            # to train mode.  Restore deterministic deployment behavior for
+            # every real layer while retaining gradient checkpointing through
+            # the frozen action expert into the residual inputs.
+            unwrapped_policy.enforce_frozen_foundation_checkpointing_mode()
         optimizer.zero_grad(set_to_none=True)
         accumulated_losses: dict[str, list[torch.Tensor]] = {}
         retrieval_accuracies: list[torch.Tensor] = []
