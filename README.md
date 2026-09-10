@@ -421,6 +421,8 @@ imports the immutable, video-audited Base result
 ```bash
 bash scripts/robotwin_eval/launch_prior_action_expert_v11_validation.sh
 bash scripts/robotwin_eval/launch_prior_action_expert_v11_cross_validation.sh
+# This refuses to start unless all four cells pass.
+bash scripts/robotwin_eval/launch_prior_action_expert_v11_final.sh
 ```
 
 If the four-cell gate fails, the only next attribution experiment is an

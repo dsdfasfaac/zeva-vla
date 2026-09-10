@@ -984,6 +984,8 @@ scripts/robotwin_eval/wait_and_run_anchored_v9.sh v9 持久门控协调器
 bash scripts/train_robotwin_advantage10_prior_action_expert_v11.sh
 bash scripts/robotwin_eval/launch_prior_action_expert_v11_validation.sh
 bash scripts/robotwin_eval/launch_prior_action_expert_v11_cross_validation.sh
+# 只有 four_cell_validation_summary.json 通过时才会启动
+bash scripts/robotwin_eval/launch_prior_action_expert_v11_final.sh
 ```
 
 若四 cell 门槛失败，不允许继续调 gate、dropout 或 guidance 碰运气。唯一下一组归因实验是从 untouched best-v1 训练 `action-expert-only`：保持 action-expert LR、步数、paired teacher 和四 cell 协议完全相同，同时关闭 prior/context 与 Gaussian NLL，以区分 action expert 漂移和 prior 注入两种失败源。
