@@ -519,6 +519,8 @@ v8 的两支 5,000-step 训练已经结束，但没有 checkpoint 同时满足 p
 
 当前 frozen-PI adapter 仍从 Base step3000 精确初始化，但冻结完整 PI0.5，只训练 ZeVA。它完成 2,000 global steps、每 250 steps 保存，八个 checkpoint 均包含完整模型、adapter 与 optimizer state。validation5-only 选择 step1250：5 个 checkpoint 合格，选中点 aggregate paired improvement `+3.386e-5`、win fraction `58.83%`、retrieval `99.85%`、最差任务 improvement `+2.199e-5`，十任务均为正。新的闭环验证使用与 5000/6000/7000/8000/10000 均不重叠的 seed9000 和 seed12000；每 split 为 10×8，要求各自 delta≥0 且合计至少 `+6/160`。协议仍为 Large_D435 640×480、Joint14、EEF16 H50 输出/H15 执行、seen instruction 和逐 episode 视频。扩散 RNG 设为 `20260907` 后在每个 condition 内连续消耗；episode reset 只清 recurrent/causal state。历史 untouched best-v1 的 `114/200=57.0%` 仍是硬下限，最终门槛固定为 `Base>=max(同 seed Anchor,57%)` 且 `ZeVA>Base`。parent foundation SHA256 必须是 `7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe`。
 
+该预注册闭环门槛已经通过：seed9000 的 split-e 为 `Base 43/80、ZeVA 43/80`（差值 `0`），seed12000 的 split-f 为 `Base 39/80、ZeVA 46/80`（差值 `+7`）；两组 seed 逐任务互斥，合计为 `Base 82/160、ZeVA 89/160`，即 `+7/160`。因此 step1250 获准进入保留的 seed10000 正式 10×20 测试。正式测试只作最终报告，不参与 checkpoint 选择；在三组 condition 和视频审计全部完成前，不报告运行中的成功率为最终结果。
+
 当前训练命令与输出：
 
 ```bash

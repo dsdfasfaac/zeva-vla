@@ -445,6 +445,14 @@ evaluates three semantic conditions on the exact same 10x20 manifest: untouched
 best-v1 Anchor, trained action-expert-only Base, and trained action expert +
 Zeva.  Its immutable gate is `Base >= max(Anchor,57%)` and `Zeva > Base`.
 
+The frozen adapter passed this preregistered validation gate. Split-e
+(seed stream 9000) produced Base `43/80` and Zeva `43/80` (delta `0`);
+split-f (seed stream 12000) produced Base `39/80` and Zeva `46/80`
+(delta `+7`). The streams are pairwise disjoint and the combined result is
+Base `82/160` versus Zeva `89/160`, delta `+7/160`. The reserved seed-10000
+10x20 final was started only after this result was frozen. Its running metrics
+must not be used for checkpoint selection or reported as final results.
+
 ```bash
 bash scripts/robotwin_eval/launch_anchored_v9_validation.sh
 bash scripts/robotwin_eval/launch_anchored_v9_fresh_final.sh
