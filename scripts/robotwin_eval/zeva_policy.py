@@ -319,6 +319,14 @@ def eval(task_env: Any, model: Any, observation: dict[str, Any]) -> None:
     if response.get("retrieval"):
         item = response["retrieval"][0]
         print(f"Zeva task-language retrieval: {item['task']} score={item['score']:.4f}")
+    if response.get("selector"):
+        item = response["selector"]
+        print(
+            "Zeva PI consensus: "
+            f"candidate={item['selected_candidate']} "
+            f"phase_score={item['phase_confidence']:.4f} "
+            f"base_fallback={item['fallback_to_base']}"
+        )
     executed_model_actions = []
     for model_action, action in zip(response["actions"][:15], actions[:15], strict=True):
         if task_env.take_action_cnt >= task_env.step_lim or task_env.eval_success:
