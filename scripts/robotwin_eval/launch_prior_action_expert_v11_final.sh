@@ -55,6 +55,11 @@ if aggregate["prior_injection_horizon"] != 15 or aggregate["injected_context_res
     raise SystemExit("v11 residual contract is not H15 prior-only")
 PY
 
+ssh "$render_host" "cd '$render_runtime'; env CUDA_VISIBLE_DEVICES=0 \
+  VK_ICD_FILENAMES='$render_vulkan_icd' LD_LIBRARY_PATH='$render_ld_library_path' \
+  WARP_CACHE_PATH='/tmp/zeva-v11-final-preflight-warp' \
+  .venv_robotwin/bin/python script/test_render.py" 2>&1 | grep -q 'Render Well'
+
 model_sha256=$(sha256sum "$checkpoint/model.safetensors" | awk '{print $1}')
 adapter_sha256=$(sha256sum "$checkpoint/zeva_adapter.pth" | awk '{print $1}')
 zeva_cache=$model_cache_root/step-${step}-${model_sha256}

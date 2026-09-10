@@ -45,6 +45,22 @@ if not 0.499999 <= aggregate["prior_gate"]["minimum"] <= aggregate["prior_gate"]
     raise SystemExit("v11 prior guidance is not fixed at 0.5")
 PY
 
+preflight_render() {
+  local host=$1 name=$2
+  ssh "$host" "cd '/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin'; env \
+    CUDA_VISIBLE_DEVICES=0 VK_ICD_FILENAMES='$render_vulkan_icd' \
+    LD_LIBRARY_PATH='$render_ld_library_path' \
+    WARP_CACHE_PATH='/tmp/zeva-v11-step-${step}-${name}-preflight-warp' \
+    .venv_robotwin/bin/python script/test_render.py" 2>&1 | grep -q 'Render Well'
+}
+
+preflight_render aigc24 i &
+preflight_i=$!
+preflight_render aigc28 j &
+preflight_j=$!
+wait "$preflight_i"
+wait "$preflight_j"
+
 candidate_sha256=$(sha256sum "$checkpoint/model.safetensors" | awk '{print $1}')
 adapter_sha256=$(sha256sum "$checkpoint/zeva_adapter.pth" | awk '{print $1}')
 mkdir -p "$eval_root/configs"
