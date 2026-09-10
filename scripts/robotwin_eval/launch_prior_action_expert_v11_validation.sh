@@ -166,8 +166,10 @@ wait "$pid_i" || status=1
 wait "$pid_j" || status=1
 (( status == 0 )) || exit "$status"
 
-python3 "$zeva_root/scripts/robotwin_eval/audit_advantage10_formal.py" "$eval_root/split-i"
-python3 "$zeva_root/scripts/robotwin_eval/audit_advantage10_formal.py" "$eval_root/split-j"
+python3 "$zeva_root/scripts/robotwin_eval/audit_advantage10_formal.py" \
+  "$eval_root/split-i" --expected-model-rng-seed "$split_i_rng"
+python3 "$zeva_root/scripts/robotwin_eval/audit_advantage10_formal.py" \
+  "$eval_root/split-j" --expected-model-rng-seed "$split_j_rng"
 python3 - "$eval_root" "$episodes" <<'PY'
 import json, sys
 from pathlib import Path

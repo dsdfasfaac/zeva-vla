@@ -26,7 +26,6 @@ EXPECTED_MANIFEST = {
     "camera": "Large_D435_640x480",
     "action_contract": "chunk-start-relative-eef16-predict-h50-execute-h15",
     "model_seed_policy": "continuous",
-    "model_rng_seed": 20260907,
     "model_runtime": "native_handoff_transformers_5.5.4",
 }
 EXPECTED_IDENTITY = {
@@ -82,6 +81,12 @@ def main() -> int:
         action="store_true",
         help="Also require Base >= Anchor and ZeVA > Base.",
     )
+    parser.add_argument(
+        "--expected-model-rng-seed",
+        type=int,
+        default=20260907,
+        help="Expected continuous model RNG seed (default: 20260907).",
+    )
     args = parser.parse_args()
     root = args.root.resolve()
     output = (args.output or root / "completion_audit.json").resolve()
@@ -118,8 +123,11 @@ def main() -> int:
     check(expected_task_count == 10, f"formal task_count must be 10, got {expected_task_count}")
     check(expected_episodes > 0, f"episodes_per_task must be positive, got {expected_episodes}")
     check(expected_start_seed >= 0, f"absolute_start_seed must be non-negative, got {expected_start_seed}")
-    check(expected_model_rng_seed == 20260907,
-          f"model_rng_seed must be 20260907, got {expected_model_rng_seed}")
+    check(
+        expected_model_rng_seed == args.expected_model_rng_seed,
+        "model_rng_seed must be "
+        f"{args.expected_model_rng_seed}, got {expected_model_rng_seed}",
+    )
     check(len(tasks) == expected_task_count,
           f"expected {expected_task_count} tasks, got {len(tasks)}")
     check(len(tasks) == len(set(tasks)), "tasks.txt contains duplicates")
