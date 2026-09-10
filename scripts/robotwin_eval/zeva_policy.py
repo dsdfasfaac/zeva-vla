@@ -110,8 +110,15 @@ class ZevaModel:
         self._torch = torch
         self._prepare_robotwin_pi_image = prepare_robotwin_pi_image
         self._baseline_only = bool(args.get("baseline_only", False))
+        self._candidate_selector = args.get("candidate_selector")
+        self._candidate_count = int(args.get("candidate_count", 4))
+        self._phase_confidence_floor = float(args.get("phase_confidence_floor", 0.85))
+        if self._candidate_selector not in {None, "phase_gated_consensus_medoid"}:
+            raise ValueError(f"Unsupported candidate selector: {self._candidate_selector!r}.")
+        if self._candidate_selector and self._candidate_count != 4:
+            raise ValueError("The frozen-PI consensus protocol requires exactly four candidates.")
         stage2_checkpoint = args.get("stage2_checkpoint")
-        if not self._baseline_only and not stage2_checkpoint:
+        if not self._baseline_only and not stage2_checkpoint and not self._candidate_selector:
             raise ValueError("ZeVA evaluation requires stage2_checkpoint.")
         self.policy = RobotWinZevaPolicy.from_handoff(
             args["handoff_root"],
@@ -123,7 +130,7 @@ class ZevaModel:
             zte_checkpoint=None if self._baseline_only else args["zte_checkpoint"],
             adapter_checkpoint=(
                 None
-                if self._baseline_only
+                if self._baseline_only or not stage2_checkpoint
                 else str(Path(stage2_checkpoint) / "zeva_adapter.pth")
             ),
             # Stage 2 saves the complete action-expert PI0.5 weights separately
@@ -145,6 +152,26 @@ class ZevaModel:
             if self._torch.cuda.is_available():
                 self._torch.cuda.manual_seed_all(self._model_rng_seed)
         self._previous_commands: torch.Tensor | None = None
+        self._proposal_cpu_rng_state = None
+        self._proposal_cuda_rng_state = None
+        self._reset_proposal_rng(self._model_rng_seed or 0)
+
+    def _reset_proposal_rng(self, seed: int) -> None:
+        """Create an isolated proposal stream without moving the Base stream."""
+        base_cpu = self._torch.random.get_rng_state()
+        base_cuda = (
+            self._torch.cuda.get_rng_state_all() if self._torch.cuda.is_available() else None
+        )
+        self._torch.manual_seed(int(seed) ^ 0x5EEDC0DE)
+        if self._torch.cuda.is_available():
+            self._torch.cuda.manual_seed_all(int(seed) ^ 0x5EEDC0DE)
+        self._proposal_cpu_rng_state = self._torch.random.get_rng_state()
+        self._proposal_cuda_rng_state = (
+            self._torch.cuda.get_rng_state_all() if self._torch.cuda.is_available() else None
+        )
+        self._torch.random.set_rng_state(base_cpu)
+        if base_cuda is not None:
+            self._torch.cuda.set_rng_state_all(base_cuda)
 
     def reset_model(self, payload: dict[str, Any] | None = None) -> None:
         if payload is not None and "seed" in payload:
@@ -152,8 +179,73 @@ class ZevaModel:
             self._torch.manual_seed(seed)
             if self._torch.cuda.is_available():
                 self._torch.cuda.manual_seed_all(seed)
+            self._reset_proposal_rng(seed)
         self.policy.reset(scope="episode")
         self._previous_commands = None
+
+    def _frozen_pi_candidates(self, batch: dict[str, Any]):
+        """Draw K candidates while preserving candidate-0's future Base RNG."""
+        candidate_zero = self.policy.foundation.predict_action_chunk(batch)
+        after_base_cpu = self._torch.random.get_rng_state()
+        after_base_cuda = (
+            self._torch.cuda.get_rng_state_all() if self._torch.cuda.is_available() else None
+        )
+        self._torch.random.set_rng_state(self._proposal_cpu_rng_state)
+        if self._proposal_cuda_rng_state is not None:
+            self._torch.cuda.set_rng_state_all(self._proposal_cuda_rng_state)
+        candidates = [candidate_zero]
+        for _ in range(self._candidate_count - 1):
+            candidates.append(self.policy.foundation.predict_action_chunk(batch))
+        self._proposal_cpu_rng_state = self._torch.random.get_rng_state()
+        self._proposal_cuda_rng_state = (
+            self._torch.cuda.get_rng_state_all() if self._torch.cuda.is_available() else None
+        )
+        self._torch.random.set_rng_state(after_base_cpu)
+        if after_base_cuda is not None:
+            self._torch.cuda.set_rng_state_all(after_base_cuda)
+        return self._torch.stack(candidates, dim=1)
+
+    def _phase_gated_consensus_chunk(self, raw: dict[str, Any]):
+        from openpi.zeva.robotwin_policy import robotwin_multiview_image  # noqa: PLC0415
+
+        batch = self.policy.preprocessor(raw)
+        batch["zeva.goal_embedding"] = self.policy._task_only_goal_embedding(  # noqa: SLF001
+            raw["task"], batch["observation.state"].device
+        )
+        self.policy._prepare_causal_conditioning(  # noqa: SLF001
+            batch,
+            executed_actions=self._previous_commands,
+            actions_normalized=False,
+        )
+        candidates = self._frozen_pi_candidates(batch)
+        prefix = candidates[:, :, :15]
+        pairwise = (prefix[:, :, None] - prefix[:, None, :]).square().mean(dim=(3, 4))
+        medoid_index = pairwise.sum(dim=-1).argmin(dim=-1)
+
+        task_ids = self.policy._retrieved_task_ids  # noqa: SLF001
+        live_phase = self.policy._last_live_phase_token  # noqa: SLF001
+        bank = self.policy.causal_bank
+        if task_ids is None or live_phase is None or bank is None:
+            raise RuntimeError("Consensus selector requires task-language retrieval and live phase.")
+        phase_table = bank.phase_key[task_ids]
+        valid = bank.count[task_ids] > 0
+        phase_score = self._torch.einsum(
+            "bpd,bd->bp",
+            self._torch.nn.functional.normalize(phase_table.float(), dim=-1),
+            self._torch.nn.functional.normalize(live_phase.float(), dim=-1),
+        ).masked_fill(~valid, -self._torch.inf)
+        confidence = phase_score.max(dim=1).values
+        selected_index = self._torch.where(
+            confidence >= self._phase_confidence_floor,
+            medoid_index,
+            self._torch.zeros_like(medoid_index),
+        )
+        selected = candidates[
+            self._torch.arange(len(candidates), device=candidates.device), selected_index
+        ]
+        self.policy._previous_image = robotwin_multiview_image(batch).detach().clone()  # noqa: SLF001
+        self.policy._pending_normalized_actions = selected.detach().clone()  # noqa: SLF001
+        return self.policy.postprocessor(selected), confidence, selected_index
 
     def commit_executed_actions(self, value: np.ndarray) -> None:
         """Record only the H15 controls that RoboTwin actually executed."""
@@ -188,10 +280,18 @@ class ZevaModel:
             ),
             "task": observation["task"],
         }
+        selector_diagnostics = None
         if self._baseline_only:
             batch = self.policy.preprocessor(raw)
             normalized = self.policy.foundation.predict_action_chunk(batch)
             chunk = self.policy.postprocessor(normalized)
+        elif self._candidate_selector == "phase_gated_consensus_medoid":
+            chunk, phase_confidence, selected_index = self._phase_gated_consensus_chunk(raw)
+            selector_diagnostics = {
+                "phase_confidence": float(phase_confidence[0].detach().cpu()),
+                "selected_candidate": int(selected_index[0].detach().cpu()),
+                "fallback_to_base": bool(int(selected_index[0].detach().cpu()) == 0),
+            }
         else:
             chunk = self.policy.infer_chunk(raw, executed_actions=self._previous_commands)
         chunk = self._torch.as_tensor(chunk).detach().cpu()
@@ -202,6 +302,7 @@ class ZevaModel:
         return {
             "actions": chunk.numpy().astype(np.float32),
             "retrieval": [] if self._baseline_only else self.policy.retrieval_diagnostics(),
+            "selector": selector_diagnostics,
         }
 
 

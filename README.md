@@ -48,14 +48,12 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 ## Zeva architecture
 
 The selected PI0.5 has already been trained on the same RoboTwin distribution.
-The authoritative v14 pipeline starts from untouched
-`pretrained_model-best-v1` and keeps every PI0.5 tensor frozen. PaliGemma, the
-PI action expert, Stage 1 ZTE/Mamba, causal bank and task retrieval all stay
-frozen. Only the task/context/prior representation and a small post-diffusion
-residual corrector are trained at `5e-5`. Earlier action-expert and token-
-injection variants are rejected because they reduced normal PI closed-loop
-success; v13's Base/prior interpolation was also rejected after its gate
-collapsed to zero. At deployment all parameters are frozen. The active path is:
+The current v18 candidate starts from untouched `pretrained_model-best-v1` and
+keeps every PI0.5, Stage 1 ZTE/Mamba, causal-bank, and task-retrieval tensor
+frozen. It does not inject tokens, fine-tune the action expert, interpolate
+toward an action prior, or add a post-diffusion residual. Those v11--v17 paths
+were rejected because lower held-out expert-action MSE did not reproduce as
+higher closed-loop success. The active path is:
 
 - The Mamba Causal Transition Encoder consumes all three camera views before an
   executed chunk, the exact normalized EEF16 chunk, and the three resulting
@@ -65,18 +63,23 @@ collapsed to zero. At deployment all parameters are frozen. The active path is:
   attempts in the same fixed episode.
 - Frozen PI0.5 task-language embeddings identify a ZTE task prototype through
   a calibrated retrieval head shared by training and deployment.
-- Frozen PI0.5 first samples its unmodified normalized H50 EEF16 Base chunk.
-  A diagonal Gaussian prior supplies auxiliary mean/uncertainty features, but
-  its mean is never used as a replacement action.
-- The direct residual corrector sees task language, recurrent H15 phase,
-  causal memory, the exact Base action and prior statistics. It predicts a
-  bounded normalized `expert - Base` delta only for H15. H35 is copied from
-  Base exactly. No Zeva signal is inserted into PaliGemma or action-expert
-  tokens; PI masks, position IDs and H50 shape remain unchanged.
+- Frozen PI0.5 samples four native H50 EEF16 candidates. Candidate zero consumes
+  the ordinary Base RNG stream; the other three use an isolated proposal RNG,
+  so selecting candidate zero also preserves every future Base draw.
+- ZeVA selects the H15 distribution medoid: an actual PI sample nearest the
+  other samples, never an averaged or residual-modified action.
+- Task-language retrieval identifies the causal-bank task. The real recurrent
+  H15 Mamba phase is compared with that task's train95 phase bank. If maximum
+  phase similarity is below the preregistered train-distribution 1% quantile
+  (`0.85`), selection falls back exactly to candidate zero.
+- The policy still returns H50 and RoboTwin still executes H15 before replanning.
 
-The residual and gate heads are zero initialized, so step zero is exactly the
-untouched foundation for the same noise. A deployment scale of zero also gives
-an exact Base fallback for any task.
+Offline expert-MSE is now diagnostic only. K=4 has a 57.27% validation oracle
+gap, while the non-learned medoid improves validation MSE by 13.76% on all ten
+selected tasks. The current development split replays the already frozen 80
+expert-valid seeds against the audited Base result `43/80`; v18 must exceed it
+before any independent confirmation or 10x20 final run. Sections describing
+v11--v17 below are retained as historical failure analysis, not active methods.
 
 ## H100 runtime
 

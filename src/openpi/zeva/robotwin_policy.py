@@ -775,6 +775,7 @@ class RobotWinZevaPolicy(nn.Module):
         self._cte_inference_params = None
         self._retrieved_task_ids: torch.Tensor | None = None
         self._retrieved_task_scores: torch.Tensor | None = None
+        self._last_live_phase_token: torch.Tensor | None = None
         self._active_prior_residual_mask = None
         self._active_context_gate = None
         self._active_prior_gate = None
@@ -1413,6 +1414,7 @@ class RobotWinZevaPolicy(nn.Module):
                 memory.update(phase_token[index], causal.causal_signal[index])
 
         offline = self._offline_bank_batch(batch, phase_token)
+        self._last_live_phase_token = phase_token.detach().clone()
         conditioning_phase = offline.phase_token if offline is not None else phase_token
         causal_context = self._build_context(task_schema, conditioning_phase, offline)
         return task_schema, conditioning_phase, causal_context

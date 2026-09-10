@@ -1,8 +1,8 @@
 # ZeVA–RoboTwin：基于已训练 PI0.5 的因果记忆增强方法
 
-> 文档状态：当前正式方法（2026-09-10）
+> 文档状态：当前候选方法与实验证据（2026-09-11）
 > 目标：在已经完成 RoboTwin 训练的 PI0.5 上加入 ZeVA 的因果表征、记忆与检索能力，同时保持 PI0.5 的物理输入输出协议和基础能力。
-> 主线定义：Stage1 训练 ZTE/Mamba 并产生 causal bank、H15 live queries 和 task-language retrieval；Stage2 v14 完全冻结 untouched best-v1 PI0.5 与 Stage1，只在 PI 完成 H50 采样后，用 task/phase/causal 表征预测 `expert - Base` 的有界动作残差，并仅修正实际执行的前 H15。旧 v11 token 注入和 v13 Base/prior 凸混合均已由实验否决。
+> 主线定义：Stage1 训练 ZTE/Mamba 并产生 causal bank、H15 live queries 和 task-language retrieval；当前 v18 完全冻结 untouched best-v1 PI0.5 与 Stage1，由 PI 生成 4 个原生动作候选，ZeVA 用真实 recurrent phase 做 OOD 安全门控并选择 H15 分布 medoid。v11--v17 的 token 注入、action-expert 微调、prior/残差和 expert-MSE ranker 均已被闭环或独立 audit 否决。
 
 ## 1. 问题定义与设计原则
 
@@ -12,14 +12,14 @@ RoboTwin 的基础策略已经是一个在相同 50-task 数据分布上训练�
 2. 当前处于任务的哪个因果阶段；
 3. 已执行动作造成了什么效果；
 4. 当前 episode/attempt 中哪些历史经验与下一步决策相关；
-5. 如何把上述信息以受控残差的形式注入 PI0.5。
+5. 如何在不改写 PI 动作的前提下，用上述信息安全选择 PI 原生候选。
 
 因此，最终方案遵循四个原则：
 
-- **PI0.5 是不可改动的强基线**：untouched best-v1 是唯一正式 Base；v14 的 813 个 PI tensor 必须逐元素保持不变，57% untouched PI 结果是不可放宽的硬下限。
+- **PI0.5 是不可改动的强基线**：untouched best-v1 是唯一正式 Base；全部 PI tensor 保持不变，57% untouched PI 结果是不可放宽的硬下限。
 - **因果状态必须来自真实 action-effect transition**：不使用帧编号、oracle progress 或测试成功标签构造部署时状态。
 - **训练与部署使用相同递归过程**：从真实 `B0` 初始化，每执行 H15 后更新一次 Mamba、BIT 和 PIM。
-- **增强是可关闭的输出残差**：零初始化 residual 保证初始策略严格等于原 PI0.5；任务级部署 scale 为 0 时也严格回退到 Base。
+- **增强只在 PI 分布内选择**：输出必须是四个冻结 PI 候选之一；phase OOD 时选择 candidate-0，并同时保持后续 Base RNG 流不变。
 
 ## 2. 与 BehaviorVLA 迁移方案的关系
 
@@ -32,11 +32,11 @@ RoboTwin 的基础策略已经是一个在相同 50-task 数据分布上训练�
 | 初始状态 | 方法相关上下文初始化 | `B0 = F_init(g, s0)`，其中 `g` 是冻结 PI0.5 的任务语言表示 |
 | 外部知识 | 方法相关 memory/retrieval | train95-only causal bank + task/phase retrieval |
 | 在线记忆 | 历史上下文 | BIT（短期）+ PIM（持久） |
-| 接入基础模型 | 下游策略适配 | PI0.5 先独立生成 Base H50；task language、真实 H15 phase、causal context 与 Base/prior statistics 预测 post-diffusion EEF16 残差 |
-| Stage 2 | 下游策略适配 | 完全冻结 untouched best-v1、ZTE/Mamba、bank、retrieval；只训练 task/context/prior 表征与 direct residual corrector |
+| 接入基础模型 | 下游策略适配 | PI0.5 生成 K=4 个原生 H50；ZeVA 以 task-language + 真实 H15 phase 做安全门控，选择 H15 medoid，不改写动作 |
+| Stage 2 | 下游策略适配 | 当前 v18 不微调 PI/ZTE/bank；候选价值学习仅作否决性消融，部署采用无需 expert-MSE ranker 的 phase-gated consensus |
 | Stage 3 | 对最终策略特征做检索对齐 | 仅在 Stage2 paired 闭环评测后决定是否需要 |
 
-这里最关键的改动是：**正式 Stage2 不在 VLM 输入前注入，也不写入 diffusion/action-expert token。untouched PI0.5 先独立完成 H50 采样；ZeVA 用 task-language、真实 recurrent H15 phase、causal memory、Base action 与 Gaussian prior statistics 直接预测 `expert - Base`，只修改前 H15，后 H35 逐元素保留 Base。Gaussian NLL 只作为表征辅助，prior mean 不再直接替代 PI 动作。训练和部署都不使用 BehaviorVLA 的 episode-index oracle。**
+这里最关键的改动是：**当前方法不在 VLM 前注入、不写 diffusion/action-expert token，也不在 PI 输出后添加 residual。untouched PI0.5 独立生成四个 H50；candidate-0 使用正常 Base 连续 RNG，额外候选使用隔离 RNG。ZeVA 通过 task-language 检索任务，用真实 recurrent H15 phase 和 train95 causal bank 判断是否在分布内；在分布内选择实际 PI medoid，分布外精确回退 candidate-0。训练和部署都不使用 BehaviorVLA 的 episode-index oracle。**
 
 ## 3. 冻结的 RoboTwin–PI0.5 契约
 
@@ -74,9 +74,9 @@ checkpoint/pretrained_model-best-v1
 
 Stage1 的 B0 语言坐标、causal bank 与 retrieval 由 `pretrained_model` 对应的冻结语言初始化产生；当前 v14 的 Base 严格使用 `pretrained_model-best-v1`。两者模型 hash 不同，因此 v14 显式加载独立的 Stage1 language checkpoint 来保持既有语言坐标，不把 best-v1 的 embedding 偷换进已冻结的 Stage1。更换 PI-base 时的规则见第 16 节。
 
-## 4. 方法总览（当前主线：v14）
+## 4. 方法总览（当前主线：v18 phase-gated PI consensus）
 
-当前正式候选是 v14 H15 direct output residual。untouched `pretrained_model-best-v1`、PaliGemma/VLM、action expert、ZTE/Mamba、causal bank 和 task retrieval 全部冻结。旧的 context/prior token projector 被硬清零并关闭。只用 `5e-5` 更新 task/context/prior 表征与 residual corrector。v11 的 token/action-expert 路线在闭环为 Base `43/80`、ZeVA `41/80`；v13 的 Base/prior 凸混合到 step1000 将 gate 压到 `8.5e-8`，均已拒绝：
+当前候选是 v18 phase-gated PI consensus。untouched `pretrained_model-best-v1`、PaliGemma/VLM、action expert、ZTE/Mamba、causal bank 和 task retrieval 全部冻结。v14 虽在 validation5 上 10/10 任务 expert-action MSE 改善，但 development split-j 为 Base `43/80`、ZeVA `38/80`；二值路由在独立 split-i 到 73/80 时已数学上不可能超过 Base，故全部 residual 方法停止。随后 K=4 PI 候选验证 oracle 相对 candidate-0 改善 `57.27%`；学习 ranker 只能捕获 `3.9%--8.7%` oracle 空间且任务符号不稳定，也被否决。无需学习的 PI medoid 在 validation 上改善 `13.76%` 且 10/10 任务为正，因此只允许它进入闭环开发验证：
 
 ```text
 离线 Stage1
@@ -86,23 +86,20 @@ PI-base 冻结 task embedding + s0 ──► B0
                                       └── train95 bank / live queries / task retrieval
                                            在 Stage2 开始前全部冻结
 
-Stage2 v14 与部署的因果条件链
+当前 v18 与部署的因果条件链
 instruction ──► task-language retrieval ──► task prototype
 真实 H15 历史 ──► 冻结 ZTE ────────► live phase
-train95 bank + BIT + PIM ─────────────────────────► causal context
-                                                        ├── Gaussian prior statistics（辅助）
-三相机 + Joint14 + instruction ──► 冻结 PI0.5 ──────────┼──► Base EEF16 [50,16]
-                                                        ▼
-                                         bounded residual corrector
-                                      Base[:15] + Delta[:15]；H35 不变
-                                                        └── 执行前 15 步后重规划
+train95 causal bank ──► 最大 phase similarity ──► OOD gate（floor=0.85）
+三相机 + Joint14 + instruction ──► 冻结 PI0.5 ──► K=4 原生 EEF16 [50,16]
+                                                        │
+                                      in-distribution：选择 H15 medoid 候选
+                                      OOD：选择 candidate-0 exact Base
+                                                        └── 返回 H50，执行 H15 后重规划
 ```
 
-residual head 和 gate head 都为零初始化，因此 step0 的最终动作严格等于 Base。residual 以 normalized EEF16 的 `0.25` 为硬上界；训练目标直接是最终 H15 对专家动作的 MSE，并加入 residual-target regression、逐样本 non-regression hinge、`0.10` trust region、Gaussian NLL 表征辅助和防 gate-collapse 正则。完整训练为 1,500 global steps、每卡 batch16、累积2、8卡 global batch256。为避免反复运行冻结 PI，训练使用一次性导出的 immutable Base action cache。
+candidate-0 在每次 replan 先消耗正常 Base RNG；保存其后的 RNG 状态，再切到独立 proposal RNG 生成三个额外候选，最后恢复 Base RNG。故选择 candidate-0 时，本次动作与未来 Base 随机流都严格一致。medoid 是四个候选中到其余候选平均 H15 距离最小的实际样本，不做坐标平均。`0.85` 来自 train phase-bank 最大余弦相似度的第 1 百分位，在闭环结果出现前固定。离线指标只决定能否进入闭环，最终唯一判据是相同 seed/instruction/RNG 下的成功率。
 
-v14 step1500 的 validation5 直接动作结果：Base MSE `0.01201938`，ZeVA MSE `0.01196872`，paired improvement `5.06596e-5`，sample win fraction `68.19%`，10/10 任务 improvement 为正，minimum-task improvement `1.11653e-5`。这只允许进入闭环验证，不能替代成功率结果。
-
-未路由的 v14 在 development split-j 上为 Base `43/80`、ZeVA `38/80`，证明离线 MSE 改善仍不能支持全任务持续注入。部署安全路由采用预先固定的二值规则：一个任务只有在 development 中至少多 1 次成功且 ZeVA-only wins 严格多于 Base-only losses 时 scale=1，否则 scale=0 严格回退 Base。该规则只启用 `hanging_mug` 与 `scan_object`，development 组合结果为 `46/80`；随后冻结路由，在独立 split-i 上确认，禁止从 confirmation/final 数据修改路由。
+下文 v11--v17 的训练公式、残差校准和历史目录均保留作失败分析；凡与本节冲突者均不是当前方法。
 
 下图表示单次在线重规划时的注入位置：
 

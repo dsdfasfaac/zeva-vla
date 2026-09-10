@@ -1,0 +1,13 @@
+policy_name: zeva_policy
+handoff_root: /mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1
+foundation_checkpoint: /data1/dingxin/zeva-checkpoint-cache/pretrained_model-best-v1
+goal_embedding_checkpoint: /data1/dingxin/zeva-checkpoint-cache/pretrained_model-stage1-language-v1
+zte_checkpoint: /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1/stage1-zte/zte_best.pth
+causal_bank: /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1/stage1-zte/train_causal_bank.pt
+retrieval_checkpoint: /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1/stage1.5-task-retrieval/task_retrieval.pth
+baseline_only: false
+candidate_selector: phase_gated_consensus_medoid
+candidate_count: 4
+phase_confidence_floor: 0.85
+device: cuda
+model_rng_seed: 20260908
