@@ -69,13 +69,18 @@ cache_file() {
   local host=$1 source=$2 destination=$3 expected=$4
   ssh "$host" "set -euo pipefail
     mkdir -p '$(dirname "$destination")'
-    if [[ -s '$destination' ]]; then
+    marker='$destination.sha256'
+    if [[ -s '$destination' && -s \"\$marker\" && \"\$(cat \"\$marker\")\" = '$expected' ]]; then
+      :
+    elif [[ -s '$destination' ]]; then
       test \"\$(sha256sum '$destination' | awk '{print \$1}')\" = '$expected'
+      printf '%s\\n' '$expected' > \"\$marker\"
     else
       temporary='$destination.partial'
       cp '$source' \"\$temporary\"
       test \"\$(sha256sum \"\$temporary\" | awk '{print \$1}')\" = '$expected'
       mv \"\$temporary\" '$destination'
+      printf '%s\\n' '$expected' > \"\$marker\"
     fi"
 }
 
