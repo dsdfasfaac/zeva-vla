@@ -110,6 +110,186 @@ class RobotWinActionPrior(nn.Module):
         return RobotWinGaussianActionPrior(mean=mean, log_std=log_std)
 
 
+class RobotWinOutputCorrectionGate(nn.Module):
+    """Conservative H15 gate between the frozen PI action and the ZeVA prior.
+
+    This module never writes into PI0.5's diffusion tokens.  It sees the exact
+    sampled Base action together with task/phase/memory features and returns a
+    scalar interpolation weight per executed step.  A zero weight is therefore
+    an exact, construction-level fallback to the released Base policy.
+    """
+
+    def __init__(
+        self,
+        *,
+        task_dim: int,
+        phase_dim: int,
+        context_dim: int,
+        hidden_dim: int = 256,
+    ):
+        super().__init__()
+        step_feature_dim = (
+            task_dim
+            + phase_dim
+            + context_dim
+            + ROBOTWIN_ACTION_DIM * 4
+            + 1
+        )
+        self.network = nn.Sequential(
+            nn.Linear(step_feature_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, 1),
+        )
+        # Start at about 1% trust.  Unlike a zero-initialized token projector,
+        # this is already a complete deployed computation, so a near-zero gate
+        # makes the initial candidate numerically close to Base while retaining
+        # useful gradients for both the gate and the Gaussian prior.
+        nn.init.zeros_(self.network[-1].weight)
+        nn.init.constant_(self.network[-1].bias, float(torch.logit(torch.tensor(0.01))))
+
+    def forward(
+        self,
+        task_schema: torch.Tensor,
+        phase_token: torch.Tensor,
+        causal_context: torch.Tensor,
+        base_actions: torch.Tensor,
+        prior: RobotWinGaussianActionPrior,
+        *,
+        horizon: int,
+    ) -> torch.Tensor:
+        if not 0 < horizon <= ROBOTWIN_ACTION_HORIZON:
+            raise ValueError(f"Output-correction horizon must be in [1,50], got {horizon}.")
+        base = base_actions[:, :horizon]
+        mean = prior.mean[:, :horizon]
+        log_std = prior.log_std[:, :horizon]
+        if base.shape != mean.shape or mean.shape != log_std.shape:
+            raise ValueError(
+                "Base actions and ZeVA Gaussian parameters must agree over the corrected horizon."
+            )
+        static = torch.cat([task_schema, phase_token, causal_context], dim=-1)
+        static = static[:, None].expand(-1, horizon, -1)
+        time = torch.linspace(
+            0.0,
+            1.0,
+            horizon,
+            device=base.device,
+            dtype=base.dtype,
+        ).view(1, horizon, 1).expand(base.shape[0], -1, -1)
+        features = torch.cat(
+            [
+                static.to(base.dtype),
+                base,
+                mean,
+                log_std,
+                (mean - base).abs(),
+                time,
+            ],
+            dim=-1,
+        )
+        return torch.sigmoid(self.network(features).squeeze(-1))
+
+
+class RobotWinOutputResidualCorrector(nn.Module):
+    """Predict a bounded post-diffusion H15 residual from the exact Base chunk.
+
+    This is deliberately different from :class:`RobotWinOutputCorrectionGate`.
+    The corrector does not interpolate toward the Gaussian prior.  It predicts
+    an action-space delta directly, with the exact frozen PI action, task,
+    recurrent phase, memory context, and Gaussian-prior statistics as input.
+    Both output heads are zero initialized, so a fresh adapter is an exact
+    Base policy even though its gate is already differentiable.  The delta is
+    bounded in normalized EEF16 coordinates and only the executed H15 prefix
+    is written; H35 is copied from Base without touching it.
+    """
+
+    def __init__(
+        self,
+        *,
+        task_dim: int,
+        phase_dim: int,
+        context_dim: int,
+        hidden_dim: int = 256,
+        residual_bound: float = 0.25,
+        gate_floor: float = 0.05,
+    ):
+        super().__init__()
+        residual_bound = float(residual_bound)
+        gate_floor = float(gate_floor)
+        if not math.isfinite(residual_bound) or residual_bound <= 0:
+            raise ValueError("residual_bound must be finite and positive.")
+        if not math.isfinite(gate_floor) or not 0 <= gate_floor < 1:
+            raise ValueError("gate_floor must be finite and in [0, 1).")
+        self.residual_bound = residual_bound
+        self.gate_floor = gate_floor
+        step_feature_dim = task_dim + phase_dim + context_dim + ROBOTWIN_ACTION_DIM * 4 + 1
+        self.trunk = nn.Sequential(
+            nn.Linear(step_feature_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.SiLU(),
+        )
+        self.delta_head = nn.Linear(hidden_dim, ROBOTWIN_ACTION_DIM)
+        self.gate_head = nn.Linear(hidden_dim, 1)
+        # Exact Base at construction time.  The first optimizer update learns
+        # the final delta head before the context trunk is allowed to move.
+        nn.init.zeros_(self.delta_head.weight)
+        nn.init.zeros_(self.delta_head.bias)
+        nn.init.zeros_(self.gate_head.weight)
+        nn.init.zeros_(self.gate_head.bias)
+
+    def forward(
+        self,
+        task_schema: torch.Tensor,
+        phase_token: torch.Tensor,
+        causal_context: torch.Tensor,
+        base_actions: torch.Tensor,
+        prior: RobotWinGaussianActionPrior,
+        *,
+        horizon: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not 0 < horizon <= ROBOTWIN_ACTION_HORIZON:
+            raise ValueError(f"Output-residual horizon must be in [1,50], got {horizon}.")
+        base = base_actions[:, :horizon]
+        mean = prior.mean[:, :horizon]
+        log_std = prior.log_std[:, :horizon]
+        if base.shape != mean.shape or mean.shape != log_std.shape:
+            raise ValueError(
+                "Base actions and ZeVA Gaussian parameters must agree over the corrected horizon."
+            )
+        static = torch.cat([task_schema, phase_token, causal_context], dim=-1)
+        static = static[:, None].expand(-1, horizon, -1)
+        time = torch.linspace(
+            0.0,
+            1.0,
+            horizon,
+            device=base.device,
+            dtype=base.dtype,
+        ).view(1, horizon, 1).expand(base.shape[0], -1, -1)
+        features = torch.cat(
+            [
+                static.to(base.dtype),
+                base,
+                mean.to(base.dtype),
+                log_std.to(base.dtype),
+                (mean - base).abs().to(base.dtype),
+                time,
+            ],
+            dim=-1,
+        )
+        module_dtype = next(self.trunk.parameters()).dtype
+        hidden = self.trunk(features.to(module_dtype))
+        residual = torch.tanh(self.delta_head(hidden)) * self.residual_bound
+        residual = residual.to(base.dtype)
+        gate = self.gate_floor + (1.0 - self.gate_floor) * torch.sigmoid(
+            self.gate_head(hidden).squeeze(-1)
+        )
+        return residual, gate
+
+
 class RobotWinZevaPolicy(nn.Module):
     """RoboTwin PI0.5 plus Zeva causal conditioning for staged fine-tuning.
 
@@ -163,6 +343,16 @@ class RobotWinZevaPolicy(nn.Module):
             phase_dim=self.zeva_config.phase_dim,
             context_dim=self.zeva_config.model_dim,
         )
+        self.output_correction_gate = RobotWinOutputCorrectionGate(
+            task_dim=self.zeva_config.model_dim,
+            phase_dim=self.zeva_config.phase_dim,
+            context_dim=self.zeva_config.model_dim,
+        )
+        self.output_residual_corrector = RobotWinOutputResidualCorrector(
+            task_dim=self.zeva_config.model_dim,
+            phase_dim=self.zeva_config.phase_dim,
+            context_dim=self.zeva_config.model_dim,
+        )
         self.causal_action_projector = nn.Linear(self.zeva_config.model_dim, 1024)
         self.prior_action_projector = nn.Linear(ROBOTWIN_ACTION_DIM, 1024)
         # The projectors start at zero, so the wrapper is exactly the released
@@ -200,6 +390,10 @@ class RobotWinZevaPolicy(nn.Module):
         # the conservative v11 path can persist an H15-only prior injection.
         self._prior_injection_horizon = ROBOTWIN_ACTION_HORIZON
         self._direct_context_injection_enabled = True
+        self._output_action_correction_enabled = False
+        self._output_correction_horizon = 15
+        self._output_residual_correction_enabled = False
+        self._output_residual_horizon = 15
         # Optional deployment-only safety calibration.  A single trust scale is
         # shared by the context and action-prior residuals so calibration cannot
         # change the learned dual-residual semantics.  Task identity comes from
@@ -928,6 +1122,241 @@ class RobotWinZevaPolicy(nn.Module):
         self._active_context_gate = None
         self._active_prior_gate = None
 
+    def _apply_output_action_correction(
+        self,
+        base_actions: torch.Tensor,
+        task_schema: torch.Tensor,
+        phase_token: torch.Tensor,
+        causal_context: torch.Tensor,
+        action_prior: RobotWinGaussianActionPrior,
+        *,
+        injection_confidence: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Blend only the executed prefix and leave the remaining H50 exact Base."""
+        horizon = min(self._output_correction_horizon, base_actions.shape[1])
+        gates = self.output_correction_gate(
+            task_schema,
+            phase_token,
+            causal_context,
+            base_actions,
+            action_prior,
+            horizon=horizon,
+        )
+        if injection_confidence is not None:
+            gates = gates * injection_confidence.to(gates.dtype)[:, None]
+        corrected = base_actions.clone()
+        # Convex interpolation is bounded by the two independently meaningful
+        # action predictions; it cannot extrapolate an unbounded control delta.
+        corrected[:, :horizon] = torch.lerp(
+            base_actions[:, :horizon],
+            action_prior.mean[:, :horizon].to(base_actions.dtype),
+            gates.to(base_actions.dtype).unsqueeze(-1),
+        )
+        return corrected, gates
+
+    def output_correction_training_forward(
+        self,
+        batch: dict[str, torch.Tensor],
+        *,
+        bank_phase_token: torch.Tensor,
+        bank_brief_signals: torch.Tensor,
+        bank_retrieved_signals: torch.Tensor,
+        bank_brief_mask: torch.Tensor,
+        bank_retrieved_mask: torch.Tensor,
+        injection_confidence: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor, RobotWinGaussianActionPrior, torch.Tensor]:
+        """Return exact Base, corrected output, prior and gate for direct H15 training."""
+        task_schema = self._task_schema(batch)
+        causal_context = self.memory_context_encoder(
+            task_schema,
+            bank_phase_token,
+            bank_brief_signals,
+            bank_retrieved_signals,
+            bank_brief_mask,
+            bank_retrieved_mask,
+        )
+        action_prior = self.action_prior(task_schema, bank_phase_token, causal_context)
+        # PI0.5 is deliberately outside autograd.  Stage 2 optimizes the
+        # actual post-diffusion H15 control, not a proxy residual in token space.
+        with torch.no_grad():
+            base_actions = self.foundation.predict_action_chunk(batch).detach()
+        corrected, gates = self._apply_output_action_correction(
+            base_actions,
+            task_schema,
+            bank_phase_token,
+            causal_context,
+            action_prior,
+            injection_confidence=injection_confidence,
+        )
+        return base_actions, corrected, action_prior, gates
+
+    def output_correction_cached_forward(
+        self,
+        task_goal_embedding: torch.Tensor,
+        base_actions: torch.Tensor,
+        *,
+        bank_phase_token: torch.Tensor,
+        bank_brief_signals: torch.Tensor,
+        bank_retrieved_signals: torch.Tensor,
+        bank_brief_mask: torch.Tensor,
+        bank_retrieved_mask: torch.Tensor,
+        injection_confidence: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor, RobotWinGaussianActionPrior, torch.Tensor]:
+        """Fast v13 path after the immutable PI actions have been cached once."""
+        projector_dtype = next(self.task_token_projector.parameters()).dtype
+        task_schema = self.task_token_projector(task_goal_embedding.to(projector_dtype))
+        causal_context = self.memory_context_encoder(
+            task_schema,
+            bank_phase_token,
+            bank_brief_signals,
+            bank_retrieved_signals,
+            bank_brief_mask,
+            bank_retrieved_mask,
+        )
+        action_prior = self.action_prior(task_schema, bank_phase_token, causal_context)
+        corrected, gates = self._apply_output_action_correction(
+            base_actions,
+            task_schema,
+            bank_phase_token,
+            causal_context,
+            action_prior,
+            injection_confidence=injection_confidence,
+        )
+        return base_actions, corrected, action_prior, gates
+
+    def _apply_output_residual_correction(
+        self,
+        base_actions: torch.Tensor,
+        task_schema: torch.Tensor,
+        phase_token: torch.Tensor,
+        causal_context: torch.Tensor,
+        action_prior: RobotWinGaussianActionPrior,
+        *,
+        injection_confidence: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Apply a bounded action-space residual to H15 and copy Base for H35."""
+        horizon = min(self._output_residual_horizon, base_actions.shape[1])
+        residual, gates = self.output_residual_corrector(
+            task_schema,
+            phase_token,
+            causal_context,
+            base_actions,
+            action_prior,
+            horizon=horizon,
+        )
+        if injection_confidence is not None:
+            # Retrieval confidence is a bounded feature, not a second on/off
+            # gate.  Keep a fixed 0.5 floor so a zero residual head cannot be
+            # compounded by ``confidence == 0`` into a permanently silent
+            # corrector (the v13 failure mode).
+            confidence = injection_confidence.to(gates.dtype).clamp(0.0, 1.0)
+            gates = gates * (0.5 + 0.5 * confidence)[:, None]
+        if (
+            self._deployment_task_residual_scales
+            or self._deployment_default_residual_scale != 1.0
+        ):
+            if self._retrieved_task_ids is None or not self.retrieval_task_names:
+                raise RuntimeError(
+                    "Deployment residual calibration requires task-language retrieval."
+                )
+            scales = torch.as_tensor(
+                [
+                    self._deployment_task_residual_scales.get(
+                        self.retrieval_task_names[int(task_id)],
+                        self._deployment_default_residual_scale,
+                    )
+                    for task_id in self._retrieved_task_ids.detach().cpu()
+                ],
+                device=gates.device,
+                dtype=gates.dtype,
+            )
+            gates = gates * scales[:, None]
+        corrected = base_actions.clone()
+        corrected[:, :horizon] = base_actions[:, :horizon] + residual * gates.to(
+            residual.dtype
+        ).unsqueeze(-1)
+        return corrected, gates, residual
+
+    def output_residual_training_forward(
+        self,
+        batch: dict[str, torch.Tensor],
+        *,
+        bank_phase_token: torch.Tensor,
+        bank_brief_signals: torch.Tensor,
+        bank_retrieved_signals: torch.Tensor,
+        bank_brief_mask: torch.Tensor,
+        bank_retrieved_mask: torch.Tensor,
+        injection_confidence: torch.Tensor | None,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        RobotWinGaussianActionPrior,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """Return exact Base and a direct, bounded H15 residual correction."""
+        task_schema = self._task_schema(batch)
+        causal_context = self.memory_context_encoder(
+            task_schema,
+            bank_phase_token,
+            bank_brief_signals,
+            bank_retrieved_signals,
+            bank_brief_mask,
+            bank_retrieved_mask,
+        )
+        action_prior = self.action_prior(task_schema, bank_phase_token, causal_context)
+        with torch.no_grad():
+            base_actions = self.foundation.predict_action_chunk(batch).detach()
+        corrected, gates, residual = self._apply_output_residual_correction(
+            base_actions,
+            task_schema,
+            bank_phase_token,
+            causal_context,
+            action_prior,
+            injection_confidence=injection_confidence,
+        )
+        return base_actions, corrected, action_prior, gates, residual
+
+    def output_residual_cached_forward(
+        self,
+        task_goal_embedding: torch.Tensor,
+        base_actions: torch.Tensor,
+        *,
+        bank_phase_token: torch.Tensor,
+        bank_brief_signals: torch.Tensor,
+        bank_retrieved_signals: torch.Tensor,
+        bank_brief_mask: torch.Tensor,
+        bank_retrieved_mask: torch.Tensor,
+        injection_confidence: torch.Tensor | None,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        RobotWinGaussianActionPrior,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """Fast residual path using the immutable cached Base action chunk."""
+        projector_dtype = next(self.task_token_projector.parameters()).dtype
+        task_schema = self.task_token_projector(task_goal_embedding.to(projector_dtype))
+        causal_context = self.memory_context_encoder(
+            task_schema,
+            bank_phase_token,
+            bank_brief_signals,
+            bank_retrieved_signals,
+            bank_brief_mask,
+            bank_retrieved_mask,
+        )
+        action_prior = self.action_prior(task_schema, bank_phase_token, causal_context)
+        corrected, gates, residual = self._apply_output_residual_correction(
+            base_actions,
+            task_schema,
+            bank_phase_token,
+            causal_context,
+            action_prior,
+            injection_confidence=injection_confidence,
+        )
+        return base_actions, corrected, action_prior, gates, residual
+
     def _prepare_causal_conditioning(
         self,
         batch: dict[str, torch.Tensor],
@@ -1005,20 +1434,43 @@ class RobotWinZevaPolicy(nn.Module):
             executed_actions=executed_actions,
             actions_normalized=actions_normalized,
         )
-        self._active_causal_context = causal_context
-        self._active_action_prior = self.action_prior(task_schema, phase_token, causal_context).mean
-        self._activate_residual_gates(task_schema, phase_token)
-        self._active_prior_residual_mask = None
+        action_prior = self.action_prior(task_schema, phase_token, causal_context)
         if self._retrieved_task_scores is None:
-            self._active_injection_confidence = causal_context.new_ones(causal_context.shape[0])
+            injection_confidence = causal_context.new_ones(causal_context.shape[0])
         else:
-            self._active_injection_confidence = self.calibrate_retrieval_confidence(
+            injection_confidence = self.calibrate_retrieval_confidence(
                 self._retrieved_task_scores
             )
-        try:
+        if self._output_residual_correction_enabled:
             actions = self.foundation.predict_action_chunk(batch)
-        finally:
-            self._clear_active_residuals()
+            actions, _, _ = self._apply_output_residual_correction(
+                actions,
+                task_schema,
+                phase_token,
+                causal_context,
+                action_prior,
+                injection_confidence=injection_confidence,
+            )
+        elif self._output_action_correction_enabled:
+            actions = self.foundation.predict_action_chunk(batch)
+            actions, _ = self._apply_output_action_correction(
+                actions,
+                task_schema,
+                phase_token,
+                causal_context,
+                action_prior,
+                injection_confidence=injection_confidence,
+            )
+        else:
+            self._active_causal_context = causal_context
+            self._active_action_prior = action_prior.mean
+            self._activate_residual_gates(task_schema, phase_token)
+            self._active_prior_residual_mask = None
+            self._active_injection_confidence = injection_confidence
+            try:
+                actions = self.foundation.predict_action_chunk(batch)
+            finally:
+                self._clear_active_residuals()
         self._previous_image = robotwin_multiview_image(batch).detach().clone()
         self._pending_normalized_actions = actions.detach().clone()
         return actions
@@ -1091,11 +1543,79 @@ class RobotWinZevaPolicy(nn.Module):
         injection_confidence: torch.Tensor | None = None,
         prior_residual_mask: torch.Tensor | None = None,
         foundation_only: bool = False,
+        output_correction: bool = False,
+        output_residual: bool = False,
+        cached_base_actions: torch.Tensor | None = None,
+        task_goal_embedding: torch.Tensor | None = None,
         foundation_reduction: str = "mean",
     ):
         """Train the PI0.5 flow policy with Zeva Gaussian-prior conditioning."""
         if foundation_only:
             return self.foundation(batch, reduction=foundation_reduction)
+        if output_correction:
+            required = (
+                bank_phase_token,
+                bank_brief_signals,
+                bank_retrieved_signals,
+                bank_brief_mask,
+                bank_retrieved_mask,
+            )
+            if any(value is None for value in required):
+                raise ValueError("Output correction requires a complete causal-bank batch.")
+            if cached_base_actions is not None:
+                if task_goal_embedding is None:
+                    raise ValueError("Cached output correction requires task_goal_embedding.")
+                return self.output_correction_cached_forward(
+                    task_goal_embedding,
+                    cached_base_actions,
+                    bank_phase_token=bank_phase_token,
+                    bank_brief_signals=bank_brief_signals,
+                    bank_retrieved_signals=bank_retrieved_signals,
+                    bank_brief_mask=bank_brief_mask,
+                    bank_retrieved_mask=bank_retrieved_mask,
+                    injection_confidence=injection_confidence,
+                )
+            return self.output_correction_training_forward(
+                batch,
+                bank_phase_token=bank_phase_token,
+                bank_brief_signals=bank_brief_signals,
+                bank_retrieved_signals=bank_retrieved_signals,
+                bank_brief_mask=bank_brief_mask,
+                bank_retrieved_mask=bank_retrieved_mask,
+                injection_confidence=injection_confidence,
+            )
+        if output_residual:
+            required = (
+                bank_phase_token,
+                bank_brief_signals,
+                bank_retrieved_signals,
+                bank_brief_mask,
+                bank_retrieved_mask,
+            )
+            if any(value is None for value in required):
+                raise ValueError("Output residual correction requires a complete causal-bank batch.")
+            if cached_base_actions is not None:
+                if task_goal_embedding is None:
+                    raise ValueError("Cached output residual correction requires task_goal_embedding.")
+                return self.output_residual_cached_forward(
+                    task_goal_embedding,
+                    cached_base_actions,
+                    bank_phase_token=bank_phase_token,
+                    bank_brief_signals=bank_brief_signals,
+                    bank_retrieved_signals=bank_retrieved_signals,
+                    bank_brief_mask=bank_brief_mask,
+                    bank_retrieved_mask=bank_retrieved_mask,
+                    injection_confidence=injection_confidence,
+                )
+            return self.output_residual_training_forward(
+                batch,
+                bank_phase_token=bank_phase_token,
+                bank_brief_signals=bank_brief_signals,
+                bank_retrieved_signals=bank_retrieved_signals,
+                bank_brief_mask=bank_brief_mask,
+                bank_retrieved_mask=bank_retrieved_mask,
+                injection_confidence=injection_confidence,
+            )
         if bank_phase_token is not None:
             task_schema = self._task_schema(batch)
             causal_context = self.memory_context_encoder(
@@ -1255,6 +1775,81 @@ class RobotWinZevaPolicy(nn.Module):
         self._action_expert_finetune = True
         self.foundation.train()
         core.paligemma_with_expert.paligemma.eval()
+        self.causal_transition_encoder.eval()
+        if self.retrieval_head is not None:
+            self.retrieval_head.requires_grad_(False).eval()
+        return [parameter for parameter in self.parameters() if parameter.requires_grad]
+
+    def configure_output_action_correction_stage2(
+        self, *, correction_horizon: int = 15
+    ) -> list[nn.Parameter]:
+        """Freeze PI/ZTE and train a fallback-safe post-diffusion H15 corrector."""
+        correction_horizon = int(correction_horizon)
+        if not 0 < correction_horizon <= ROBOTWIN_ACTION_HORIZON:
+            raise ValueError("Output-correction horizon must be in [1,50].")
+        self.requires_grad_(False)
+        for module in (
+            self.task_token_projector,
+            self.memory_context_encoder,
+            self.action_prior,
+            self.output_correction_gate,
+        ):
+            module.requires_grad_(True)
+        # The old token-space branches are structurally disabled, not merely
+        # regularized toward small values.
+        with torch.no_grad():
+            self.causal_action_projector.weight.zero_()
+            self.causal_action_projector.bias.zero_()
+            self.prior_action_projector.weight.zero_()
+            self.prior_action_projector.bias.zero_()
+        self._direct_context_injection_enabled = False
+        self._output_action_correction_enabled = True
+        self._output_correction_horizon = correction_horizon
+        self._full_pi05_finetune = False
+        self._action_expert_finetune = False
+        self.foundation.eval()
+        self.causal_transition_encoder.eval()
+        if self.retrieval_head is not None:
+            self.retrieval_head.requires_grad_(False).eval()
+        return [parameter for parameter in self.parameters() if parameter.requires_grad]
+
+    def configure_output_residual_stage2(
+        self,
+        *,
+        correction_horizon: int = 15,
+        residual_bound: float = 0.25,
+    ) -> list[nn.Parameter]:
+        """Freeze PI/ZTE and train the direct post-diffusion H15 residual head."""
+        correction_horizon = int(correction_horizon)
+        if not 0 < correction_horizon <= ROBOTWIN_ACTION_HORIZON:
+            raise ValueError("Output-residual horizon must be in [1,50].")
+        residual_bound = float(residual_bound)
+        if not math.isfinite(residual_bound) or residual_bound <= 0:
+            raise ValueError("Output-residual bound must be finite and positive.")
+        self.requires_grad_(False)
+        for module in (
+            self.task_token_projector,
+            self.memory_context_encoder,
+            self.action_prior,
+            self.output_residual_corrector,
+        ):
+            module.requires_grad_(True)
+        self.output_residual_corrector.residual_bound = residual_bound
+        # The old token-space branches are structurally disabled.  The Base
+        # action is sampled first and the only active ZeVA write is the direct
+        # bounded output residual below.
+        with torch.no_grad():
+            self.causal_action_projector.weight.zero_()
+            self.causal_action_projector.bias.zero_()
+            self.prior_action_projector.weight.zero_()
+            self.prior_action_projector.bias.zero_()
+        self._direct_context_injection_enabled = False
+        self._output_action_correction_enabled = False
+        self._output_residual_correction_enabled = True
+        self._output_residual_horizon = correction_horizon
+        self._full_pi05_finetune = False
+        self._action_expert_finetune = False
+        self.foundation.eval()
         self.causal_transition_encoder.eval()
         if self.retrieval_head is not None:
             self.retrieval_head.requires_grad_(False).eval()
@@ -1443,6 +2038,8 @@ class RobotWinZevaPolicy(nn.Module):
             "task_token_projector": self.task_token_projector.state_dict(),
             "memory_context_encoder": self.memory_context_encoder.state_dict(),
             "action_prior": self.action_prior.state_dict(),
+            "output_correction_gate": self.output_correction_gate.state_dict(),
+            "output_residual_corrector": self.output_residual_corrector.state_dict(),
             "causal_action_projector": self.causal_action_projector.state_dict(),
             "prior_action_projector": self.prior_action_projector.state_dict(),
             "residual_gate_router": self.residual_gate_router.state_dict(),
@@ -1450,6 +2047,11 @@ class RobotWinZevaPolicy(nn.Module):
             "prior_gate_logit": self.prior_gate_logit.detach().cpu(),
             "prior_injection_horizon": self._prior_injection_horizon,
             "direct_context_injection_enabled": self._direct_context_injection_enabled,
+            "output_action_correction_enabled": self._output_action_correction_enabled,
+            "output_correction_horizon": self._output_correction_horizon,
+            "output_residual_correction_enabled": self._output_residual_correction_enabled,
+            "output_residual_horizon": self._output_residual_horizon,
+            "output_residual_bound": self.output_residual_corrector.residual_bound,
             "action_normalization": self.action_normalizer.metadata(),
             "deployment_task_residual_scales": dict(self._deployment_task_residual_scales),
             "deployment_default_residual_scale": self._deployment_default_residual_scale,
@@ -1466,6 +2068,8 @@ class RobotWinZevaPolicy(nn.Module):
             "task_token_projector": self.task_token_projector.state_dict(),
             "memory_context_encoder": self.memory_context_encoder.state_dict(),
             "action_prior": self.action_prior.state_dict(),
+            "output_correction_gate": self.output_correction_gate.state_dict(),
+            "output_residual_corrector": self.output_residual_corrector.state_dict(),
             "causal_action_projector": self.causal_action_projector.state_dict(),
             "prior_action_projector": self.prior_action_projector.state_dict(),
             "residual_gate_router": self.residual_gate_router.state_dict(),
@@ -1473,6 +2077,11 @@ class RobotWinZevaPolicy(nn.Module):
             "prior_gate_logit": self.prior_gate_logit.detach().cpu(),
             "prior_injection_horizon": self._prior_injection_horizon,
             "direct_context_injection_enabled": self._direct_context_injection_enabled,
+            "output_action_correction_enabled": self._output_action_correction_enabled,
+            "output_correction_horizon": self._output_correction_horizon,
+            "output_residual_correction_enabled": self._output_residual_correction_enabled,
+            "output_residual_horizon": self._output_residual_horizon,
+            "output_residual_bound": self.output_residual_corrector.residual_bound,
             "action_normalization": self.action_normalizer.metadata(),
             "deployment_task_residual_scales": dict(self._deployment_task_residual_scales),
             "deployment_default_residual_scale": self._deployment_default_residual_scale,
@@ -1510,6 +2119,10 @@ class RobotWinZevaPolicy(nn.Module):
             names.insert(0, "causal_transition_encoder")
         for name in names:
             getattr(self, name).load_state_dict(checkpoint[name])
+        if "output_correction_gate" in checkpoint:
+            self.output_correction_gate.load_state_dict(checkpoint["output_correction_gate"])
+        if "output_residual_corrector" in checkpoint:
+            self.output_residual_corrector.load_state_dict(checkpoint["output_residual_corrector"])
         if "residual_gate_router" in checkpoint:
             self.residual_gate_router.load_state_dict(checkpoint["residual_gate_router"])
         self.context_gate_logit.data.copy_(checkpoint["context_gate_logit"])
@@ -1520,6 +2133,22 @@ class RobotWinZevaPolicy(nn.Module):
         self._direct_context_injection_enabled = bool(
             checkpoint.get("direct_context_injection_enabled", True)
         )
+        self._output_action_correction_enabled = bool(
+            checkpoint.get("output_action_correction_enabled", False)
+        )
+        self._output_correction_horizon = int(
+            checkpoint.get("output_correction_horizon", 15)
+        )
+        self._output_residual_correction_enabled = bool(
+            checkpoint.get("output_residual_correction_enabled", False)
+        )
+        self._output_residual_horizon = int(
+            checkpoint.get("output_residual_horizon", 15)
+        )
+        if "output_residual_bound" in checkpoint:
+            self.output_residual_corrector.residual_bound = float(
+                checkpoint["output_residual_bound"]
+            )
         self.configure_deployment_residual_scales(
             checkpoint.get("deployment_task_residual_scales"),
             default_scale=checkpoint.get("deployment_default_residual_scale", 1.0),

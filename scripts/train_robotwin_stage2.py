@@ -42,6 +42,11 @@ except ModuleNotFoundError:  # Direct `python scripts/...py` execution.
     from train_robotwin_zte import TorchCodecRoboTwinDataset
 
 
+UNTOUCHED_BEST_V1_MODEL_SHA256 = (
+    "7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe"
+)
+
+
 @dataclasses.dataclass
 class Args:
     handoff_root: str = (
@@ -74,6 +79,10 @@ class Args:
         "/data1/dingxin/zeva-runs/robotwin-v5-h15-tasklang/"
         "stage1.5-task-retrieval/task_retrieval.pth"
     )
+    # Optional untouched-PI action cache.  Required by the formal v13 path so
+    # the frozen diffusion model is evaluated once per observation, not once
+    # per training epoch.
+    base_action_cache: str | None = None
     save_dir: str = (
         "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/"
         "stage2-action-expert-v8-accelerated"
@@ -126,6 +135,12 @@ class Args:
     # Fresh residual branches may use a stronger gate while retaining exact
     # step-zero Base equivalence because both injection projectors start at 0.
     initial_residual_gate_probability: float = 0.01
+    # Direct post-diffusion residual corrector (v14).  The residual is
+    # bounded in normalized EEF16 coordinates and only applied to H15.
+    residual_bound: float = 0.25
+    residual_regression_weight: float = 0.25
+    residual_trust_region_weight: float = 0.01
+    residual_trust_region_radius: float = 0.10
     retrieval_confidence_floor: float = 0.2
     save_freq: int = 500
     save_checkpoints: bool = True
@@ -231,6 +246,7 @@ class RobotWinStage2Dataset(Dataset):
         selected_tasks: tuple[str, ...] | None = None,
         video_backend: str = "torchcodec",
         decoder_threads: int = 1,
+        base_action_cache: str | Path | None = None,
     ):
         if video_backend == "torchcodec":
             self.source = TorchCodecRoboTwinDataset(adapter_manifest, subset=subset)
@@ -268,6 +284,24 @@ class RobotWinStage2Dataset(Dataset):
         ]
         if not self._samples:
             raise ValueError(f"Task subset selected no samples from split {subset!r}.")
+        self._original_sample_indices = list(range(len(self._samples)))
+        self.cached_base_actions: torch.Tensor | None = None
+        if base_action_cache is not None:
+            payload = torch.load(base_action_cache, map_location="cpu", weights_only=False)
+            if payload.get("schema") != "zeva-robotwin-untouched-base-action-cache-v1":
+                raise ValueError("v13 requires an untouched Base action cache v1.")
+            cached = payload["splits"][subset]
+            indices = torch.as_tensor(cached["sample_indices"], dtype=torch.long)
+            actions = torch.as_tensor(cached["base_actions"], dtype=torch.float32)
+            if actions.shape != (len(indices), ROBOTWIN_ACTION_HORIZON, ROBOTWIN_ACTION_DIM):
+                raise ValueError(f"Invalid {subset} Base cache shape: {tuple(actions.shape)}.")
+            if len(indices) != len(indices.unique()) or bool((indices < 0).any()) or bool(
+                (indices >= len(self._samples)).any()
+            ):
+                raise ValueError(f"Invalid or duplicate {subset} Base cache sample indices.")
+            self._samples = [self._samples[int(index)] for index in indices]
+            self._original_sample_indices = indices.tolist()
+            self.cached_base_actions = actions
 
     def __len__(self) -> int:
         return len(self._samples)
@@ -277,13 +311,19 @@ class RobotWinStage2Dataset(Dataset):
         record = self.dataset._records[record_index]  # noqa: SLF001
         episode_start = int(self.dataset._cumulative[record_index])  # noqa: SLF001
         result = dict(self.dataset[episode_start + frame])
-        images = self.source.read_images(record, [frame])
-        for key in ROBOTWIN_CAMERA_KEYS:
-            # FFmpeg returns CHW uint8 [0,255], while the frozen PI0.5
-            # preprocessor declares VISUAL=IDENTITY.  Normalize explicitly at
-            # the dataset boundary so training exactly matches deployment.
-            result[key] = prepare_robotwin_pi_image(images[key][0], name=key)
+        if self.cached_base_actions is None:
+            images = self.source.read_images(record, [frame])
+            for key in ROBOTWIN_CAMERA_KEYS:
+                # FFmpeg returns CHW uint8 [0,255], while the frozen PI0.5
+                # preprocessor declares VISUAL=IDENTITY.  Normalize explicitly at
+                # the dataset boundary so training exactly matches deployment.
+                result[key] = prepare_robotwin_pi_image(images[key][0], name=key)
+        else:
+            result["zeva.base_actions"] = self.cached_base_actions[index]
         result["zeva.task_id"] = torch.tensor(self._task_ids[record["key"][1]], dtype=torch.long)
+        result["zeva.sample_index"] = torch.tensor(
+            self._original_sample_indices[index], dtype=torch.long
+        )
         live = self.live_records[record_index]
         result["zeva.phase_query"] = live["phase_queries"][decision_index].float()
         memory = CausalMemoryManager(
@@ -354,6 +394,22 @@ def _preprocess_with_task_only_goal(
         tasks, processed["action"].device
     )
     return processed
+
+
+def _prepare_cached_output_correction_batch(
+    policy: nn.Module,
+    raw_batch: dict[str, Any],
+) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Prepare v13 without decoding images or invoking PI0.5 again."""
+    unwrapped = policy.module if hasattr(policy, "module") else policy
+    base_actions = raw_batch.pop("zeva.base_actions")
+    raw_targets = raw_batch["action"]
+    task_goal = unwrapped._task_only_goal_embedding(  # noqa: SLF001
+        raw_batch["task"], raw_targets.device
+    )
+    processed = {"zeva.goal_embedding": task_goal}
+    normalized_targets = unwrapped.action_normalizer.normalize(raw_targets)
+    return processed, base_actions, normalized_targets, task_goal
 
 
 def _losses(
@@ -492,6 +548,252 @@ def _baseline_losses(policy: nn.Module, processed: dict[str, torch.Tensor]) -> d
     }
 
 
+def _action_expert_control_losses(
+    policy: nn.Module,
+    processed: dict[str, torch.Tensor],
+    baseline_flow: torch.Tensor | None,
+    foundation_rng_state: tuple[torch.Tensor, torch.Tensor] | None,
+    preserve_weight: float,
+    paired_improvement_margin: float,
+    preserve_scale: float,
+) -> dict[str, torch.Tensor]:
+    """Flow plus matched immutable-Base PBD for the v12 causal control.
+
+    Unlike ``_losses``, this path never builds a causal bank batch, action
+    prior, context residual, or Gaussian NLL.  The only trainable path is the
+    PI0.5 action expert; when a teacher loss is sampled, the anchor forward
+    saved the rank-local RNG state and this student forward consumes the same
+    noise/time draw.  The shared data contract remains H50 prediction with
+    H15-spaced decisions and H15 deployment execution.
+    """
+    if foundation_rng_state is not None:
+        cpu_state, cuda_state = foundation_rng_state
+        torch.random.set_rng_state(cpu_state)
+        torch.cuda.set_rng_state(cuda_state, processed["action"].device)
+    foundation_output = policy(processed, foundation_only=True)
+    flow_per_sample = _foundation_loss(foundation_output, reduction="none")
+    flow = flow_per_sample.mean()
+    if baseline_flow is None:
+        baseline = flow.detach().new_full((), float("nan"))
+        baseline_per_sample = flow_per_sample.detach().new_full(
+            flow_per_sample.shape, float("nan")
+        )
+        preserve = flow.new_zeros(())
+        baseline_sampled = flow.new_zeros(())
+        paired_improvement = flow.new_full((), float("nan"))
+        paired_win_fraction = flow.new_full((), float("nan"))
+        paired_degradation = flow.new_full((), float("nan"))
+    else:
+        baseline_per_sample = baseline_flow.detach()
+        if baseline_per_sample.shape != flow_per_sample.shape:
+            raise ValueError(
+                "Matched immutable-Base and control flow losses must have identical "
+                f"per-example shapes, got {baseline_per_sample.shape} and {flow_per_sample.shape}."
+            )
+        baseline = baseline_per_sample.mean()
+        preserve = (
+            F.relu(
+                flow_per_sample
+                - baseline_per_sample
+                + float(paired_improvement_margin)
+            ).mean()
+            * preserve_scale
+        )
+        baseline_sampled = flow.new_ones(())
+        paired_improvement = baseline - flow
+        paired_win_fraction = (flow_per_sample < baseline_per_sample).to(flow.dtype).mean()
+        paired_degradation = F.relu(flow_per_sample - baseline_per_sample).mean()
+    return {
+        "total": flow + preserve_weight * preserve,
+        "flow": flow,
+        "prior": flow.new_zeros(()),
+        "baseline": baseline,
+        "baseline_sampled": baseline_sampled,
+        "preserve": preserve,
+        "gate": flow.new_zeros(()),
+        "paired_improvement": paired_improvement,
+        "paired_win_fraction": paired_win_fraction,
+        "paired_degradation": paired_degradation,
+        "flow_per_sample": flow_per_sample,
+        "baseline_per_sample": baseline_per_sample,
+        "prior_std": flow.new_zeros(()),
+        "prior_residual_keep": flow.new_zeros(()),
+    }
+
+
+def _output_correction_losses(
+    policy: nn.Module,
+    processed: dict[str, torch.Tensor],
+    bank_batch,
+    injection_confidence: torch.Tensor,
+    *,
+    prior_weight: float,
+    preserve_weight: float,
+    gate_regularization_weight: float,
+    paired_improvement_margin: float,
+    correction_horizon: int,
+    cached_base_actions: torch.Tensor | None = None,
+    task_goal_embedding: torch.Tensor | None = None,
+    target_actions: torch.Tensor | None = None,
+) -> dict[str, torch.Tensor]:
+    """Train the actual post-diffusion H15 output against its exact Base sample."""
+    base, corrected, action_prior, gates = policy(
+        processed,
+        output_correction=True,
+        bank_phase_token=bank_batch.phase_token,
+        bank_brief_signals=bank_batch.brief_signals,
+        bank_retrieved_signals=bank_batch.retrieved_signals,
+        bank_brief_mask=bank_batch.brief_mask,
+        bank_retrieved_mask=bank_batch.retrieved_mask,
+        injection_confidence=injection_confidence,
+        cached_base_actions=cached_base_actions,
+        task_goal_embedding=task_goal_embedding,
+    )
+    horizon = min(int(correction_horizon), base.shape[1])
+    if target_actions is None:
+        target_actions = processed["action"]
+    target = target_actions[:, :horizon, :ROBOTWIN_ACTION_DIM].to(base.dtype)
+    base_prefix = base[:, :horizon]
+    corrected_prefix = corrected[:, :horizon]
+    base_per_sample = (base_prefix - target).square().mean(dim=(1, 2))
+    corrected_per_sample = (corrected_prefix - target).square().mean(dim=(1, 2))
+    corrected_mse = corrected_per_sample.mean()
+    base_mse = base_per_sample.mean()
+    preserve = F.relu(
+        corrected_per_sample - base_per_sample + float(paired_improvement_margin)
+    ).mean()
+    supervised_prior = action_prior._replace(
+        mean=action_prior.mean[:, :horizon],
+        log_std=action_prior.log_std[:, :horizon],
+    )
+    prior = gaussian_action_prior_nll(supervised_prior, target)
+    gate = gates.square().mean()
+    total = (
+        corrected_mse
+        + prior_weight * prior
+        + preserve_weight * preserve
+        + gate_regularization_weight * gate
+    )
+    improvement = base_mse - corrected_mse
+    return {
+        "total": total,
+        # Keep legacy metric names consumable by the shared logger, but make
+        # their direct action-space meaning explicit in the v13 manifest.
+        "flow": corrected_mse,
+        "prior": prior,
+        "baseline": base_mse,
+        "baseline_sampled": corrected_mse.new_ones(()),
+        "preserve": preserve,
+        "gate": gate,
+        "paired_improvement": improvement,
+        "paired_win_fraction": (corrected_per_sample < base_per_sample).float().mean(),
+        "paired_degradation": F.relu(corrected_per_sample - base_per_sample).mean(),
+        "flow_per_sample": corrected_per_sample,
+        "baseline_per_sample": base_per_sample,
+        "prior_std": supervised_prior.log_std.detach().exp().mean(),
+        "prior_residual_keep": gates.detach().mean(),
+    }
+
+
+def _output_residual_losses(
+    policy: nn.Module,
+    processed: dict[str, torch.Tensor],
+    bank_batch,
+    injection_confidence: torch.Tensor,
+    *,
+    prior_weight: float,
+    preserve_weight: float,
+    gate_regularization_weight: float,
+    paired_improvement_margin: float,
+    correction_horizon: int,
+    residual_regression_weight: float,
+    residual_trust_region_weight: float,
+    residual_trust_region_radius: float,
+    residual_bound: float,
+    cached_base_actions: torch.Tensor | None = None,
+    task_goal_embedding: torch.Tensor | None = None,
+    target_actions: torch.Tensor | None = None,
+) -> dict[str, torch.Tensor]:
+    """Train the direct bounded H15 action residual against expert output.
+
+    The exact Base chunk is immutable data.  The main loss supervises the
+    final corrected action; a second regression term supervises the raw
+    residual against the clipped expert-minus-Base delta.  The per-example
+    hinge is retained so a task cannot hide degradation behind another task.
+    Gaussian NLL trains the context/prior representation but never supplies
+    the deployed action by interpolation.
+    """
+    base, corrected, action_prior, gates, residual = policy(
+        processed,
+        output_residual=True,
+        bank_phase_token=bank_batch.phase_token,
+        bank_brief_signals=bank_batch.brief_signals,
+        bank_retrieved_signals=bank_batch.retrieved_signals,
+        bank_brief_mask=bank_batch.brief_mask,
+        bank_retrieved_mask=bank_batch.retrieved_mask,
+        injection_confidence=injection_confidence,
+        cached_base_actions=cached_base_actions,
+        task_goal_embedding=task_goal_embedding,
+    )
+    horizon = min(int(correction_horizon), base.shape[1])
+    if target_actions is None:
+        target_actions = processed["action"]
+    target = target_actions[:, :horizon, :ROBOTWIN_ACTION_DIM].to(base.dtype)
+    base_prefix = base[:, :horizon]
+    corrected_prefix = corrected[:, :horizon]
+    corrected_per_sample = (corrected_prefix - target).square().mean(dim=(1, 2))
+    base_per_sample = (base_prefix - target).square().mean(dim=(1, 2))
+    corrected_mse = corrected_per_sample.mean()
+    base_mse = base_per_sample.mean()
+    preserve = F.relu(
+        corrected_per_sample - base_per_sample + float(paired_improvement_margin)
+    ).mean()
+
+    target_delta = (target - base_prefix).clamp(-float(residual_bound), float(residual_bound))
+    residual_regression = (residual - target_delta).square().mean()
+    effective_delta = corrected_prefix - base_prefix
+    trust_excess = F.relu(
+        effective_delta.abs() - float(residual_trust_region_radius)
+    )
+    trust_region = trust_excess.square().mean()
+    supervised_prior = action_prior._replace(
+        mean=action_prior.mean[:, :horizon],
+        log_std=action_prior.log_std[:, :horizon],
+    )
+    prior = gaussian_action_prior_nll(supervised_prior, target)
+    # Centering rather than shrinking the gate avoids the v13 gate-collapse
+    # failure mode while leaving the residual head itself fully bounded.
+    gate = (gates - 0.5).square().mean()
+    total = (
+        corrected_mse
+        + float(residual_regression_weight) * residual_regression
+        + prior_weight * prior
+        + preserve_weight * preserve
+        + float(residual_trust_region_weight) * trust_region
+        + gate_regularization_weight * gate
+    )
+    improvement = base_mse - corrected_mse
+    return {
+        "total": total,
+        "flow": corrected_mse,
+        "prior": prior,
+        "baseline": base_mse,
+        "baseline_sampled": corrected_mse.new_ones(()),
+        "preserve": preserve,
+        "gate": gate,
+        "residual_regression": residual_regression,
+        "trust_region": trust_region,
+        "paired_improvement": improvement,
+        "paired_win_fraction": (corrected_per_sample < base_per_sample).float().mean(),
+        "paired_degradation": F.relu(corrected_per_sample - base_per_sample).mean(),
+        "flow_per_sample": corrected_per_sample,
+        "baseline_per_sample": base_per_sample,
+        "prior_std": supervised_prior.log_std.detach().exp().mean(),
+        "prior_residual_keep": gates.detach().mean(),
+        "residual_abs": residual.detach().abs().mean(),
+    }
+
+
 def _assert_action_expert_finetune_gradients(
     policy: RobotWinZevaPolicy,
     *,
@@ -571,6 +873,121 @@ def _assert_action_expert_finetune_gradients(
         for parameter in module.parameters()
     ) or policy.context_gate_logit.grad is not None or policy.prior_gate_logit.grad is not None:
         raise RuntimeError("Matched PI baseline unexpectedly received Zeva gradients.")
+
+
+_ACTION_EXPERT_PARAMETER_PREFIXES = (
+    "model.paligemma_with_expert.gemma_expert.model.",
+    "model.action_in_proj.",
+    "model.action_out_proj.",
+    "model.time_mlp_in.",
+    "model.time_mlp_out.",
+)
+
+
+def _assert_action_expert_control_parameters(
+    policy: RobotWinZevaPolicy,
+    trainable: list[nn.Parameter],
+) -> tuple[str, ...]:
+    """Fail closed unless v12's optimizer candidate is exactly action expert."""
+    trainable_ids = {id(parameter) for parameter in trainable}
+    named_foundation = dict(policy.foundation.named_parameters())
+    named_policy = dict(policy.named_parameters())
+    foundation_names = tuple(
+        sorted(name for name, parameter in named_foundation.items() if id(parameter) in trainable_ids)
+    )
+    unexpected_foundation = [
+        name
+        for name in foundation_names
+        if not any(name.startswith(prefix) for prefix in _ACTION_EXPERT_PARAMETER_PREFIXES)
+    ]
+    if unexpected_foundation:
+        raise RuntimeError(
+            "action_expert_control has non-action foundation parameters in the optimizer: "
+            f"{unexpected_foundation[:8]}"
+        )
+    non_foundation = sorted(
+        name
+        for name, parameter in named_policy.items()
+        if id(parameter) in trainable_ids and not name.startswith("foundation.")
+    )
+    if non_foundation:
+        raise RuntimeError(
+            "action_expert_control has ZeVA parameters in the optimizer: "
+            f"{non_foundation[:8]}"
+        )
+    if not foundation_names:
+        raise RuntimeError("action_expert_control has no trainable action-expert parameters.")
+    return foundation_names
+
+
+def _assert_action_expert_control_optimizer(
+    optimizer: torch.optim.Optimizer,
+    trainable: list[nn.Parameter],
+    anchor_parameters: dict[str, torch.Tensor],
+) -> None:
+    """Ensure the immutable anchor is data-only and never enters AdamW."""
+    optimizer_ids = {
+        id(parameter)
+        for group in optimizer.param_groups
+        for parameter in group["params"]
+    }
+    trainable_ids = {id(parameter) for parameter in trainable}
+    if optimizer_ids != trainable_ids:
+        raise RuntimeError(
+            "action_expert_control optimizer parameters differ from the audited trainable set."
+        )
+    teacher_ids = {id(value) for value in anchor_parameters.values()}
+    if optimizer_ids.intersection(teacher_ids):
+        raise RuntimeError("Immutable action-expert teacher tensor entered the optimizer.")
+
+
+def _assert_output_correction_gradients(policy: RobotWinZevaPolicy) -> None:
+    """Fail closed unless v13 trains only the direct output-correction path."""
+    required = (
+        policy.task_token_projector,
+        policy.memory_context_encoder,
+        policy.action_prior,
+        policy.output_correction_gate,
+    )
+    if any(
+        not any(parameter.grad is not None for parameter in module.parameters())
+        for module in required
+    ):
+        raise RuntimeError("v13 output correction omitted gradients from a required module.")
+    forbidden = (
+        policy.foundation,
+        policy.causal_transition_encoder,
+        policy.causal_action_projector,
+        policy.prior_action_projector,
+        policy.residual_gate_router,
+    )
+    if any(parameter.grad is not None for module in forbidden for parameter in module.parameters()):
+        raise RuntimeError("v13 output correction leaked gradients into a frozen/token path.")
+
+
+def _assert_output_residual_gradients(policy: RobotWinZevaPolicy) -> None:
+    """Fail closed unless v14 trains only the direct residual path."""
+    required = (
+        policy.task_token_projector,
+        policy.memory_context_encoder,
+        policy.action_prior,
+        policy.output_residual_corrector,
+    )
+    if any(
+        not any(parameter.grad is not None for parameter in module.parameters())
+        for module in required
+    ):
+        raise RuntimeError("v14 output residual omitted gradients from a required module.")
+    forbidden = (
+        policy.foundation,
+        policy.causal_transition_encoder,
+        policy.causal_action_projector,
+        policy.prior_action_projector,
+        policy.residual_gate_router,
+        policy.output_correction_gate,
+    )
+    if any(parameter.grad is not None for module in forbidden for parameter in module.parameters()):
+        raise RuntimeError("v14 output residual leaked gradients into a frozen/token path.")
 
 
 def _retrieve(
@@ -672,9 +1089,22 @@ def _manifest(
         "adapter",
         "prior_adapter",
         "prior_zeva",
+        "output_correction",
+        "output_residual",
     }
+    action_expert_control = args.training_variant == "action_expert_control"
+    output_correction = args.training_variant == "output_correction"
+    output_residual = args.training_variant == "output_residual"
+    paired_teacher_enabled = (
+        zeva_enabled and not output_correction and not output_residual
+    ) or action_expert_control
     prior_only = args.training_variant in {"prior_adapter", "prior_zeva"}
-    frozen_foundation = args.training_variant in {"adapter", "prior_adapter"}
+    frozen_foundation = args.training_variant in {
+        "adapter",
+        "prior_adapter",
+        "output_correction",
+        "output_residual",
+    }
     zte_checkpoint = torch.load(args.zte_checkpoint, map_location="cpu")
     if zte_checkpoint.get("schema") != "zeva-robotwin-zte-stage1-checkpoint-v5":
         raise ValueError("Aligned Stage 2 requires a Stage 1 v5 checkpoint.")
@@ -685,7 +1115,15 @@ def _manifest(
     if bank.manifest["statistics_sha256"] != _sha256(handoff.statistics):
         raise ValueError("The causal bank does not match the selected PI0.5 normalization.")
     return {
-        "schema": "zeva-robotwin-stage2-action-expert-manifest-v11",
+        "schema": (
+            "zeva-robotwin-stage2-action-expert-control-manifest-v1"
+            if action_expert_control
+            else "zeva-robotwin-stage2-output-correction-manifest-v1"
+            if output_correction
+            else "zeva-robotwin-stage2-output-residual-manifest-v1"
+            if output_residual
+            else "zeva-robotwin-stage2-action-expert-manifest-v11"
+        ),
         "handoff_root": str(handoff.root),
         "foundation_checkpoint": str(handoff.checkpoint),
         "foundation_identity": _checkpoint_identity(handoff.checkpoint),
@@ -712,6 +1150,12 @@ def _manifest(
         "causal_bank_manifest": bank.manifest,
         "live_queries": str(Path(args.live_queries).resolve()),
         "live_queries_sha256": _sha256(args.live_queries),
+        "base_action_cache": (
+            str(Path(args.base_action_cache).resolve()) if args.base_action_cache else None
+        ),
+        "base_action_cache_sha256": (
+            _sha256(args.base_action_cache) if args.base_action_cache else None
+        ),
         "task_retrieval": str(Path(args.task_retrieval).resolve()),
         "task_retrieval_sha256": _sha256(args.task_retrieval),
         "dataset_adapter": str((Path(args.dataset_root) / "adapter.json").resolve()),
@@ -728,10 +1172,17 @@ def _manifest(
         "runtime_versions": runtime_versions,
         "training_variant": args.training_variant,
         "training_mode": (
+            "untouched_best_v1_action_expert_only_pbd_control_v12"
+            if action_expert_control
+            else
             "frozen_paligemma_action_expert_prior_residual_pbd_v11"
             if args.training_variant == "prior_zeva"
             else "frozen_pi05_zeva_prior_only_fixed_gate_v11"
             if args.training_variant == "prior_adapter"
+            else "frozen_pi05_post_diffusion_h15_output_correction_v13"
+            if args.training_variant == "output_correction"
+            else "frozen_pi05_post_diffusion_h15_output_residual_v14"
+            if output_residual
             else "frozen_pi05_zeva_task_phase_routed_dual_residual_v10"
             if frozen_foundation
             else "frozen_paligemma_action_expert_dual_residual_accelerated_v8"
@@ -750,57 +1201,103 @@ def _manifest(
             "persistent_decoder_cache": args.video_backend == "torchcodec",
         },
         "paired_baseline_preservation": {
-            "enabled": zeva_enabled,
+            "enabled": paired_teacher_enabled,
             "teacher": (
                 "independent_untouched_foundation_path"
                 if args.anchor_foundation_checkpoint is not None
                 else (
                     "independent_frozen_base_action_path"
                     if args.anchor_stage2_checkpoint is not None
-                    else ("current_student_residual_off" if zeva_enabled else "none")
+                    else ("current_student_residual_off" if paired_teacher_enabled else "none")
                 )
             ),
             "sampling": (
-                "fixed_optimizer_step_interval" if zeva_enabled else "none"
+                "fixed_optimizer_step_interval" if paired_teacher_enabled else "none"
             ),
-            "interval": args.baseline_preserve_interval if zeva_enabled else None,
+            "interval": args.baseline_preserve_interval if paired_teacher_enabled else None,
             "sampled_loss_scale": (
-                args.baseline_preserve_interval if zeva_enabled else None
+                args.baseline_preserve_interval if paired_teacher_enabled else None
             ),
             "validation": (
-                "every_batch_matched_teacher" if zeva_enabled else "self_flow"
+                "every_batch_matched_teacher" if paired_teacher_enabled else "self_flow"
             ),
-            "hinge_scope": "per_example_no_cross_task_cancellation" if zeva_enabled else None,
+            "same_noise_rng_replay": paired_teacher_enabled,
+            "hinge_scope": "per_example_no_cross_task_cancellation" if paired_teacher_enabled else None,
             "positive_improvement_margin": (
-                args.paired_improvement_margin if zeva_enabled else None
+                args.paired_improvement_margin if paired_teacher_enabled else None
             ),
         },
         "causal_context_residual": {
             "source": "memory_context_encoder",
             "target": (
+                "disabled"
+                if action_expert_control
+                else "post_diffusion_action_residual_h15"
+                if output_residual
+                else
                 "prior_conditioning_only"
                 if prior_only
                 else "noisy_action_embedding"
             ),
-            "direct_injection_enabled": not prior_only,
+            "direct_injection_enabled": (
+                False if action_expert_control or output_correction or output_residual else not prior_only
+            ),
             "broadcast_horizon": 50,
             "gate": (
                 "disabled"
-                if prior_only
+                if prior_only or action_expert_control
                 else "bounded_task_language_plus_recurrent_h15_phase_router"
             ),
         },
         "action_prior": {
-            "distribution": "diagonal_gaussian",
-            "parameterization": "mean_and_log_std",
-            "log_std_range": [-5.0, 2.0],
-            "loss": "negative_log_likelihood_sum_action_mean_executed_horizon",
-            "supervision_horizon": args.prior_injection_horizon,
-            "residual_source": "mean",
-            "residual_target": "noisy_action_embedding",
-            "residual_dropout_probability": args.prior_residual_dropout_probability,
-            "injection_horizon": args.prior_injection_horizon,
-            "scalar_gate": "fixed_0.5" if prior_only else "learned_sigmoid",
+            "distribution": "disabled" if action_expert_control else "diagonal_gaussian",
+            "parameterization": None if action_expert_control else "mean_and_log_std",
+            "log_std_range": None if action_expert_control else [-5.0, 2.0],
+            "loss": "disabled" if action_expert_control else "negative_log_likelihood_sum_action_mean_executed_horizon",
+            "supervision_horizon": None if action_expert_control else args.prior_injection_horizon,
+            "residual_source": None if action_expert_control else "mean",
+            "residual_target": (
+                None
+                if action_expert_control
+                else "post_diffusion_h15_expert_minus_base_delta"
+                if output_residual
+                else "post_diffusion_h15_output"
+                if output_correction
+                else "noisy_action_embedding"
+            ),
+            "residual_dropout_probability": 0.0 if action_expert_control else args.prior_residual_dropout_probability,
+            "injection_horizon": None if action_expert_control else args.prior_injection_horizon,
+            "scalar_gate": (
+                "disabled"
+                if action_expert_control
+                else "direct_bounded_residual_with_floor"
+                if output_residual
+                else "learned_per_step_output_gate"
+                if output_correction
+                else ("fixed_0.5" if prior_only else "learned_sigmoid")
+            ),
+        },
+        "output_action_correction": {
+            "enabled": args.training_variant == "output_correction",
+            "target": "post_diffusion_normalized_eef16",
+            "horizon": args.prior_injection_horizon if args.training_variant == "output_correction" else None,
+            "operator": "bounded_convex_interpolation_between_exact_base_and_gaussian_prior_mean",
+            "identity_fallback": "gate_zero_is_bitwise_base_before_postprocessor",
+            "selection_metric": "heldout_paired_h15_action_mse_not_flow_loss",
+            "token_injection": False,
+        },
+        "output_residual_correction": {
+            "enabled": output_residual,
+            "target": "post_diffusion_normalized_eef16",
+            "horizon": args.prior_injection_horizon if output_residual else None,
+            "operator": "base_plus_bounded_direct_residual_no_prior_lerp",
+            "residual_bound": args.residual_bound if output_residual else None,
+            "gate_floor": 0.05 if output_residual else None,
+            "identity_fallback": "zero_initialized_residual_is_exact_base",
+            "h35": "exact_base_copy",
+            "selection_metric": "heldout_paired_h15_action_mse_not_flow_loss",
+            "deployment_scale": "per_task_validation_selected_in_[0,1], zero_is_exact_base",
+            "token_injection": False,
         },
         "frozen": [
             "pi05_paligemma_vision_tower",
@@ -817,7 +1314,9 @@ def _manifest(
             "context_gate_logit",
             "prior_gate_logit",
             "residual_gate_router",
-        ] if args.training_variant == "baseline" else []) + ([
+            "output_correction_gate",
+            "output_residual_corrector",
+        ] if args.training_variant in {"baseline", "action_expert_control"} else []) + ([
             "pi05_gemma_action_expert",
             "pi05_action_input_output_and_time_projections",
         ] if frozen_foundation else []) + (([
@@ -825,8 +1324,31 @@ def _manifest(
             "context_gate_logit",
             "prior_gate_logit",
         ] + (["residual_gate_router"] if args.training_variant == "prior_zeva" else []))
-        if prior_only else []),
-        "trainable": ([] if frozen_foundation else [
+        if prior_only else []) + ([
+            "causal_action_projector",
+            "prior_action_projector",
+            "context_gate_logit",
+            "prior_gate_logit",
+            "residual_gate_router",
+        ] if output_correction else []) + ([
+            "causal_action_projector",
+            "prior_action_projector",
+            "context_gate_logit",
+            "prior_gate_logit",
+            "residual_gate_router",
+            "output_correction_gate",
+        ] if output_residual else []),
+        "trainable": ([
+            "task_token_projector",
+            "memory_context_encoder",
+            "action_prior",
+            "output_correction_gate",
+        ] if output_correction else ( [
+            "task_token_projector",
+            "memory_context_encoder",
+            "action_prior",
+            "output_residual_corrector",
+        ] if output_residual else ([] if frozen_foundation else [
             "pi05_gemma_action_expert",
             "pi05_action_input_output_and_time_projections",
         ]) + (([
@@ -845,7 +1367,32 @@ def _manifest(
             "context_gate_logit",
             "prior_gate_logit",
             "residual_gate_router",
-        ] if zeva_enabled else [])),
+        ] if zeva_enabled else [])))),
+        "parameter_contract": (
+            {
+                "trainable_scope": "pi05_action_expert_only",
+                "adapter_parameters_frozen": True,
+                "teacher_in_optimizer": False,
+                "pbd_loss": "per_example_flow_hinge_against_immutable_same_noise_teacher",
+                "action_output_horizon": 50,
+                "flow_supervision_horizon": 50,
+                "pbd_horizon": 50,
+                "decision_stride_horizon": 15,
+                "supervision_contract": (
+                    "same H50 PI flow/PBD objective as v11 action expert; "
+                    "dataset decisions and deployment execute every H15"
+                ),
+                "execution_horizon": 15,
+                "gaussian_nll_enabled": False,
+                "checkpoint_contract": {
+                    "full_model_safetensors": True,
+                    "optimizer_state_dict": True,
+                    "adapter_checkpoint": False,
+                },
+            }
+            if action_expert_control
+            else None
+        ),
         "train_args": dataclasses.asdict(args),
         "source_sha256": {
             "trainer": _sha256(Path(__file__).resolve()),
@@ -875,19 +1422,48 @@ def evaluate(
         "paired_improvement": [],
         "paired_win_fraction": [],
         "paired_degradation": [],
+        "residual_regression": [],
+        "trust_region": [],
+        "residual_abs": [],
     }
     paired_by_task: dict[int, dict[str, list[torch.Tensor]]] = {}
     for batch_index, raw_batch in enumerate(loader):
         if batch_index >= args.eval_batches:
             break
+        raw_batch.pop("zeva.sample_index")
         task_ids = raw_batch.pop("zeva.task_id")
         phase_queries = raw_batch.pop("zeva.phase_query")
         live_brief = raw_batch.pop("zeva.live_brief")
         live_brief_mask = raw_batch.pop("zeva.live_brief_mask")
         live_retrieved = raw_batch.pop("zeva.live_retrieved")
         live_retrieved_mask = raw_batch.pop("zeva.live_retrieved_mask")
-        processed = _preprocess_with_task_only_goal(policy, preprocessor, raw_batch)
-        if args.training_variant in {"zeva", "adapter", "prior_adapter", "prior_zeva"}:
+        if args.training_variant in {"output_correction", "output_residual"} and args.base_action_cache is not None:
+            processed, cached_base_actions, target_actions, task_goal_embedding = (
+                _prepare_cached_output_correction_batch(policy, raw_batch)
+            )
+        else:
+            processed = _preprocess_with_task_only_goal(policy, preprocessor, raw_batch)
+            cached_base_actions = target_actions = task_goal_embedding = None
+        if args.training_variant == "action_expert_control":
+            baseline_flow, foundation_rng_state = _matched_baseline_flow(policy, processed)
+            losses = _action_expert_control_losses(
+                policy,
+                processed,
+                baseline_flow,
+                foundation_rng_state,
+                args.preserve_loss_weight,
+                paired_improvement_margin=0.0,
+                preserve_scale=1.0,
+            )
+            retrieval_accuracy = losses["flow"].detach().new_full((), float("nan"))
+        elif args.training_variant in {
+            "zeva",
+            "adapter",
+            "prior_adapter",
+            "prior_zeva",
+            "output_correction",
+            "output_residual",
+        }:
             bank_batch, confidence, retrieval_accuracy = _retrieve(
                 policy,
                 processed,
@@ -902,26 +1478,75 @@ def evaluate(
                 args,
                 training=False,
             )
-            baseline_flow, foundation_rng_state = _matched_baseline_flow(policy, processed)
-            losses = _losses(
-                policy,
-                processed,
-                bank_batch,
-                confidence,
-                baseline_flow,
-                foundation_rng_state,
-                args.prior_loss_weight,
-                args.preserve_loss_weight,
-                args.gate_regularization_weight,
-                args.prior_residual_dropout_probability,
-                paired_improvement_margin=0.0,
-                prior_supervision_horizon=args.prior_injection_horizon,
-                training=False,
-            )
+            if args.training_variant == "output_correction":
+                # Fixed validation batches receive a deterministic PI diffusion
+                # stream; Base and corrected metrics reuse the same sampled chunk.
+                torch.manual_seed(args.seed + 100_000 + batch_index + accelerator.process_index * 10_000)
+                torch.cuda.manual_seed_all(
+                    args.seed + 100_000 + batch_index + accelerator.process_index * 10_000
+                )
+                losses = _output_correction_losses(
+                    policy,
+                    processed,
+                    bank_batch,
+                    confidence,
+                    prior_weight=args.prior_loss_weight,
+                    preserve_weight=args.preserve_loss_weight,
+                    gate_regularization_weight=args.gate_regularization_weight,
+                    paired_improvement_margin=0.0,
+                    correction_horizon=args.prior_injection_horizon,
+                    cached_base_actions=cached_base_actions,
+                    task_goal_embedding=task_goal_embedding,
+                    target_actions=target_actions,
+                )
+            elif args.training_variant == "output_residual":
+                losses = _output_residual_losses(
+                    policy,
+                    processed,
+                    bank_batch,
+                    confidence,
+                    prior_weight=args.prior_loss_weight,
+                    preserve_weight=args.preserve_loss_weight,
+                    gate_regularization_weight=args.gate_regularization_weight,
+                    paired_improvement_margin=0.0,
+                    correction_horizon=args.prior_injection_horizon,
+                    residual_regression_weight=args.residual_regression_weight,
+                    residual_trust_region_weight=args.residual_trust_region_weight,
+                    residual_trust_region_radius=args.residual_trust_region_radius,
+                    residual_bound=args.residual_bound,
+                    cached_base_actions=cached_base_actions,
+                    task_goal_embedding=task_goal_embedding,
+                    target_actions=target_actions,
+                )
+            else:
+                baseline_flow, foundation_rng_state = _matched_baseline_flow(policy, processed)
+                losses = _losses(
+                    policy,
+                    processed,
+                    bank_batch,
+                    confidence,
+                    baseline_flow,
+                    foundation_rng_state,
+                    args.prior_loss_weight,
+                    args.preserve_loss_weight,
+                    args.gate_regularization_weight,
+                    args.prior_residual_dropout_probability,
+                    paired_improvement_margin=0.0,
+                    prior_supervision_horizon=args.prior_injection_horizon,
+                    training=False,
+                )
         else:
             losses = _baseline_losses(policy, processed)
             retrieval_accuracy = losses["flow"].detach().new_full((), float("nan"))
-        if args.training_variant in {"zeva", "adapter", "prior_adapter", "prior_zeva"}:
+        if args.training_variant in {
+            "zeva",
+            "adapter",
+            "prior_adapter",
+            "prior_zeva",
+            "output_correction",
+            "output_residual",
+            "action_expert_control",
+        }:
             gathered_task_ids = accelerator.gather_for_metrics(task_ids.detach()).cpu()
             gathered_flow = accelerator.gather_for_metrics(
                 losses["flow_per_sample"].detach()
@@ -945,13 +1570,19 @@ def evaluate(
             "paired_improvement",
             "paired_win_fraction",
             "paired_degradation",
+            "residual_regression",
+            "trust_region",
+            "residual_abs",
         ):
-            totals[name].append(accelerator.gather_for_metrics(losses[name].detach().reshape(1)))
+            if name in losses:
+                totals[name].append(
+                    accelerator.gather_for_metrics(losses[name].detach().reshape(1))
+                )
         totals["retrieval_accuracy"].append(
             accelerator.gather_for_metrics(retrieval_accuracy.detach().reshape(1))
         )
     result = {
-        name: float(torch.cat(values).mean()) if values else math.inf
+        name: float(torch.cat(values).mean()) if values else float("nan")
         for name, values in totals.items()
     }
     per_task = {}
@@ -981,18 +1612,30 @@ def main(args: Args) -> None:
         "adapter",
         "prior_adapter",
         "prior_zeva",
+            "output_correction",
+            "output_residual",
+            "action_expert_control",
         "baseline",
     }:
         raise ValueError(
-            "training_variant must be 'zeva', 'adapter', 'prior_adapter', 'prior_zeva', or 'baseline'."
+            "training_variant must be 'zeva', 'adapter', 'prior_adapter', 'prior_zeva', "
+            "'output_correction', 'output_residual', 'action_expert_control', or 'baseline'."
         )
     zeva_enabled = args.training_variant in {
         "zeva",
         "adapter",
         "prior_adapter",
         "prior_zeva",
+        "output_correction",
+        "output_residual",
     }
     prior_only = args.training_variant in {"prior_adapter", "prior_zeva"}
+    action_expert_control = args.training_variant == "action_expert_control"
+    output_correction = args.training_variant == "output_correction"
+    output_residual = args.training_variant == "output_residual"
+    paired_teacher_enabled = (
+        zeva_enabled and not output_correction and not output_residual
+    ) or action_expert_control
     if zeva_enabled and args.foundation_checkpoint is not None:
         default_checkpoint = Path(args.handoff_root).resolve() / "checkpoint" / "pretrained_model"
         if Path(args.foundation_checkpoint).resolve() != default_checkpoint and args.goal_embedding_checkpoint is None:
@@ -1057,12 +1700,57 @@ def main(args: Args) -> None:
             policy.causal_action_projector.bias
         ).item():
             raise RuntimeError("v11 invariant failed: direct context projector is nonzero.")
+    elif args.training_variant == "output_correction":
+        if args.prior_injection_horizon != 15:
+            raise ValueError("Formal v13 output correction requires H15.")
+        trainable = policy.configure_output_action_correction_stage2(
+            correction_horizon=args.prior_injection_horizon
+        )
+    elif args.training_variant == "output_residual":
+        if args.prior_injection_horizon != 15:
+            raise ValueError("Formal v14 output residual requires H15.")
+        trainable = policy.configure_output_residual_stage2(
+            correction_horizon=args.prior_injection_horizon,
+            residual_bound=args.residual_bound,
+        )
+    elif args.training_variant == "action_expert_control":
+        trainable = policy.configure_action_expert_only_finetune()
+        # Persist the same H15 decision boundary used by the v11 deployment
+        # contract even though this control has no residual to truncate.
+        policy.configure_prior_injection_horizon(args.prior_injection_horizon)
+        with torch.no_grad():
+            # Keep the disabled residual path numerically inert even if a
+            # future caller accidentally supplies ZeVA inputs to this control.
+            policy.causal_action_projector.weight.zero_()
+            policy.causal_action_projector.bias.zero_()
+            policy.prior_action_projector.weight.zero_()
+            policy.prior_action_projector.bias.zero_()
+            policy.context_gate_logit.fill_(-20.0)
+            policy.prior_gate_logit.fill_(-20.0)
+            for parameter in policy.residual_gate_router.parameters():
+                parameter.zero_()
+        policy._direct_context_injection_enabled = False  # noqa: SLF001
+        if policy._direct_context_injection_enabled:  # noqa: SLF001
+            raise RuntimeError("action_expert_control invariant failed: direct context is enabled.")
+        if any(
+            parameter.requires_grad
+            for module in (
+                policy.task_token_projector,
+                policy.memory_context_encoder,
+                policy.action_prior,
+                policy.causal_action_projector,
+                policy.prior_action_projector,
+                policy.residual_gate_router,
+            )
+            for parameter in module.parameters()
+        ) or policy.context_gate_logit.requires_grad or policy.prior_gate_logit.requires_grad:
+            raise RuntimeError("action_expert_control invariant failed: a ZeVA parameter is trainable.")
     else:
         trainable = policy.configure_action_expert_only_finetune()
     # Prior-only variants set the deployed 0.5 guidance inside their
     # configure_* method.  Do not overwrite that fixed value with the legacy
     # fresh-dual-residual initialization probability.
-    if zeva_enabled and not prior_only and args.resume_checkpoint is None:
+    if zeva_enabled and not prior_only and not output_residual and args.resume_checkpoint is None:
         policy.initialize_residual_gate_probability(
             args.initial_residual_gate_probability
         )
@@ -1071,18 +1759,51 @@ def main(args: Args) -> None:
             raise ValueError("An independent Stage 2 Base anchor is only valid for joint ZeVA training.")
         policy.load_foundation_anchor(args.anchor_stage2_checkpoint)
     if args.anchor_foundation_checkpoint is not None:
-        if args.training_variant != "prior_zeva":
+        if args.training_variant not in {"prior_zeva", "action_expert_control"}:
             raise ValueError(
-                "An untouched foundation anchor is only valid for the prior_zeva variant."
+                "An untouched foundation anchor is only valid for prior_zeva or "
+                "action_expert_control."
             )
         if Path(args.anchor_foundation_checkpoint).resolve() != handoff.checkpoint.resolve():
             raise ValueError(
-                "prior_zeva requires the immutable anchor to be the same untouched foundation "
-                "checkpoint used to initialize the action expert."
+                "The immutable anchor must be the same untouched foundation checkpoint "
+                "used to initialize the action expert."
             )
         policy.load_foundation_anchor(args.anchor_foundation_checkpoint)
-    elif args.training_variant == "prior_zeva":
-        raise ValueError("prior_zeva requires --anchor-foundation-checkpoint.")
+    elif args.training_variant in {"prior_zeva", "action_expert_control"}:
+        raise ValueError(
+            f"{args.training_variant} requires --anchor-foundation-checkpoint."
+        )
+    if action_expert_control:
+        if args.foundation_checkpoint is None:
+            raise ValueError("action_expert_control requires explicit untouched --foundation-checkpoint.")
+        foundation_model = Path(args.foundation_checkpoint).resolve() / "model.safetensors"
+        if _sha256(foundation_model) != UNTOUCHED_BEST_V1_MODEL_SHA256:
+            raise ValueError(
+                "action_expert_control requires untouched best-v1 model.safetensors; "
+                f"got {_sha256(foundation_model)}."
+            )
+        if args.initial_stage2_checkpoint is not None:
+            raise ValueError(
+                "action_expert_control must initialize directly from untouched best-v1; "
+                "--initial-stage2-checkpoint is forbidden."
+            )
+        if args.goal_embedding_checkpoint is not None:
+            raise ValueError(
+                "action_expert_control must use the untouched best-v1 language table; "
+                "--goal-embedding-checkpoint is forbidden."
+            )
+        if Path(args.anchor_foundation_checkpoint).resolve() != handoff.checkpoint.resolve():
+            raise ValueError(
+                "action_expert_control requires the immutable teacher to be the same "
+                "untouched foundation checkpoint used for initialization."
+            )
+        if args.prior_loss_weight != 0.0:
+            raise ValueError("action_expert_control requires --prior-loss-weight 0.")
+        if args.prior_residual_dropout_probability != 0.0:
+            raise ValueError(
+                "action_expert_control requires --prior-residual-dropout-probability 0."
+            )
     core = policy.foundation.model
     if hasattr(core, "gradient_checkpointing_disable"):
         core.gradient_checkpointing_disable()
@@ -1123,8 +1844,11 @@ def main(args: Args) -> None:
         )
     if not (0 < args.action_expert_learning_rate < args.learning_rate):
         raise ValueError("Action-expert learning rate must be positive and smaller than the Zeva rate.")
-    if args.prior_loss_weight <= 0:
-        raise ValueError("Gaussian action-prior NLL weight must be positive.")
+    if args.prior_loss_weight < 0 or (args.prior_loss_weight == 0 and not action_expert_control):
+        raise ValueError(
+            "Gaussian action-prior NLL weight must be positive except for "
+            "action_expert_control, where it must be zero."
+        )
     if not math.isfinite(args.paired_improvement_margin) or args.paired_improvement_margin < 0:
         raise ValueError("Paired improvement margin must be finite and non-negative.")
     if (
@@ -1138,6 +1862,37 @@ def main(args: Args) -> None:
         raise ValueError("prior_injection_horizon must be in [1, 50].")
     if args.baseline_preserve_interval <= 0:
         raise ValueError("baseline_preserve_interval must be positive.")
+    if action_expert_control and args.prior_injection_horizon != 15:
+        raise ValueError("action_expert_control requires the H15 execution/supervision contract.")
+    if output_residual:
+        if not math.isfinite(args.residual_bound) or args.residual_bound <= 0:
+            raise ValueError("v14 residual_bound must be finite and positive.")
+        if not math.isfinite(args.residual_regression_weight) or args.residual_regression_weight < 0:
+            raise ValueError("v14 residual_regression_weight must be finite and non-negative.")
+        if not math.isfinite(args.residual_trust_region_weight) or args.residual_trust_region_weight < 0:
+            raise ValueError("v14 residual_trust_region_weight must be finite and non-negative.")
+        if not math.isfinite(args.residual_trust_region_radius) or args.residual_trust_region_radius <= 0:
+            raise ValueError("v14 residual_trust_region_radius must be finite and positive.")
+    if output_correction and args.base_action_cache is None:
+        raise ValueError("Formal v13 output correction requires --base-action-cache.")
+    if output_residual and args.base_action_cache is None:
+        raise ValueError("Formal v14 output residual requires --base-action-cache.")
+    if not (output_correction or output_residual) and args.base_action_cache is not None:
+        raise ValueError(
+            "A Base action cache is valid only for output_correction or output_residual."
+        )
+    if output_correction or output_residual:
+        base_cache = torch.load(args.base_action_cache, map_location="cpu", weights_only=False)
+        if base_cache.get("schema") != "zeva-robotwin-untouched-base-action-cache-v1":
+            raise ValueError("v13 Base action cache has the wrong schema.")
+        if base_cache.get("foundation_model_sha256") != _sha256(
+            handoff.checkpoint / "model.safetensors"
+        ):
+            raise ValueError("v13 Base action cache was generated by a different PI foundation.")
+        if base_cache.get("live_queries_sha256") != _sha256(args.live_queries):
+            raise ValueError("v13 Base action cache uses different Stage1 live queries.")
+        if args.task_subset is None or base_cache.get("task_subset_sha256") != _sha256(args.task_subset):
+            raise ValueError("v13 Base action cache uses a different task subset.")
     if args.compile_mode not in {"default", "reduce-overhead", "max-autotune"}:
         raise ValueError(f"Unsupported torch.compile mode: {args.compile_mode!r}.")
     preprocessor = policy.preprocessor
@@ -1161,6 +1916,7 @@ def main(args: Args) -> None:
         selected_tasks=selected_tasks,
         video_backend=args.video_backend,
         decoder_threads=args.decoder_threads,
+        base_action_cache=args.base_action_cache if (output_correction or output_residual) else None,
     )
     validation_dataset = RobotWinStage2Dataset(
         adapter_manifest,
@@ -1170,6 +1926,7 @@ def main(args: Args) -> None:
         selected_tasks=selected_tasks,
         video_backend=args.video_backend,
         decoder_threads=args.decoder_threads,
+        base_action_cache=args.base_action_cache if (output_correction or output_residual) else None,
     )
     if train_dataset.task_names != bank.task_names or validation_dataset.task_names != bank.task_names:
         raise ValueError("Dataset task ordering differs from the Stage 1 causal bank.")
@@ -1210,12 +1967,30 @@ def main(args: Args) -> None:
     zeva_parameters = [
         parameter for parameter in trainable if id(parameter) not in action_expert_parameter_ids
     ]
-    if args.training_variant not in {"adapter", "prior_adapter"} and not action_expert_parameters:
+    if args.training_variant not in {
+        "adapter",
+        "prior_adapter",
+        "output_correction",
+        "output_residual",
+    } and not action_expert_parameters:
         raise RuntimeError("Stage 2 requires a non-empty action-expert optimizer group.")
     if zeva_enabled and not zeva_parameters:
         raise RuntimeError("Zeva Stage 2 requires a non-empty Zeva optimizer group.")
     if args.training_variant == "baseline" and zeva_parameters:
         raise RuntimeError("Matched PI baseline must not contain trainable Zeva parameters.")
+    if action_expert_control:
+        if zeva_parameters:
+            raise RuntimeError(
+                "action_expert_control invariant failed: adapter/prior parameters are trainable."
+            )
+        trainable_names = _assert_action_expert_control_parameters(policy, trainable)
+        manifest["parameter_contract"]["actual_trainable_parameter_count"] = len(trainable_names)
+        manifest["parameter_contract"]["actual_trainable_parameter_names_sha256"] = hashlib.sha256(
+            "\n".join(trainable_names).encode("utf-8")
+        ).hexdigest()
+        manifest["parameter_contract"]["teacher_parameter_count"] = len(
+            policy._foundation_anchor_parameters  # noqa: SLF001
+        )
     manifest["optimizer_groups"] = {}
     if action_expert_parameters:
         manifest["optimizer_groups"]["pi05_action_expert"] = {
@@ -1245,6 +2020,12 @@ def main(args: Args) -> None:
         eps=1e-8,
         weight_decay=args.weight_decay,
     )
+    if action_expert_control:
+        _assert_action_expert_control_optimizer(
+            optimizer,
+            trainable,
+            policy._foundation_anchor_parameters,  # noqa: SLF001
+        )
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer,
         lambda step: min(1.0, (step + 1) / max(1, args.warmup_steps)),
@@ -1259,6 +2040,9 @@ def main(args: Args) -> None:
             "adapter": "zeva-robotwin-stage2-frozen-foundation-training-state-v2",
             "prior_adapter": "zeva-robotwin-stage2-prior-only-training-state-v1",
             "prior_zeva": "zeva-robotwin-stage2-action-expert-prior-training-state-v1",
+            "output_correction": "zeva-robotwin-stage2-output-correction-training-state-v1",
+            "output_residual": "zeva-robotwin-stage2-output-residual-training-state-v1",
+            "action_expert_control": "zeva-robotwin-stage2-action-expert-control-training-state-v1",
             "baseline": "robotwin-pi05-action-expert-baseline-training-state-v1",
         }[args.training_variant]
         if checkpoint.get("schema") != expected_schema:
@@ -1330,20 +2114,27 @@ def main(args: Args) -> None:
         optimizer.zero_grad(set_to_none=True)
         accumulated_losses: dict[str, list[torch.Tensor]] = {}
         retrieval_accuracies: list[torch.Tensor] = []
-        sample_baseline = zeva_enabled and step % args.baseline_preserve_interval == 0
+        sample_baseline = paired_teacher_enabled and step % args.baseline_preserve_interval == 0
         for micro_step in range(args.gradient_accumulation_steps):
             try:
                 raw_batch = next(iterator)
             except StopIteration:
                 iterator = iter(train_loader)
                 raw_batch = next(iterator)
+            raw_batch.pop("zeva.sample_index")
             task_ids = raw_batch.pop("zeva.task_id")
             phase_queries = raw_batch.pop("zeva.phase_query")
             live_brief = raw_batch.pop("zeva.live_brief")
             live_brief_mask = raw_batch.pop("zeva.live_brief_mask")
             live_retrieved = raw_batch.pop("zeva.live_retrieved")
             live_retrieved_mask = raw_batch.pop("zeva.live_retrieved_mask")
-            processed = _preprocess_with_task_only_goal(policy, preprocessor, raw_batch)
+            if args.training_variant in {"output_correction", "output_residual"} and args.base_action_cache is not None:
+                processed, cached_base_actions, target_actions, task_goal_embedding = (
+                    _prepare_cached_output_correction_batch(policy, raw_batch)
+                )
+            else:
+                processed = _preprocess_with_task_only_goal(policy, preprocessor, raw_batch)
+                cached_base_actions = target_actions = task_goal_embedding = None
             if zeva_enabled:
                 bank_batch, confidence, retrieval_accuracy = _retrieve(
                     policy,
@@ -1370,6 +2161,56 @@ def main(args: Args) -> None:
             with sync_context:
                 if args.training_variant == "baseline":
                     micro_losses = _baseline_losses(policy, processed)
+                elif args.training_variant == "action_expert_control":
+                    if sample_baseline:
+                        baseline_flow, foundation_rng_state = _matched_baseline_flow(policy, processed)
+                    else:
+                        baseline_flow, foundation_rng_state = None, None
+                    micro_losses = _action_expert_control_losses(
+                        policy,
+                        processed,
+                        baseline_flow,
+                        foundation_rng_state,
+                        args.preserve_loss_weight,
+                        paired_improvement_margin=args.paired_improvement_margin,
+                        preserve_scale=(
+                            float(args.baseline_preserve_interval) if sample_baseline else 1.0
+                        ),
+                    )
+                elif args.training_variant == "output_correction":
+                    micro_losses = _output_correction_losses(
+                        policy,
+                        processed,
+                        bank_batch,
+                        confidence,
+                        prior_weight=args.prior_loss_weight,
+                        preserve_weight=args.preserve_loss_weight,
+                        gate_regularization_weight=args.gate_regularization_weight,
+                        paired_improvement_margin=args.paired_improvement_margin,
+                        correction_horizon=args.prior_injection_horizon,
+                        cached_base_actions=cached_base_actions,
+                        task_goal_embedding=task_goal_embedding,
+                        target_actions=target_actions,
+                    )
+                elif args.training_variant == "output_residual":
+                    micro_losses = _output_residual_losses(
+                        policy,
+                        processed,
+                        bank_batch,
+                        confidence,
+                        prior_weight=args.prior_loss_weight,
+                        preserve_weight=args.preserve_loss_weight,
+                        gate_regularization_weight=args.gate_regularization_weight,
+                        paired_improvement_margin=args.paired_improvement_margin,
+                        correction_horizon=args.prior_injection_horizon,
+                        residual_regression_weight=args.residual_regression_weight,
+                        residual_trust_region_weight=args.residual_trust_region_weight,
+                        residual_trust_region_radius=args.residual_trust_region_radius,
+                        residual_bound=args.residual_bound,
+                        cached_base_actions=cached_base_actions,
+                        task_goal_embedding=task_goal_embedding,
+                        target_actions=target_actions,
+                    )
                 else:
                     if sample_baseline:
                         baseline_flow, foundation_rng_state = _matched_baseline_flow(policy, processed)
@@ -1395,13 +2236,18 @@ def main(args: Args) -> None:
                     )
                 accelerator.backward(micro_losses["total"] / args.gradient_accumulation_steps)
             if step == start_step and micro_step == 0:
-                _assert_action_expert_finetune_gradients(
-                    accelerator.unwrap_model(policy),
-                    include_zeva=zeva_enabled,
-                    action_expert_trainable=args.training_variant
-                    not in {"adapter", "prior_adapter"},
-                    prior_only=args.training_variant in {"prior_adapter", "prior_zeva"},
-                )
+                if args.training_variant == "output_correction":
+                    _assert_output_correction_gradients(accelerator.unwrap_model(policy))
+                elif args.training_variant == "output_residual":
+                    _assert_output_residual_gradients(accelerator.unwrap_model(policy))
+                else:
+                    _assert_action_expert_finetune_gradients(
+                        accelerator.unwrap_model(policy),
+                        include_zeva=zeva_enabled,
+                        action_expert_trainable=args.training_variant
+                        not in {"adapter", "prior_adapter"},
+                        prior_only=args.training_variant in {"prior_adapter", "prior_zeva"},
+                    )
             for name, value in micro_losses.items():
                 accumulated_losses.setdefault(name, []).append(value.detach())
             retrieval_accuracies.append(retrieval_accuracy.detach())
@@ -1447,6 +2293,9 @@ def main(args: Args) -> None:
                         "adapter": "zeva-robotwin-stage2-frozen-foundation-training-state-v2",
                         "prior_adapter": "zeva-robotwin-stage2-prior-only-training-state-v1",
                         "prior_zeva": "zeva-robotwin-stage2-action-expert-prior-training-state-v1",
+                        "output_correction": "zeva-robotwin-stage2-output-correction-training-state-v1",
+                        "output_residual": "zeva-robotwin-stage2-output-residual-training-state-v1",
+                        "action_expert_control": "zeva-robotwin-stage2-action-expert-control-training-state-v1",
                         "baseline": "robotwin-pi05-action-expert-baseline-training-state-v1",
                         }[args.training_variant],
                         "step": completed,
@@ -1486,6 +2335,21 @@ def main(args: Args) -> None:
                             "train_prior_nll": float(losses["prior"]),
                             "train_prior_std": float(losses["prior_std"]),
                             "train_prior_residual_keep": float(losses["prior_residual_keep"]),
+                            "train_residual_regression": (
+                                float(losses["residual_regression"])
+                                if "residual_regression" in losses
+                                else None
+                            ),
+                            "train_residual_trust_region": (
+                                float(losses["trust_region"])
+                                if "trust_region" in losses
+                                else None
+                            ),
+                            "train_residual_abs": (
+                                float(losses["residual_abs"])
+                                if "residual_abs" in losses
+                                else None
+                            ),
                             "validation": validation,
                         },
                         indent=2,
