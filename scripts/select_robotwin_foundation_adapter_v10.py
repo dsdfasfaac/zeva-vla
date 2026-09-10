@@ -19,6 +19,30 @@ from select_robotwin_anchored_v9 import (
 )
 
 
+def tensor_values_identical(candidate: Path, foundation: Path) -> bool:
+    """Compare tensors, ignoring safetensors container metadata."""
+    import torch
+    from safetensors import safe_open
+
+    with safe_open(candidate, framework="pt", device="cpu") as left, safe_open(
+        foundation, framework="pt", device="cpu"
+    ) as right:
+        left_keys = set(left.keys())
+        right_keys = set(right.keys())
+        if left_keys != right_keys:
+            return False
+        for key in sorted(left_keys):
+            left_tensor = left.get_tensor(key)
+            right_tensor = right.get_tensor(key)
+            if (
+                left_tensor.dtype != right_tensor.dtype
+                or left_tensor.shape != right_tensor.shape
+                or not torch.equal(left_tensor, right_tensor)
+            ):
+                return False
+    return True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("candidate_root", type=Path)
@@ -128,14 +152,20 @@ def main() -> None:
     selected_payload = None
     if selected is not None:
         checkpoint = Path(selected["zeva_checkpoint"])
-        model_sha256 = sha256(checkpoint / "model.safetensors")
-        if model_sha256 != FOUNDATION_SHA256:
-            raise ValueError("selected frozen-PI checkpoint differs from untouched best-v1")
+        model_path = checkpoint / "model.safetensors"
+        if not tensor_values_identical(model_path, foundation_model):
+            raise ValueError(
+                "selected frozen-PI checkpoint tensor values differ from untouched best-v1"
+            )
+        # ``save_model`` can rewrite safetensors metadata, so file hashes need
+        # not match even when all frozen PI tensors are bit-identical.
+        model_sha256 = sha256(model_path)
         selected_payload = {
             **selected,
             "artifacts": {
                 "base_model_sha256": FOUNDATION_SHA256,
                 "zeva_model_sha256": model_sha256,
+                "zeva_tensor_values_bit_identical": True,
                 "zeva_adapter_sha256": sha256(checkpoint / "zeva_adapter.pth"),
             },
         }

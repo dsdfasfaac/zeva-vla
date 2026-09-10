@@ -77,6 +77,11 @@ def main() -> None:
     prior_projector.load_state_dict(adapter["prior_action_projector"])
     router = nn.Sequential(nn.Linear(384, 2))
     router.load_state_dict(adapter["residual_gate_router"])
+    prior_injection_horizon = int(adapter.get("prior_injection_horizon", 50))
+    if not 0 < prior_injection_horizon <= 50:
+        raise RuntimeError(
+            f"Invalid prior injection horizon: {prior_injection_horizon}; expected 1..50."
+        )
     modules = (
         task_projector,
         context_encoder,
@@ -125,6 +130,8 @@ def main() -> None:
             prior_gate = torch.sigmoid(adapter["prior_gate_logit"]) * multipliers[:, 1]
             context_residual = context_projector(context) * context_gate[:, None]
             prior_residual = prior_projector(prior_mean) * prior_gate[:, None, None]
+            if prior_injection_horizon < prior_residual.shape[1]:
+                prior_residual[:, prior_injection_horizon:] = 0
             task_rows[task_name] = {
                 "language_records": len(indices),
                 "phase_bins": len(phase),
@@ -157,6 +164,11 @@ def main() -> None:
             "injected_context_residual_rms": context_rms,
             "injected_prior_residual_rms": prior_rms,
             "context_to_prior_injected_rms_ratio": context_rms / max(prior_rms, 1e-12),
+            "prior_injection_horizon": prior_injection_horizon,
+            "context_projector_max_abs": max(
+                float(context_projector.weight.abs().max()),
+                float(context_projector.bias.abs().max()),
+            ),
         },
         "tasks": task_rows,
     }

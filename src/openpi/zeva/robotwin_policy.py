@@ -195,6 +195,11 @@ class RobotWinZevaPolicy(nn.Module):
         self._active_prior_residual_mask: torch.Tensor | None = None
         self._active_context_gate: torch.Tensor | None = None
         self._active_prior_gate: torch.Tensor | None = None
+        # PI predicts H50 but RoboTwin executes the first H15 before the next
+        # recurrent observation.  Legacy adapters preserve the H50 broadcast;
+        # the conservative v11 path can persist an H15-only prior injection.
+        self._prior_injection_horizon = ROBOTWIN_ACTION_HORIZON
+        self._direct_context_injection_enabled = True
         # Optional deployment-only safety calibration.  A single trust scale is
         # shared by the context and action-prior residuals so calibration cannot
         # change the learned dual-residual semantics.  Task identity comes from
@@ -512,7 +517,7 @@ class RobotWinZevaPolicy(nn.Module):
             action_embeddings, pad_masks, attention_masks, adarms = original_embed_suffix(*args, **kwargs)
             context = owner._active_causal_context
             confidence = owner._active_injection_confidence
-            if context is not None:
+            if context is not None and owner._direct_context_injection_enabled:
                 if confidence is None:
                     confidence = context.new_ones((context.shape[0],))
                 gate = owner._active_context_gate
@@ -534,7 +539,19 @@ class RobotWinZevaPolicy(nn.Module):
                 if residual_mask is not None:
                     gate = gate * residual_mask.to(device=gate.device, dtype=gate.dtype)
                 prior_delta = owner.prior_action_projector(prior).to(action_embeddings.dtype)
-                action_embeddings = action_embeddings + prior_delta * gate[:, None, None]
+                prior_delta = prior_delta * gate[:, None, None]
+                if prior_delta.ndim == 2:
+                    prior_delta = prior_delta[:, None, :]
+                horizon = min(owner._prior_injection_horizon, action_embeddings.shape[1])
+                if horizon < action_embeddings.shape[1]:
+                    token_mask = torch.zeros(
+                        (1, action_embeddings.shape[1], 1),
+                        device=action_embeddings.device,
+                        dtype=action_embeddings.dtype,
+                    )
+                    token_mask[:, :horizon] = 1
+                    prior_delta = prior_delta * token_mask
+                action_embeddings = action_embeddings + prior_delta
             return action_embeddings, pad_masks, attention_masks, adarms
 
         model.embed_suffix = MethodType(embed_suffix_with_zeva, model)
@@ -835,6 +852,16 @@ class RobotWinZevaPolicy(nn.Module):
             )
             self.context_gate_logit.copy_(value)
             self.prior_gate_logit.copy_(value)
+
+    def configure_prior_injection_horizon(self, horizon: int) -> None:
+        """Limit prior token injection to the executed prefix when requested."""
+        horizon = int(horizon)
+        if not 0 < horizon <= ROBOTWIN_ACTION_HORIZON:
+            raise ValueError(
+                "prior injection horizon must be in [1, H50], "
+                f"got {horizon}."
+            )
+        self._prior_injection_horizon = horizon
 
     def _activate_residual_gates(
         self, task_schema: torch.Tensor, phase_token: torch.Tensor
@@ -1314,6 +1341,12 @@ class RobotWinZevaPolicy(nn.Module):
         with torch.no_grad():
             self.causal_action_projector.weight.zero_()
             self.causal_action_projector.bias.zero_()
+            # A zero router produces multipliers of exactly 1.0 after
+            # ``2 * sigmoid``. Freeze it so the deployed prior guidance is
+            # genuinely fixed at 0.5. Task and recurrent H15 phase still
+            # condition the Gaussian prior itself.
+            for parameter in self.residual_gate_router.parameters():
+                parameter.zero_()
             self.context_gate_logit.fill_(-20.0)
             self.prior_gate_logit.copy_(
                 torch.logit(
@@ -1336,6 +1369,56 @@ class RobotWinZevaPolicy(nn.Module):
         self._full_pi05_finetune = False
         self._action_expert_finetune = False
         self.foundation.eval()
+        self.causal_transition_encoder.eval()
+        if self.retrieval_head is not None:
+            self.retrieval_head.requires_grad_(False).eval()
+        return [parameter for parameter in self.parameters() if parameter.requires_grad]
+
+    def configure_action_expert_prior_finetune_stage2(
+        self,
+        *,
+        prior_gate_probability: float = 0.5,
+        prior_injection_horizon: int = ROBOTWIN_ACTION_HORIZON,
+    ) -> list[nn.Parameter]:
+        """Tune the PI action path plus only the BehaviorVLA prior residual.
+
+        This is the conservative v11 variant.  PaliGemma and all Stage 1
+        causal/retrieval modules stay frozen; the action expert is allowed to
+        adapt, while the context projector is permanently disabled.  The
+        context encoder still feeds the Gaussian prior, but never writes a
+        direct high-dimensional residual into the noisy action tokens.
+        """
+        probability = float(prior_gate_probability)
+        if not math.isfinite(probability) or not 0.0 < probability < 1.0:
+            raise ValueError("prior_gate_probability must be finite and in (0, 1).")
+        self.configure_prior_injection_horizon(prior_injection_horizon)
+
+        # Start from the same action-path parameter set as the established
+        # Stage 2 fine-tune, then remove the direct context branch and both
+        # learnable scalar gates from the optimizer.
+        self.configure_action_expert_finetune_stage2()
+        with torch.no_grad():
+            self.causal_action_projector.weight.zero_()
+            self.causal_action_projector.bias.zero_()
+            self.context_gate_logit.fill_(-20.0)
+            self.prior_gate_logit.copy_(
+                torch.logit(
+                    torch.tensor(
+                        probability,
+                        device=self.prior_gate_logit.device,
+                        dtype=self.prior_gate_logit.dtype,
+                    )
+                )
+            )
+        self.causal_action_projector.requires_grad_(False)
+        self.residual_gate_router.requires_grad_(False)
+        self.context_gate_logit.requires_grad_(False)
+        self.prior_gate_logit.requires_grad_(False)
+        self._direct_context_injection_enabled = False
+        self._full_pi05_finetune = False
+        self._action_expert_finetune = True
+        self.foundation.train()
+        self.foundation.model.paligemma_with_expert.paligemma.eval()
         self.causal_transition_encoder.eval()
         if self.retrieval_head is not None:
             self.retrieval_head.requires_grad_(False).eval()
@@ -1365,6 +1448,8 @@ class RobotWinZevaPolicy(nn.Module):
             "residual_gate_router": self.residual_gate_router.state_dict(),
             "context_gate_logit": self.context_gate_logit.detach().cpu(),
             "prior_gate_logit": self.prior_gate_logit.detach().cpu(),
+            "prior_injection_horizon": self._prior_injection_horizon,
+            "direct_context_injection_enabled": self._direct_context_injection_enabled,
             "action_normalization": self.action_normalizer.metadata(),
             "deployment_task_residual_scales": dict(self._deployment_task_residual_scales),
             "deployment_default_residual_scale": self._deployment_default_residual_scale,
@@ -1386,6 +1471,8 @@ class RobotWinZevaPolicy(nn.Module):
             "residual_gate_router": self.residual_gate_router.state_dict(),
             "context_gate_logit": self.context_gate_logit.detach().cpu(),
             "prior_gate_logit": self.prior_gate_logit.detach().cpu(),
+            "prior_injection_horizon": self._prior_injection_horizon,
+            "direct_context_injection_enabled": self._direct_context_injection_enabled,
             "action_normalization": self.action_normalizer.metadata(),
             "deployment_task_residual_scales": dict(self._deployment_task_residual_scales),
             "deployment_default_residual_scale": self._deployment_default_residual_scale,
@@ -1427,6 +1514,12 @@ class RobotWinZevaPolicy(nn.Module):
             self.residual_gate_router.load_state_dict(checkpoint["residual_gate_router"])
         self.context_gate_logit.data.copy_(checkpoint["context_gate_logit"])
         self.prior_gate_logit.data.copy_(checkpoint["prior_gate_logit"])
+        self.configure_prior_injection_horizon(
+            checkpoint.get("prior_injection_horizon", ROBOTWIN_ACTION_HORIZON)
+        )
+        self._direct_context_injection_enabled = bool(
+            checkpoint.get("direct_context_injection_enabled", True)
+        )
         self.configure_deployment_residual_scales(
             checkpoint.get("deployment_task_residual_scales"),
             default_scale=checkpoint.get("deployment_default_residual_scale", 1.0),

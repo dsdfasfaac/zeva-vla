@@ -59,6 +59,8 @@ print(row["step"])
 print(artifacts["base_model_sha256"])
 print(artifacts["zeva_model_sha256"])
 print(artifacts["zeva_adapter_sha256"])
+if artifacts.get("zeva_tensor_values_bit_identical") is not True:
+    raise SystemExit("v10 selection lacks bit-identical frozen-foundation proof")
 PY
 )
 zeva_checkpoint=${selected[0]}
@@ -67,7 +69,6 @@ base_model_sha256=${selected[2]}
 zeva_model_sha256=${selected[3]}
 zeva_adapter_sha256=${selected[4]}
 test "$base_model_sha256" = "$foundation_sha256"
-test "$zeva_model_sha256" = "$foundation_sha256"
 test "$(sha256sum "$zeva_checkpoint/model.safetensors" | awk '{print $1}')" = "$zeva_model_sha256"
 test "$(sha256sum "$zeva_checkpoint/zeva_adapter.pth" | awk '{print $1}')" = "$zeva_adapter_sha256"
 
@@ -89,8 +90,11 @@ zeva_cache=$model_cache_root/zeva-${zeva_step}-${zeva_model_sha256}
 for host in "$model_host_g" "$model_host_h"; do
   cache_file "$host" "$foundation_checkpoint/model.safetensors" \
     "$base_cache/model.safetensors" "$base_model_sha256"
-  cache_file "$host" "$zeva_checkpoint/model.safetensors" \
-    "$zeva_cache/model.safetensors" "$zeva_model_sha256"
+  # The selected checkpoint's container was reserialized by save_model.  Use
+  # the original untouched foundation at deployment and pair it with only the
+  # selected adapter; the candidate model hash is retained for provenance.
+  cache_file "$host" "$foundation_checkpoint/model.safetensors" \
+    "$zeva_cache/model.safetensors" "$foundation_sha256"
   cache_file "$host" "$zeva_checkpoint/zeva_adapter.pth" \
     "$zeva_cache/zeva_adapter.pth" "$zeva_adapter_sha256"
 done
@@ -150,6 +154,8 @@ payload = {
     "zeva_checkpoint_step": int(step),
     "base_model_sha256": base_hash,
     "zeva_model_sha256": model_hash,
+    "zeva_runtime_model_sha256": base_hash,
+    "zeva_model_source": "untouched_best_v1_foundation",
     "zeva_adapter_sha256": adapter_hash,
     "episodes_per_task_per_split": int(episodes),
     "splits": {"g": {"start_seed": int(seed_g)}, "h": {"start_seed": int(seed_h)}},

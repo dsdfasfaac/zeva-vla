@@ -48,15 +48,16 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 ## Zeva architecture
 
 The selected PI0.5 has already been trained on the same RoboTwin distribution.
-The active anchored-v9 pipeline first selects an action-expert-only Base using
-held-out validation5 (`v8/baseline/003000`). Zeva is initialized from that exact
-Base rather than from a second independent best-v1 fork. The final v9 adapter
-freezes the complete PI0.5, Stage 1 ZTE/Mamba, causal bank, and task retrieval;
-only the 2.91M Zeva parameters are optimized at `5e-5`. Its residual-off path is
-therefore exactly the selected Base and supplies the same-noise paired teacher.
-The earlier low-LR joint v9 candidate is retained as a rejected ablation: its
-two closed-loop splits improved only `+5/160`, below the preregistered `+6`
-gate. At deployment all parameters are frozen. The active Zeva path is:
+The authoritative v11 pipeline therefore starts from untouched
+`pretrained_model-best-v1` and uses a second immutable copy of that checkpoint
+as the same-noise preservation teacher. PaliGemma, Stage 1 ZTE/Mamba, the
+causal bank and task retrieval stay frozen. The PI action expert is updated at
+`5e-7`; the 2.65M prior-conditioning modules are updated at `5e-5`. Earlier
+v8/v9 action-expert Bases are rejected because they reduced the normal PI
+success rate. v10 is retained only as a failed structural ablation: its direct
+context residual became about 12.6 times larger than its prior residual, while
+both were applied across H50 although RoboTwin executes only H15. At deployment
+all parameters are frozen. The active Zeva path is:
 
 - The Mamba Causal Transition Encoder consumes all three camera views before an
   executed chunk, the exact normalized EEF16 chunk, and the three resulting
@@ -67,22 +68,20 @@ gate. At deployment all parameters are frozen. The active Zeva path is:
 - Frozen PI0.5 task-language embeddings identify a ZTE task prototype through
   a calibrated retrieval head shared by training and deployment.
 - A diagonal Gaussian head predicts normalized H50 EEF16 `mean` and
-  `log_std`; its per-step mean is projected into the noisy-action embeddings
-  of the 300M action expert, while Gaussian NLL supervises both prior
-  parameters. Nothing is injected before or into the frozen PaliGemma
-  vision-language backbone. The implementation also contains a broadcast-H50
-  context projector supplies the second bounded residual at the same
-  action-expert input location. Neither residual enters PaliGemma.
+  `log_std`, but v11 injects and supervises only the first H15 that the
+  controller will actually execute. Its mean is projected into the noisy-action
+  embeddings of the action expert with fixed guidance `0.5` and 40% whole-prior
+  residual dropout. Task language and recurrent H15 phase condition the prior
+  itself; the extra gate router is frozen to identity.
+- The former high-dimensional direct context residual is hard-disabled. No
+  Zeva signal is inserted before or into PaliGemma, and no context vector is
+  broadcast over H50. PI prefix length, masks, position IDs and output H50
+  shape remain unchanged.
 
-Both implementation-level injection projections are zero initialized. The v9
-scalar gates start at 25%, but the zero projectors still make step zero exactly
-equal to the selected Base; the stronger gate avoids the vanishing residual
-gradients observed in v8.
-Each residual is multiplied by a task-language/H15-phase router bounded to
-`[0,2]` and retrieval confidence. No token is inserted, and
-the PI prefix length, masks, position IDs, and action-expert shapes remain
-unchanged. Consequently a new adapter wrapper is bit-identical to the selected
-foundation for the same random seed.
+The prior projector is zero initialized, so step zero is exactly the untouched
+foundation for the same noise. The action expert can adapt only under the
+immutable best-v1 preservation loss and a 100x smaller learning rate than the
+new prior path.
 
 ## H100 runtime
 
@@ -135,11 +134,14 @@ manifest.
 ## Three-stage training pipeline
 
 Stage 1 learns ZTE and calibrates the exact task/phase retrieval inputs used at
-deployment. Stage 2a produces the normal action-expert-only Base from the
-best-v1 checkpoint. The active Stage 2b starts from that selected Base, freezes
-the complete PI0.5 as well as Stage 1, and trains only the Zeva residual path.
-Stage 3 is optional and is considered only after paired Base/Zeva closed-loop
-evaluation. The stages must not be collapsed into one joint optimization.
+deployment. Stage 2 starts from untouched RoboTwin best-v1, freezes its
+vision-language backbone and all Stage 1 artifacts, then trains the PI action
+expert plus the H15 Gaussian-prior path under an immutable best-v1 teacher.
+Stage 3 is
+optional and is considered only after paired Base/Zeva closed-loop evaluation.
+The historical Stage 2a action-expert specialization is not part of the current
+pipeline: it was tested and rejected because it degraded the already-trained
+RoboTwin policy.
 
 Replacing only the PI base does not automatically invalidate Stage 1. ZTE,
 the bank, and retrieval can be reused when the new base keeps the same model
@@ -162,8 +164,7 @@ and deployment.
 | Stage | Frozen | Trainable | Required output |
 |---|---|---|---|
 | 1. ZTE and retrieval calibration | PI0.5 weights | ZTE, then a separate task-language retrieval head | `zte_best.pth`, train95 bank, H15 live-query cache, `task_retrieval.pth` |
-| 2a. Base specialization | PaliGemma vision-language backbone, ZTE, bank, retrieval head | PI0.5 action expert and action/time projections | validation5-selected complete Base checkpoint |
-| 2b. Anchored Zeva adapter (active v9) | complete selected Base PI0.5, ZTE/Mamba, bank, retrieval head | task/context fusion, Gaussian prior, both action-embedding projectors, scalar gates and task/phase router at `5e-5` | complete `model.safetensors`, `zeva_adapter.pth`, optimizer/scheduler state, exact-Base initialization identity |
+| 2. H15 prior/action-expert (active v11) | PaliGemma/VLM, ZTE/Mamba, bank, retrieval, direct-context residual and gate router | PI action expert at `5e-7`; task/context-to-prior, Gaussian prior and prior projector at `5e-5` | full `model.safetensors`, `zeva_adapter.pth`, optimizer/scheduler state, immutable best-v1 teacher identity |
 | 3. Optional post-Stage2 adaptation | ZTE, bank, retrieval | selected modules determined by paired Stage2 results | selectively tuned checkpoint |
 
 ### Stage 1: train ZTE and build the training causal bank
@@ -333,24 +334,25 @@ their zero baselines. Validation5 contains one episode per task, so the former
 binary minimum-per-task recall check is intentionally removed. A low weighted
 validation loss alone is not a pass.
 
-### Stage 2: selected Base followed by a frozen-PI Zeva adapter (active v9)
+### Stage 2: H15 prior plus protected action-expert adaptation (active v11)
 
-The action-expert-only Base was trained for 5,000 steps from the exact best-v1
-checkpoint; its held-out minimum-flow checkpoint is step 3000 (`0.017922`).
-Anchored v9 loads that complete Base into the Zeva student. The active adapter
-freezes the complete 430.1M PI0.5 action path and PaliGemma, plus Stage 1
-ZTE/Mamba, the train95 bank, and task retrieval. Only the 2.91M task/context
-fusion, diagonal-Gaussian H50 EEF16 prior, two zero-initialized action-embedding
-projectors, scalar gates, and bounded task/phase router are optimized at
-`5e-5`. Disabling both residuals is therefore an exact Base teacher without a
-second model copy or parameter swap.
+The normal Base is the already RoboTwin-trained, untouched best-v1 checkpoint,
+whose audited ten-task result is `114/200 = 57%`. Active v11 initializes the
+student from this exact checkpoint and loads the same checkpoint as an
+immutable same-noise teacher. It freezes PaliGemma, ZTE/Mamba, the train95 bank,
+task retrieval, the direct-context projector, scalar gates and gate router. It
+trains the PI action expert at `5e-7` and trains only the task/context-to-prior,
+diagonal Gaussian prior and prior projector at `5e-5`.
 
-The low-LR joint v9 ablation trained the action expert at `5e-7`, but its two
-closed-loop validation splits were only Base `84/160` versus Zeva `89/160`
-(`+5`), below the preregistered `+6` gate. It was rejected before final testing.
-The frozen-PI adapter is the current candidate. It uses H15 decision frames and
-the deployment-identical recurrent `bank.retrieve()` path; ground-truth task
-IDs only measure retrieval accuracy and never select a bank entry.
+This change is based on observed failures rather than checkpoint trial and
+error. v8/v9 changed the Base itself and lowered its closed-loop success. v10
+kept PI frozen, but its broadcast context residual dominated the action prior
+by about `12.6x`. Historical prior-only H50 rollouts also lengthened difficult
+stacking/ranking trajectories by roughly 146--238 simulator steps and hit the
+step limit more often. Since the controller replans after H15, v11 hard-disables
+the direct context branch and constrains prior injection and NLL supervision to
+the executed H15 prefix. Task language and the real recurrent H15 phase still
+condition the Gaussian prior; no `episode_index` or progress oracle is used.
 
 ```text
 L_stage2 = L_PI_flow
@@ -359,16 +361,13 @@ L_stage2 = L_PI_flow
           + lambda_gate * L_gate
 ```
 
-Gaussian NLL is summed over EEF16 and averaged over batch/H50, with `log_std`
-clamped to `[-5,2]`. The causal context and prior mean are injected only into
-the noisy-action embedding: context is broadcast to H50, while the prior is
-per-step H50. PaliGemma receives neither residual.
-During Zeva training, an independent Bernoulli mask drops the complete prior
-residual with probability 0.4 (keep probability 0.6), while the separate
-whole-memory dropout remains 0.1. For the active adapter, the residual-off
-teacher's action-expert weights remain bit-identical to Base step 3000. Teacher
-and student consume identical flow noise. A positive `5e-5` margin explicitly
-trains toward measurable improvement.
+Gaussian NLL is summed over EEF16 and averaged over batch/H15, with `log_std`
+clamped to `[-5,2]`. Only the Gaussian mean for action tokens 0--14 is injected
+into the noisy-action embedding. PaliGemma receives no residual. An independent
+Bernoulli mask drops the complete prior residual with probability 0.4 (keep
+probability 0.6), while whole-memory dropout remains 0.1. Teacher and student
+consume identical flow noise. A positive `5e-5` margin trains toward measurable
+improvement while the action expert LR is limited to `5e-7`.
 The hinge is evaluated per example, so a
 gain on one task cannot cancel a regression on another. To control cost, the
 matched frozen baseline runs every two optimizer steps and the sampled term is
@@ -377,27 +376,19 @@ continues to run the matched baseline on every batch, preserving the expected
 training objective and exact validation gate.
 
 ```bash
-# Base v8 is already complete. Launch the active frozen-PI adapter.
-bash scripts/train_robotwin_advantage10_anchored_v9.sh adapter
-
-# Rejected low-LR action-expert ablation, retained only for reproduction.
-bash scripts/train_robotwin_advantage10_anchored_v9.sh joint
+# Train active v11 from untouched best-v1 with its immutable teacher.
+bash scripts/train_robotwin_advantage10_prior_action_expert_v11.sh
 ```
 
-The released joint PaliGemma/action-expert attention forward and both noisy-
-action residuals are retained unchanged. Every PI0.5 tensor has
-`requires_grad=False`; gradients traverse the frozen action expert only to
-reach the injected residuals. Real stochastic layers remain in eval mode while
-the two scheduler-parent flags keep Gemma gradient checkpointing active. The
-trainer installs the residual hook before compiling the foundation training
-forward. It uses per-GPU micro-batch
-16 with two-step gradient accumulation, giving `16 x 8 GPUs x 2 = 256`. This must pass the formal
-eight-H100 smoke test before launch. The active v9 run is 2,000 optimizer steps,
-saves every 250 steps, and starts from the validation-selected Base rather than
-relearning the Base action expert. Every checkpoint
-still stores the complete `model.safetensors` for self-contained deployment,
-plus `zeva_adapter.pth` and complete optimizer/scheduler state,
-manifest, and validation metrics.
+The released joint PaliGemma/action-expert attention forward remains intact.
+The trainer installs the H15 prior hook before compiling the forward and uses
+per-GPU micro-batch 16 with two-step accumulation, giving
+`16 x 8 GPUs x 2 = 256`. A real eight-H100 one-step smoke must pass module-
+freeze and gradient assertions before launch. The active run is 2,000 optimizer
+steps and saves every 250 steps. Every checkpoint stores the complete adapted
+`model.safetensors`, `zeva_adapter.pth`, optimizer/scheduler state, manifest and
+validation metrics; the manifest separately hashes the immutable untouched
+teacher.
 
 #### Ten-task ZeVA specialization
 
@@ -408,58 +399,29 @@ The fixed method-aligned subset is declared in
 Stage 2 decision samples. Stage 1's full 50-task vocabulary, ZTE, causal bank,
 and language retrieval IDs remain unchanged and frozen.
 
-The completed v8 Base is under `advantage10-action-expert-v8/baseline`; v8's
-independently forked Zeva branch had no eligible offline checkpoint and is an
-explicitly rejected audit artifact. The active adapter is under
-`advantage10-anchored-v9/adapter`; its joint sibling is rejected audit data.
-It uses Base step 3000 as both exact initialization and residual-off teacher.
-Held-out validation5 flow, retrieval
-at least 95%, and independent-Base paired non-regression determine the Zeva
-checkpoint before any new closed-loop rollout. The result must be reported as
-a 10-task specialized model, not as a replacement for the 50-task benchmark
-score.
+The active run is under `advantage10-prior-action-expert-v11/zeva`. Held-out
+validation5 metrics are only a screening gate: retrieval must remain at least
+95%, all ten tasks must be covered, and no task may have a negative mean paired
+flow improvement. Because earlier versions passed this offline screen and still
+lost closed-loop success, offline loss is never sufficient to select the final
+checkpoint.
 
-After a v9 candidate finishes, select it using validation5 only:
+Candidate checkpoints must first pass direct-context-off, fixed-gate, H15
+injection/supervision and immutable-teacher identity audits. They are then
+compared against the same untouched Base on at least two disjoint paired
+closed-loop splits, with multiple model-RNG replicates and trajectory-length,
+step-limit and discordant-pair diagnostics. Only a checkpoint that is
+non-regressive on every validation split may enter the seed-1000 confirmatory
+test. That test imports the immutable, video-audited Base result
+`114/200 = 57%` and evaluates Zeva on the same 10x20 expert-valid
+`(seed, instruction)` manifest. The final gate is `Base >= 57%` and
+`Zeva > Base`, so Zeva must achieve at least 115/200.
 
-```bash
-python3 scripts/select_robotwin_anchored_v9.py \
-  /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-anchored-v9/adapter \
-  /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-action-expert-v8/baseline/003000
-```
-
-The selector rejects any step that lacks ten-task coverage, retrieval at least
-95%, positive independent-Base improvement, at least 50% paired wins, or
-non-negative mean paired improvement on every task. Among eligible steps it
-first maximizes the worst-task improvement; closed-loop results are never an
-input. The adapter completed all 2,000 steps with eight complete checkpoints;
-five passed the offline gate. The validation5-only selector froze step 1250:
-aggregate paired flow improvement `+3.386e-5`, paired wins `58.83%`, retrieval
-`99.85%`, and worst-task improvement `+2.199e-5`. These statistics select the
-checkpoint but do not count as closed-loop success evidence.
-
-The rejected joint candidate already consumed streams starting at seeds 7000
-and 8000. The active adapter therefore uses two new disjoint 10x8 streams at
-seeds 9000 and 12000. Each split must be non-negative and the combined gain
-must be at least `+6/160` before the seed-10000 final is reachable.  The final
-evaluates three semantic conditions on the exact same 10x20 manifest: untouched
-best-v1 Anchor, trained action-expert-only Base, and trained action expert +
-Zeva.  Its immutable gate is `Base >= max(Anchor,57%)` and `Zeva > Base`.
-
-The frozen adapter passed this preregistered validation gate. Split-e
-(seed stream 9000) produced Base `43/80` and Zeva `43/80` (delta `0`);
-split-f (seed stream 12000) produced Base `39/80` and Zeva `46/80`
-(delta `+7`). The streams are pairwise disjoint and the combined result is
-Base `82/160` versus Zeva `89/160`, delta `+7/160`. The reserved seed-10000
-10x20 final was started only after this result was frozen. Its running metrics
-must not be used for checkpoint selection or reported as final results.
-
-```bash
-bash scripts/robotwin_eval/launch_anchored_v9_validation.sh
-bash scripts/robotwin_eval/launch_anchored_v9_fresh_final.sh
-# Or use the durable coordinator, which waits for COMPLETE and enforces the
-# offline selector -> seed9000/12000 validation -> reserved seed10000 final DAG.
-bash scripts/robotwin_eval/wait_and_run_anchored_v9.sh
-```
+For audit history, frozen anchored-v9 passed its seed9000/12000 development
+splits by `+7/160`, but its action-expert Base reached only 95 successes after
+193/200 seed-10000 episodes and could finish at no more than 102/200. It was
+therefore rejected before Anchor/Zeva could consume further formal resources;
+its development result is not a deliverable comparison.
 
 The earlier 1,000-step action-expert experiment used the sequential launcher
 below. It is retained only for historical reproduction; its evaluated Base

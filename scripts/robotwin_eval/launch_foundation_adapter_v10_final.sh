@@ -64,6 +64,8 @@ print(row["step"])
 print(artifacts["base_model_sha256"])
 print(artifacts["zeva_model_sha256"])
 print(artifacts["zeva_adapter_sha256"])
+if artifacts.get("zeva_tensor_values_bit_identical") is not True:
+    raise SystemExit("v10 selection lacks bit-identical frozen-foundation proof")
 PY
 )
 zeva_checkpoint=${selected[0]}
@@ -72,7 +74,6 @@ base_model_sha256=${selected[2]}
 zeva_model_sha256=${selected[3]}
 zeva_adapter_sha256=${selected[4]}
 test "$base_model_sha256" = "$foundation_sha256"
-test "$zeva_model_sha256" = "$foundation_sha256"
 test "$(sha256sum "$zeva_checkpoint/model.safetensors" | awk '{print $1}')" = "$zeva_model_sha256"
 test "$(sha256sum "$zeva_checkpoint/zeva_adapter.pth" | awk '{print $1}')" = "$zeva_adapter_sha256"
 
@@ -90,7 +91,10 @@ cache_file() {
     fi"
 }
 zeva_cache=$model_cache_root/zeva-${zeva_step}-${zeva_model_sha256}
-cache_file "$zeva_checkpoint/model.safetensors" "$zeva_cache/model.safetensors" "$zeva_model_sha256"
+# Pair the selected adapter with the original untouched PI file.  The selected
+# checkpoint's safetensors container may have a different serialization hash
+# despite bit-identical tensor values.
+cache_file "$foundation/model.safetensors" "$zeva_cache/model.safetensors" "$foundation_sha256"
 cache_file "$zeva_checkpoint/zeva_adapter.pth" "$zeva_cache/zeva_adapter.pth" "$zeva_adapter_sha256"
 
 mkdir -p "$eval_root/configs" "$output"
@@ -159,6 +163,8 @@ payload = {
     "zeva_checkpoint_step": int(step),
     "base_model_sha256": base_hash,
     "zeva_model_sha256": model_hash,
+    "zeva_runtime_model_sha256": base_hash,
+    "zeva_model_source": "untouched_best_v1_foundation",
     "zeva_adapter_sha256": adapter_hash,
     "acceptance": "Base>=57% and ZeVA>Base on exact same seed/instruction pairs",
 }
@@ -191,4 +197,3 @@ python3 "$zeva_root/scripts/robotwin_eval/audit_advantage10_formal.py" \
   "$output" --require-accepted
 python3 "$zeva_root/scripts/robotwin_eval/render_advantage10_final_markdown.py" \
   "$output" --output "$output/final_result.md"
-
