@@ -51,6 +51,7 @@ zeva_label=${ZEVA_LABEL:-stage2a-005000-h15}
 anchor_label=${ANCHOR_LABEL:-pi05-anchor-h15}
 seed_manifest=$output/seed_manifest.json
 frozen_seed_manifest=${FROZEN_SEED_MANIFEST:-}
+baseline_only_precompute=${BASELINE_ONLY_PRECOMPUTE:-false}
 
 if [[ -n "$precomputed_baseline_root" ]]; then
   baseline_is_untouched_anchor=true
@@ -69,6 +70,10 @@ if [[ "$baseline_is_untouched_anchor" != true && "$baseline_is_untouched_anchor"
 fi
 if [[ "$require_explicit_foundation" != true && "$require_explicit_foundation" != false ]]; then
   echo "REQUIRE_EXPLICIT_FOUNDATION must be true or false" >&2
+  exit 2
+fi
+if [[ "$baseline_only_precompute" != true && "$baseline_only_precompute" != false ]]; then
+  echo "BASELINE_ONLY_PRECOMPUTE must be true or false" >&2
   exit 2
 fi
 if [[ "$require_explicit_foundation" == true && ! "$foundation_model_sha256" =~ ^[0-9a-f]{64}$ ]]; then
@@ -444,6 +449,44 @@ temporary = Path(destination + ".partial")
 temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 os.replace(temporary, destination)
 PY
+fi
+
+if [[ "$baseline_only_precompute" == true ]]; then
+  # This is an audited throughput optimization for a future paired run.  The
+  # baseline has already selected and evaluated the exact expert-valid seeds;
+  # a later invocation on the same output root re-audits the completed
+  # progress, regenerates the identical manifest, and then evaluates ZeVA.
+  python3 - "$output/baseline_precompute_complete.json" "$seed_manifest" \
+    "$output/baseline/report.json" "$baseline_config_sha256" \
+    "$absolute_start_seed" "$expected_total_episodes" <<'PY'
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+
+destination, seed_manifest, report, config_sha256, start_seed, expected = sys.argv[1:]
+seed_path = Path(seed_manifest)
+report_path = Path(report)
+payload = {
+    "schema": "zeva-robotwin-baseline-precompute-v1",
+    "baseline_config_sha256": config_sha256,
+    "absolute_start_seed": int(start_seed),
+    "expected_total_episodes": int(expected),
+    "seed_manifest": str(seed_path.resolve()),
+    "seed_manifest_sha256": hashlib.sha256(seed_path.read_bytes()).hexdigest(),
+    "baseline_report": str(report_path.resolve()),
+    "baseline_report_sha256": hashlib.sha256(report_path.read_bytes()).hexdigest(),
+    "continuation": "rerun_same_output_root_to_audit_baseline_then_evaluate_zeva",
+}
+path = Path(destination)
+temporary = path.with_name(path.name + ".partial")
+temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+os.replace(temporary, path)
+PY
+  printf '{"state":"baseline_precompute_complete","finished":"%s"}\n' \
+    "$(date -Iseconds)" > "$output/state.json"
+  exit 0
 fi
 
 if [[ -n "$anchor_config" ]]; then
