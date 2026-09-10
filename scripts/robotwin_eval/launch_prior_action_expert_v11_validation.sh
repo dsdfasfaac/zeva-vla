@@ -70,7 +70,7 @@ prepare_host() {
   cache_file "$host" "$checkpoint/zeva_adapter.pth" "$zeva_cache/zeva_adapter.pth" "$adapter_sha256"
 }
 
-prepare_host aigc29 &
+prepare_host aigc24 &
 cache_i=$!
 prepare_host aigc28 &
 cache_j=$!
@@ -129,7 +129,7 @@ run_split() {
     > "$eval_root/split-${name}.launcher.log" 2>&1
 }
 
-run_split i "$split_i_seed" "$split_i_rng" aigc29 172.16.80.163 aigc24 /data1/dingxin/robotwin-formal-eval/RoboTwin &
+run_split i "$split_i_seed" "$split_i_rng" aigc24 172.16.80.158 aigc29 /mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin &
 pid_i=$!
 run_split j "$split_j_seed" "$split_j_rng" aigc28 172.16.80.162 aigc14 /mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin &
 pid_j=$!
