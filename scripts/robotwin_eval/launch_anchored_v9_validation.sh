@@ -12,6 +12,11 @@ selection=${SELECTION:-$(dirname "$candidate_root")/$(basename "$candidate_root"
 eval_root=${EVAL_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-anchored-v9/joint}
 task_manifest=${TASK_MANIFEST:-$zeva_root/configs/robotwin_zeva_advantage10.json}
 episodes=${EPISODES:-8}
+split_c_name=${SPLIT_C_NAME:-split-c}
+split_d_name=${SPLIT_D_NAME:-split-d}
+start_seed_c=${START_SEED_C:-7000}
+start_seed_d=${START_SEED_D:-8000}
+excluded_validation_starts=${EXCLUDED_VALIDATION_STARTS:-5000,6000}
 foundation_checkpoint=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1
 foundation_sha256=7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe
 
@@ -145,7 +150,9 @@ validation_plan=$eval_root/validation_plan.json
 python3 - "$validation_plan" "$selection" "$base_checkpoint" "$zeva_checkpoint" \
   "$base_step" "$zeva_step" "$base_model_sha256" "$zeva_model_sha256" \
   "$zeva_adapter_sha256" "$episodes" "$base_config" "$zeva_config" \
-  "$base_cache" "$zeva_cache" "$model_host_c" "$model_host_d" <<'PY'
+  "$base_cache" "$zeva_cache" "$model_host_c" "$model_host_d" \
+  "$split_c_name" "$start_seed_c" "$split_d_name" "$start_seed_d" \
+  "$excluded_validation_starts" <<'PY'
 import hashlib
 import json
 import os
@@ -154,7 +161,8 @@ from pathlib import Path
 
 (destination, selection, base_checkpoint, zeva_checkpoint, base_step, zeva_step,
  base_hash, zeva_hash, adapter_hash, episodes, base_config, zeva_config,
- base_cache, zeva_cache, model_host_c, model_host_d) = sys.argv[1:]
+ base_cache, zeva_cache, model_host_c, model_host_d, split_c_name,
+ start_seed_c, split_d_name, start_seed_d, excluded_validation_starts) = sys.argv[1:]
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 payload = {
@@ -184,8 +192,13 @@ payload = {
         },
     },
     "episodes_per_task_per_split": int(episodes),
-    "splits": {"c": {"start_seed": 7000}, "d": {"start_seed": 8000}},
-    "excluded_prior_validation_starts": [5000, 6000],
+    "splits": {
+        split_c_name.removeprefix("split-"): {"start_seed": int(start_seed_c)},
+        split_d_name.removeprefix("split-"): {"start_seed": int(start_seed_d)},
+    },
+    "excluded_prior_validation_starts": [
+        int(value) for value in excluded_validation_starts.split(",") if value
+    ],
     "reserved_final_start_seed": 10000,
     "acceptance": "delta>=0 on each split and combined ZeVA-Base gain>=6/160",
 }
@@ -194,7 +207,7 @@ if path.is_file():
     existing = json.loads(path.read_text())
     if existing != payload:
         # Runtime placement is not a model/seed decision.  Permit a failed
-        # host to be replaced only before split-c produced a single episode,
+        # host to be replaced only before the first split produced an episode,
         # preserve the original immutable plan, and write a separate audit
         # record.  Every semantic field and cache identity must still match.
         existing_semantics = json.loads(json.dumps(existing))
@@ -209,19 +222,19 @@ if path.is_file():
             raise RuntimeError(
                 "existing anchored-v9 validation plan differs semantically; refusing mutation"
             )
-        progress_root = path.parent / "split-c" / "baseline" / "progress"
+        progress_root = path.parent / split_c_name / "baseline" / "progress"
         completed = 0
         for progress_path in progress_root.glob("*.json"):
             progress = json.loads(progress_path.read_text())
             completed += len(progress.get("episode_results", ()))
         if completed:
             raise RuntimeError(
-                "cannot change split-c model host after any episode was produced"
+                f"cannot change {split_c_name} model host after any episode was produced"
             )
         recovery = {
             "schema": "zeva-robotwin-anchored-v9-runtime-host-recovery-v1",
             "reason": (
-                "original split-c host failed the Mamba/PyTorch ABI preflight "
+                f"original {split_c_name} host failed the Mamba/PyTorch ABI preflight "
                 "before policy service readiness"
             ),
             "semantic_validation_plan_unchanged": True,
@@ -229,8 +242,8 @@ if path.is_file():
             "previous_replicated_model_hosts": previous_hosts,
             "recovery_replicated_model_hosts": current_hosts,
             "actual_split_model_hosts": {
-                "split-c": model_host_c,
-                "split-d": model_host_d,
+                split_c_name: model_host_c,
+                split_d_name: model_host_d,
             },
         }
         recovery_path = path.parent / "runtime_host_recovery.json"
@@ -271,24 +284,24 @@ if [[ "$model_host_c" == "$model_host_d" ]]; then
   # A single ABI-compatible model node can safely evaluate both disjoint
   # splits in sequence.  Running them concurrently would collide on ports and
   # overcommit each GPU; completed split reports are resumed/skipped above.
-  run_split split-c 7000 "$model_host_c" "$model_ip_c" "$render_host_c" "$render_runtime_c" ""
-  run_split split-d 8000 "$model_host_d" "$model_ip_d" "$render_host_d" "$render_runtime_d" \
-    /tmp/zeva-v9-split-d-mps-bypass
+  run_split "$split_c_name" "$start_seed_c" "$model_host_c" "$model_ip_c" "$render_host_c" "$render_runtime_c" ""
+  run_split "$split_d_name" "$start_seed_d" "$model_host_d" "$model_ip_d" "$render_host_d" "$render_runtime_d" \
+    "/tmp/zeva-v9-${split_d_name}-mps-bypass"
 else
-  run_split split-c 7000 "$model_host_c" "$model_ip_c" "$render_host_c" "$render_runtime_c" "" &
+  run_split "$split_c_name" "$start_seed_c" "$model_host_c" "$model_ip_c" "$render_host_c" "$render_runtime_c" "" &
   pid_c=$!
-  run_split split-d 8000 "$model_host_d" "$model_ip_d" "$render_host_d" "$render_runtime_d" \
-    /tmp/zeva-v9-split-d-mps-bypass &
+  run_split "$split_d_name" "$start_seed_d" "$model_host_d" "$model_ip_d" "$render_host_d" "$render_runtime_d" \
+    "/tmp/zeva-v9-${split_d_name}-mps-bypass" &
   pid_d=$!
-  printf '%s\n' "$pid_c" > "$eval_root/split-c.pid"
-  printf '%s\n' "$pid_d" > "$eval_root/split-d.pid"
+  printf '%s\n' "$pid_c" > "$eval_root/${split_c_name}.pid"
+  printf '%s\n' "$pid_d" > "$eval_root/${split_d_name}.pid"
   status=0
   wait "$pid_c" || status=1
   wait "$pid_d" || status=1
   (( status == 0 )) || exit "$status"
 fi
 
-python3 - "$eval_root" "$episodes" <<'PY'
+python3 - "$eval_root" "$episodes" "$split_c_name" "$split_d_name" <<'PY'
 import json
 import os
 import sys
@@ -296,8 +309,9 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 episodes = int(sys.argv[2])
+split_c_name, split_d_name = sys.argv[3:5]
 reports = {name: json.loads((root / name / "paired_report.json").read_text())
-           for name in ("split-c", "split-d")}
+           for name in (split_c_name, split_d_name)}
 manifests = {name: json.loads((root / name / "seed_manifest.json").read_text())
              for name in reports}
 for name, report in reports.items():
@@ -308,8 +322,8 @@ seed_sets = {
            for task, rows in payload["tasks"].items()}
     for name, payload in manifests.items()
 }
-overlap = {task: sorted(seed_sets["split-c"][task] & seed_sets["split-d"][task])
-           for task in seed_sets["split-c"]}
+overlap = {task: sorted(seed_sets[split_c_name][task] & seed_sets[split_d_name][task])
+           for task in seed_sets[split_c_name]}
 if any(overlap.values()):
     raise RuntimeError(f"anchored-v9 validation split overlap: {overlap}")
 rows = []

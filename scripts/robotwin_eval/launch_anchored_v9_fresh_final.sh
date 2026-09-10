@@ -18,6 +18,8 @@ model_host=${MODEL_HOST:-aigc32}
 model_ip=${MODEL_IP:-172.16.80.166}
 render_host=${RENDER_HOST:-aigc24}
 render_runtime=${RENDER_RUNTIME:-/data1/dingxin/robotwin-formal-eval/RoboTwin}
+validation_split_c=${VALIDATION_SPLIT_C:-split-c}
+validation_split_d=${VALIDATION_SPLIT_D:-split-d}
 
 test -s "$validation_summary"
 test -s "$validation_plan"
@@ -154,12 +156,14 @@ fi
 verify_runtime_cache
 
 python3 - "$final_root/seed_manifest.json" \
-  "$eval_root/split-c/seed_manifest.json" "$eval_root/split-d/seed_manifest.json" <<'PY'
+  "$eval_root/$validation_split_c/seed_manifest.json" \
+  "$eval_root/$validation_split_d/seed_manifest.json" \
+  "$validation_split_c" "$validation_split_d" <<'PY'
 import json
 import sys
 
-manifests = [json.load(open(path, encoding="utf-8")) for path in sys.argv[1:]]
-names = ("final", "validation-c", "validation-d")
+manifests = [json.load(open(path, encoding="utf-8")) for path in sys.argv[1:4]]
+names = ("final", sys.argv[4], sys.argv[5])
 for left in range(len(manifests)):
     for right in range(left + 1, len(manifests)):
         for task, rows in manifests[left]["tasks"].items():
