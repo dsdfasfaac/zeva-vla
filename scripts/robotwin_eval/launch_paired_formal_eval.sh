@@ -52,6 +52,7 @@ anchor_label=${ANCHOR_LABEL:-pi05-anchor-h15}
 seed_manifest=$output/seed_manifest.json
 frozen_seed_manifest=${FROZEN_SEED_MANIFEST:-}
 baseline_only_precompute=${BASELINE_ONLY_PRECOMPUTE:-false}
+reuse_existing_baseline=${REUSE_EXISTING_BASELINE:-false}
 
 if [[ -n "$precomputed_baseline_root" ]]; then
   baseline_is_untouched_anchor=true
@@ -74,6 +75,14 @@ if [[ "$require_explicit_foundation" != true && "$require_explicit_foundation" !
 fi
 if [[ "$baseline_only_precompute" != true && "$baseline_only_precompute" != false ]]; then
   echo "BASELINE_ONLY_PRECOMPUTE must be true or false" >&2
+  exit 2
+fi
+if [[ "$reuse_existing_baseline" != true && "$reuse_existing_baseline" != false ]]; then
+  echo "REUSE_EXISTING_BASELINE must be true or false" >&2
+  exit 2
+fi
+if [[ "$baseline_only_precompute" == true && "$reuse_existing_baseline" == true ]]; then
+  echo "BASELINE_ONLY_PRECOMPUTE and REUSE_EXISTING_BASELINE are mutually exclusive" >&2
   exit 2
 fi
 if [[ "$require_explicit_foundation" == true && ! "$foundation_model_sha256" =~ ^[0-9a-f]{64}$ ]]; then
@@ -101,7 +110,12 @@ seed_selection="baseline-selects-first-${episodes}-expert-valid-from-${absolute_
 seed_manifest_source=""
 seed_manifest_source_sha256=""
 precomputed_baseline_report_sha256=""
-if [[ -n "$frozen_seed_manifest" ]]; then
+if [[ "$reuse_existing_baseline" == true ]]; then
+  test -s "$seed_manifest"
+  seed_selection="reuse-audited-baseline-precompute-and-exact-frozen-seed-manifest"
+  seed_manifest_source=$seed_manifest
+  seed_manifest_source_sha256=$(sha256sum "$seed_manifest" | awk '{print $1}')
+elif [[ -n "$frozen_seed_manifest" ]]; then
   cp "$frozen_seed_manifest" "$seed_manifest"
   seed_selection="all-conditions-replay-existing-frozen-expert-valid-manifest"
   seed_manifest_source=$frozen_seed_manifest
@@ -349,6 +363,8 @@ cat > "$output/manifest.json" <<EOF
   "precomputed_baseline_root": "$precomputed_baseline_root",
   "precomputed_baseline_report_sha256": "$precomputed_baseline_report_sha256",
   "precomputed_baseline_expected_successes": $precomputed_baseline_expected_successes,
+  "baseline_only_precompute": $baseline_only_precompute,
+  "reuse_existing_baseline": $reuse_existing_baseline,
   "model_runtime": "native_handoff_transformers_5.5.4",
   "model_host": "$model_host",
   "render_host": "$render_host",
@@ -357,7 +373,45 @@ cat > "$output/manifest.json" <<EOF
 }
 EOF
 
-if [[ -n "$precomputed_baseline_root" ]]; then
+if [[ "$reuse_existing_baseline" == true ]]; then
+  python3 - "$output/baseline_precompute_complete.json" "$seed_manifest" \
+    "$output/baseline/report.json" "$baseline_config_sha256" \
+    "$absolute_start_seed" "$expected_total_episodes" "$episodes" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+(proof_path, seed_manifest, report, config_sha256, start_seed,
+ expected_total, episodes_per_task) = sys.argv[1:]
+proof = json.loads(Path(proof_path).read_text())
+seed_path, report_path = Path(seed_manifest), Path(report)
+if proof.get("schema") != "zeva-robotwin-baseline-precompute-v1":
+    raise RuntimeError("existing baseline lacks audited precompute proof")
+checks = {
+    "baseline_config_sha256": config_sha256,
+    "absolute_start_seed": int(start_seed),
+    "expected_total_episodes": int(expected_total),
+    "seed_manifest_sha256": hashlib.sha256(seed_path.read_bytes()).hexdigest(),
+    "baseline_report_sha256": hashlib.sha256(report_path.read_bytes()).hexdigest(),
+}
+for key, expected_value in checks.items():
+    if proof.get(key) != expected_value:
+        raise RuntimeError(f"baseline precompute proof mismatch for {key}")
+report_payload = json.loads(report_path.read_text())
+if (report_payload.get("condition") != "baseline"
+        or report_payload.get("total_episodes") != int(expected_total)):
+    raise RuntimeError("existing baseline report is incomplete or has wrong semantics")
+seed_payload = json.loads(seed_path.read_text())
+if (seed_payload.get("schema") != "robotwin-expert-valid-seeds-v1"
+        or seed_payload.get("start_seed") != int(start_seed)
+        or len(seed_payload.get("tasks", {})) * int(episodes_per_task)
+            != int(expected_total)
+        or any(len(rows) != int(episodes_per_task)
+               for rows in seed_payload["tasks"].values())):
+    raise RuntimeError("existing frozen seed manifest is incomplete")
+PY
+elif [[ -n "$precomputed_baseline_root" ]]; then
   if [[ -e "$output/baseline" ]]; then
     python3 - "$output/baseline/report.json" "$precomputed_baseline_report_sha256" \
       "$expected_total_episodes" "$precomputed_baseline_expected_successes" <<'PY'
@@ -422,7 +476,7 @@ else
   run_condition baseline "$baseline_config" "$baseline_label"
 fi
 
-if [[ -z "$frozen_seed_manifest" ]]; then
+if [[ -z "$frozen_seed_manifest" && "$reuse_existing_baseline" != true ]]; then
 python3 - "$output/baseline/progress" "$output/tasks.txt" "$episodes" "$seed_manifest" "$absolute_start_seed" <<'PY'
 import json
 import os
