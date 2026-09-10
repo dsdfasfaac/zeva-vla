@@ -102,6 +102,8 @@ residual head 和 gate head 都为零初始化，因此 step0 的最终动作严
 
 v14 step1500 的 validation5 直接动作结果：Base MSE `0.01201938`，ZeVA MSE `0.01196872`，paired improvement `5.06596e-5`，sample win fraction `68.19%`，10/10 任务 improvement 为正，minimum-task improvement `1.11653e-5`。这只允许进入闭环验证，不能替代成功率结果。
 
+未路由的 v14 在 development split-j 上为 Base `43/80`、ZeVA `38/80`，证明离线 MSE 改善仍不能支持全任务持续注入。部署安全路由采用预先固定的二值规则：一个任务只有在 development 中至少多 1 次成功且 ZeVA-only wins 严格多于 Base-only losses 时 scale=1，否则 scale=0 严格回退 Base。该规则只启用 `hanging_mug` 与 `scan_object`，development 组合结果为 `46/80`；随后冻结路由，在独立 split-i 上确认，禁止从 confirmation/final 数据修改路由。
+
 下图表示单次在线重规划时的注入位置：
 
 ```text
@@ -948,6 +950,7 @@ scripts/train_robotwin_stage2.py             多 variant Stage2 trainer；active
 scripts/cache_robotwin_base_actions_v13_8gpu.sh immutable Base action cache
 scripts/train_robotwin_advantage10_output_residual_v14.sh active v14 训练入口
 scripts/audit_robotwin_v14_checkpoint.py     frozen PI 与 H15 direct residual 契约审计
+scripts/calibrate_robotwin_v14_task_scales.py development-only 二值安全路由
 scripts/train_robotwin_advantage10_prior_action_expert_v11.sh 历史失败 v11 入口
 scripts/train_robotwin_advantage10_anchored_v9.sh anchored-v9 训练入口
 scripts/select_robotwin_anchored_v9.py       独立 Base teacher 的 validation5-only 选点

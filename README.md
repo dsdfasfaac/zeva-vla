@@ -407,6 +407,15 @@ imports the immutable, video-audited Base result
 `(seed, instruction)` manifest. The final gate is `Base >= 57%` and
 `Zeva > Base`, so Zeva must achieve at least 115/200.
 
+The uncalibrated v14 development split-j result is Base `43/80` and ZeVA
+`38/80`; this rejects unconditional residual use despite its positive offline
+MSE. Deployment therefore uses a pre-registered binary safety route selected
+only on split-j: a task receives scale 1 iff it gains at least one success and
+has more ZeVA-only wins than Base-only losses; otherwise scale 0 gives exact
+Base. This enables only `hanging_mug` and `scan_object`, for a deterministic
+development composition of `46/80`. The route is frozen before independent
+split-i confirmation and may not be revised from confirmation or final data.
+
 ```bash
 # v14 evaluation reuses a frozen Base seed manifest and identical model RNG.
 bash scripts/robotwin_eval/launch_paired_formal_eval.sh
