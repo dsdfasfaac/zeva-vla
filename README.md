@@ -408,14 +408,25 @@ checkpoint.
 
 Candidate checkpoints must first pass direct-context-off, fixed-gate, H15
 injection/supervision and immutable-teacher identity audits. They are then
-compared against the same untouched Base on at least two disjoint paired
-closed-loop splits, with multiple model-RNG replicates and trajectory-length,
-step-limit and discordant-pair diagnostics. Only a checkpoint that is
-non-regressive on every validation split may enter the seed-1000 confirmatory
-test. That test imports the immutable, video-audited Base result
+compared against the same untouched Base in four pre-registered seed x model-
+RNG cells: seeds 15000 and 16000 crossed with RNGs 20260907 and 20260908. Each
+cell contains 10 tasks x 8 paired episodes. Every cell and every task aggregated
+over cells must be non-regressive, and the total gain must be at least 12/320.
+Only then may the checkpoint enter the seed-1000 confirmatory test. That test
+imports the immutable, video-audited Base result
 `114/200 = 57%` and evaluates Zeva on the same 10x20 expert-valid
 `(seed, instruction)` manifest. The final gate is `Base >= 57%` and
 `Zeva > Base`, so Zeva must achieve at least 115/200.
+
+```bash
+bash scripts/robotwin_eval/launch_prior_action_expert_v11_validation.sh
+bash scripts/robotwin_eval/launch_prior_action_expert_v11_cross_validation.sh
+```
+
+If the four-cell gate fails, the only next attribution experiment is an
+action-expert-only run from untouched best-v1 with the same `5e-7` LR, step
+budget, paired teacher and validation cells, while prior/context and Gaussian
+NLL are fully disabled. Gate, dropout and residual scale are not tuned first.
 
 For audit history, frozen anchored-v9 passed its seed9000/12000 development
 splits by `+7/160`, but its action-expert Base reached only 95 successes after
@@ -766,7 +777,9 @@ PYTHONPATH=src python scripts/audit_robotwin_residual_branches.py \
   --output /path/to/residual_branch_audit.json
 ```
 
-The active v9 final comparison will have two trained conditions plus a same-seed
+#### Historical v7/v9 audit (superseded by v11)
+
+The historical v9 final comparison was designed with two trained conditions plus a same-seed
 normality anchor. `Base` is the validation-selected action-expert-only step 3000;
 `Zeva` starts from that exact Base and learns the dual residual with an immutable
 Base teacher. The earlier untouched seed-1000 result was
@@ -777,18 +790,18 @@ contemporaneously on exactly the same pairs and verify the best-v1 parent SHA256
 before rollout. The final gate is `Base >= max(same-seed Anchor,114/200)` and
 `Zeva > Base`, with 200 videos per condition and an independent three-condition
 audit. The
-v7 result and older action-expert branches remain diagnostics and can never be
-substituted for a passing v9 comparison.
+v7/v9 results and older action-expert branches remain diagnostics and can never
+be substituted for the active v11 four-cell comparison.
 
 #### Decoder and throughput configuration
 
-Formal v9 uses the same TorchCodec backend as the released RoboTwin PI0.5
+Historical v9 used the same TorchCodec backend as the released RoboTwin PI0.5
 baseline. Each persistent worker keeps a bounded 32-entry decoder LRU instead
 of launching three FFmpeg processes per sample. On a real episode, TorchCodec
 and the former FFmpeg path were verified bit-exact for all three cameras. The
 FFmpeg backend remains available only for diagnostics.
 
-The active v9 run processes global batch 256 and three video streams per sample.
+The historical v9 run processed global batch 256 and three video streams per sample.
 CPU TorchCodec random access plus backward-through-frozen-action-expert are the
 main costs. The same-model residual-off teacher is sampled every two steps. Formal
 Stage 2 retains H15 recurrent samples, H50 action output, 2,000 optimizer steps,
@@ -805,9 +818,10 @@ The former `stage2a-adapter/005000` checkpoint is invalid for final reporting.
 Its FFmpeg images reached the visual-identity PI0.5 processor as uint8
 `[0,255]`, so both its baseline and enhanced offline losses were measured in
 the wrong model domain. Stage 2 now converts every view at the dataset boundary
-to contiguous CHW float32 `[0,1]`, uses the anchored-v9 manifest/training state,
-and rejects full-v5, adapter-only, or old image-contract checkpoints. The
-active candidate is isolated under `advantage10-anchored-v9/adapter`; the joint
+to contiguous CHW float32 `[0,1]`; this historical fix was first recorded in
+the anchored-v9 manifest/training state. The active v11 rejects full-v5,
+adapter-only, or old image-contract checkpoints. The superseded candidate is
+isolated under `advantage10-anchored-v9/adapter`; the joint
 sibling, rejected v8 Zeva, and stopped v7 eager
 runs remain audit artifacts. The v6 run injected
 causal context into the PaliGemma prefix and is retained only as an audit

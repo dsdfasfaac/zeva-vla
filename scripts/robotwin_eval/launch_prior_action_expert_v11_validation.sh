@@ -134,7 +134,7 @@ run_split() {
     > "$eval_root/split-${name}.launcher.log" 2>&1
 }
 
-run_split i "$split_i_seed" "$split_i_rng" aigc24 172.16.80.158 aigc29 /mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin &
+run_split i "$split_i_seed" "$split_i_rng" aigc24 172.16.80.158 aigc24 /mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin &
 pid_i=$!
 run_split j "$split_j_seed" "$split_j_rng" aigc28 172.16.80.162 aigc28 /mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin &
 pid_j=$!
