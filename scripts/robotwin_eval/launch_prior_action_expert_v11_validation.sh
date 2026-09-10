@@ -20,6 +20,8 @@ split_j_seed=${SPLIT_J_SEED:-16000}
 split_i_rng=${SPLIT_I_RNG:-20260907}
 split_j_rng=${SPLIT_J_RNG:-20260908}
 model_cache_root=${MODEL_CACHE_ROOT:-/data1/dingxin/zeva-eval-cache/prior-action-expert-v11}
+render_vulkan_icd=${RENDER_VULKAN_ICD:-/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin/.venv_robotwin/lib/python3.10/site-packages/sapien/vulkan_library/nvidia_icd.json}
+render_ld_library_path=${RENDER_LD_LIBRARY_PATH:-/data2/dingxin:/usr/lib/x86_64-linux-gnu:/usr/lib64:/usr/lib}
 
 test -s "$checkpoint/model.safetensors"
 test -s "$checkpoint/zeva_adapter.pth"
@@ -118,6 +120,8 @@ run_split() {
   if [[ -s "$output/paired_report.json" ]]; then return; fi
   env MODEL_HOST="$model_host" MODEL_IP="$model_ip" RENDER_HOST="$render_host" \
     RENDER_RUNTIME="$render_runtime" RENDER_MPS_PIPE_DIRECTORY="/tmp/zeva-v11-step-${step}-${name}-mps" \
+    RENDER_VULKAN_ICD="$render_vulkan_icd" \
+    RENDER_LD_LIBRARY_PATH="$render_ld_library_path" \
     OUTPUT_ROOT="$output" BASELINE_CONFIG="$eval_root/configs/base-${name}.yml" \
     ZEVA_CONFIG="$eval_root/configs/zeva-${name}.yml" ANCHOR_CONFIG="" \
     BASELINE_IS_UNTOUCHED_ANCHOR=true REQUIRE_EXPLICIT_FOUNDATION=true \
@@ -131,7 +135,7 @@ run_split() {
 
 run_split i "$split_i_seed" "$split_i_rng" aigc24 172.16.80.158 aigc29 /mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin &
 pid_i=$!
-run_split j "$split_j_seed" "$split_j_rng" aigc28 172.16.80.162 aigc14 /mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin &
+run_split j "$split_j_seed" "$split_j_rng" aigc28 172.16.80.162 aigc28 /mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin &
 pid_j=$!
 printf '%s\n' "$pid_i" > "$eval_root/split-i.pid"
 printf '%s\n' "$pid_j" > "$eval_root/split-j.pid"
