@@ -623,6 +623,19 @@ def _load_checkpoint_payload(args: Args, handoff):
     manifest = payload.get("manifest", {})
     if manifest.get("statistics_sha256") != stats_sha:
         raise ValueError("v2 checkpoint statistics do not match the handoff statistics.")
+    # The goal tensor is part of the learned task coordinate system.  Merely
+    # copying its hash into the artifact would allow a mismatched goal file to
+    # silently poison every task prototype, so validate the selected file
+    # against the checkpoint provenance before loading the encoder.
+    expected_goal_sha = manifest.get("goal_embeddings_sha256")
+    if not expected_goal_sha:
+        raise ValueError("v2 checkpoint is missing goal_embeddings_sha256 provenance.")
+    actual_goal_sha = sha256_file(args.goal_embeddings)
+    if expected_goal_sha != actual_goal_sha:
+        raise ValueError(
+            "v2 checkpoint goal embeddings do not match the selected goal file: "
+            f"checkpoint={expected_goal_sha}, selected={actual_goal_sha}."
+        )
     return payload, sha256_file(args.checkpoint), stats_sha
 
 
