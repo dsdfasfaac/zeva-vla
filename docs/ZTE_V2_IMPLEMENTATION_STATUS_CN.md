@@ -2,9 +2,13 @@
 
 日期：2026-09-11。本文记录已执行的验证；设计文档中的目标不代表已经实现或通过。
 
+执行口径更新：辅助表征指标是诊断，不再是全项通过后才能接 PI 的门槛。当前优先完成 v2 → action-expert 双残差/Gaussian prior 接入和公平的十任务闭环比较。计划中的 legacy-Huber 4096-step 对照与扩展旧/新 frozen-phase probe 已取消，代码保留但不声称运行。
+
 ## 当前运行
 
-当前实际长预算实验：`stage1-zte-v2-phase-vector-mse-4096-20260911h`，aigc29 launcher `513210`，GPU0/1/3/4，DDP port29541，每卡batch8、global32、4096 steps（约5.01epochs）、warmup256、每512步保存并完整验证。已检查进程存活且进入训练。匹配的 legacy-Huber phase 对照计划使用另一组4卡；尚未启动，需待 GPU6 的旧/新 exported-phase probe 使用结束后安排，不能把它写成已开训。
+当前长预算实验：`stage1-zte-v2-phase-vector-mse-4096-20260911h`，aigc29 原 launcher `513210`，GPU0/1/3/4，DDP port29541，每卡batch8、global32、4096 steps（约5.01epochs）、warmup256、每512步保存并完整验证。step512 已保存，完整验证1350条。原进程在 13:26 因 DDP reduction/未参与梯度参数报错退出，不能称为仍在训练或已正常训完。已交由 Luna worker 定位、回归测试并尝试保留原 schedule/RNG 的恢复，恢复成功以新日志和实际 step 前进为准。
+
+最新 step512：task probe **78.7407%**，phase order **72.1441%**，effect cosine **0.156680**，language consistency **0.980452**。按配置中的诊断参考（50%、80%、0.05），只有 phase order 尚未达到。该 order 来自独立 progress head，不是 exported-phase probe；本 checkpoint 的 next-H15/task-mean 与 effect/zero-effect 独立比较尚未测。`probe_gate_passed=false` 是代码固定写入的 diagnostic-only 标记，不代表所有指标失败；这些参考阈值也不是 BehaviorVLA 论文规定的通过标准。
 
 `stage1-zte-v2-pilot-20260911d` 与同预算 `stage1-zte-v2-pilot-taskpaired-20260911e` 均已完成 256 steps，分别约 9 分 57 秒和 9 分 4 秒（包含两次完整 validation5）。均使用 aigc29 四张 H100（0/1/3/4），每卡 batch 8，global batch 32，warmup 32；在 step128/256 保存并跑完整 validation5。唯一训练方法变化是同任务跨 episode 配对采样。最新一轮 launcher PID `477001` 已退出，不能把仍存在的 pid 文件当成运行状态。两轮均未通过 Stage1。
 
@@ -133,4 +137,4 @@ f 的原始 manifest 存在文字元数据勘误：旧 `information_flow.jepa_an
 - 工程候选注入在指定 `pretrained_model-best-v1` 加原生 Transformers5 上已复核：零初始化 Base 差异为 0，首步 projector weight 梯度范数 95.13，冻结参数无梯度，单步 diffusion 推理有限。证据为 `zte-v2-injection-bestv1-native-smoke-20260911.json`。输入为 synthetic，内部 padded 输出 `[1,50,32]`，不等于已经验证 RoboTwin EEF16 serving。该实现将残差加到所有已有 prefix embedding，并未增加新 prompt token，因此不能声称与 BehaviorVLA 的 global-token prepend 等价。它目前只是注入工程对照，不代表已选定最终双通道接入；真实表征 correct/shuffled 的归因尚待验证。
 - 没有新的正式训练完成结果或闭环成功率；v18 的 Base 43/80、ZeVA 43/80 仍是最近已完成的对应实验。
 
-仅通过本记录中的结构测试，不能开始 Stage2，也不能声称表征已优于旧 ZTE。
+仅通过结构测试不能声称表征或闭环已优于旧 ZTE；但按用户最新要求，不再因辅助指标未全部通过而阻止 Stage2。真实权重加载、bank 同源、无泄漏及 H15 状态一致性仍需先检查。

@@ -1,8 +1,10 @@
 # ZeVA–RoboTwin：基于已训练 PI0.5 的因果记忆增强方法
 
-> 文档状态：ZTE v2 科学重构与历史实验证据（2026-09-11）
+> 文档状态：ZTE v2 实用接入主线与历史实验证据（2026-09-11，按用户最新要求修订）
 > 目标：在已经完成 RoboTwin 训练的 PI0.5 上加入 ZeVA 的因果表征、记忆与检索能力，同时保持 PI0.5 的物理输入输出协议和基础能力。
-> 主线定义：旧 v19 已停止并标记为 `superseded`。当前主线是先构建可被独立 probe 证明有效的三流因果 ZTE v2，再通过 global causal prompt 与 phase-conditioned Gaussian prior 两条通道接入 PI0.5。任何 Stage1 gate 未通过时禁止启动 Stage2 长训。
+> 主线定义：旧 v19 已停止。当前主线是三流 ZTE v2 经真实 H15 recurrent state 和 train-only bank 接入现有 action-expert 侧双残差/Gaussian prior，再做匹配的十任务 Base/ZeVA 训练和闭环比较。允许 ZeVA 方法变体；辅助表征指标用于诊断，不再要求全部通过后才接 PI。before-VLM prefix smoke 不是当前选定接入方式。下文历史实验及原研究门槛不覆盖本段最新执行口径。
+
+当前 pipeline：Stage1 训练并选择 v2 checkpoint → 导出同源 bank/live queries、核对权重/协议/zero-init/H15 状态更新 → Stage2 冻结 ZTE/bank 和视觉语言 backbone，训练 action expert（`5e-6`）及 ZeVA 模块（`5e-5`），global batch 256 → 同 seed 配对闭环；只有发现需要针对性处理的缺陷才考虑 Stage3。Base 与 ZeVA 从指定 best-v1 出发，在相同十任务及匹配预算下训练；untouched best-v1 另作 Anchor。最终必须报告正常 Base 与 ZeVA 的真实成功率，不能通过弱化 Base 或挑测试 seed 制造优势。v2 接入仍在实现，不能将 pipeline 计划称为已完成训练。
 
 ## 1. 问题定义与设计原则
 
@@ -19,7 +21,7 @@ RoboTwin 的基础策略已经是一个在相同 50-task 数据分布上训练�
 - **PI0.5 是强基线**：untouched best-v1 是固定能力参照 Anchor。用户要求交付的 Base 与 ZeVA 均从该权重出发，在选定 10 个任务上做匹配训练；不得把较弱或不匹配的 checkpoint 选作 Base。增强在 zero-init 时必须数值等同其 PI 起点，联合微调后同时核对 Base 相对 Anchor 未异常退化及 ZeVA 相对 Base 的 paired 闭环收益。
 - **因果状态必须来自真实 action-effect transition**：不使用帧编号、oracle progress 或测试成功标签构造部署时状态。
 - **训练与部署使用相同递归过程**：从真实 `B0` 初始化，每执行 H15 后更新一次 Mamba、BIT 和 PIM。
-- **表征和接入都必须可证伪**：correct/zero/shuffled causal prompt、global-only/prior-only/both 都要产生预注册的可归因差异，否则停止而不是扩大训练。
+- **用诊断定位问题、用闭环衡量收益**：correct/zero/shuffled 和分支消融帮助判断表征是否被利用，不强制完成全部研究实验才允许策略训练；数据泄漏、错误加载或递归协议错误仍必须先修复。
 
 ## 2. 与 BehaviorVLA 迁移方案的关系
 
@@ -32,11 +34,11 @@ RoboTwin 的基础策略已经是一个在相同 50-task 数据分布上训练�
 | 初始状态 | 方法相关上下文初始化 | `B0 = F_init(g, s0)`，其中 `g` 是冻结 PI0.5 的任务语言表示 |
 | 外部知识 | 方法相关 memory/retrieval | train95-only causal bank + task/phase retrieval |
 | 在线记忆 | 历史上下文 | BIT（短期）+ PIM（持久） |
-| 接入基础模型 | global prototype prefix + behavior prior | global causal prompt 进入 PI prefix/KV；Gaussian prior 只进入 noisy-action embedding，不做最终动作 residual |
-| Stage 2 | PI 与 PBD 联合训练 | 先冻结 PI 做 attribution smoke，再以 PI `5e-6`、新模块 `5e-5` 联合训练；ZTE/bank 始终冻结 |
+| 接入基础模型 | global prototype prefix + behavior prior | 当前复用 action-expert 侧 context/prior 双残差与 Gaussian prior；不是原文 prefix 的逐行复刻，不做最终动作 residual |
+| Stage 2 | PI 与 PBD 联合训练 | 权重/zero-init/H15 smoke 后，以 action expert `5e-6`、新模块 `5e-5` 联合训练；视觉语言 backbone、ZTE/bank 冻结，global batch 256 |
 | Stage 3 | 可选的针对性适配 | 仅在 Stage2 paired 闭环诊断明确指出具体缺陷后决定是否需要 |
 
-这里最关键的改动是：**不再把旧 ZTE 当作一个任意 residual 的条件，也不再使用 candidate medoid。ZTE v2 首先必须证明它在没有语言捷径和 target-effect 泄漏时学到了 task topology、local phase 与 causal effect；之后 global causal prompt 作为 action expert 可读的上下文，local Gaussian prior 只修饰 noisy-action embedding。训练和部署都保留真实 H15 recurrent phase，并禁止 BehaviorVLA 代码中的 `episode_index` oracle lookup。**
+这里最关键的改动是：保留 ZeVA 的 action-effect 表征和记忆增强目标，但不要求完全复刻论文接入方式，也不再启动 candidate medoid 搜索。训练和部署使用真实 H15 recurrent phase，禁止 `episode_index` oracle lookup；表征诊断不足时可针对性优化，但是否有价值最终由公平的 Base/ZeVA 闭环比较决定。
 
 ## 3. 冻结的 RoboTwin–PI0.5 契约
 

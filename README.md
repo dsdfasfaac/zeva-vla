@@ -48,7 +48,10 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 ## Zeva architecture
 
 The selected PI0.5 has already been trained on the same RoboTwin distribution.
-The active work is a scientific ZTE v2 redesign. The former v19 task-gated PI
+The active work is a practical ZTE v2 → PI action-expert integration, followed
+by matched ten-task Base/ZeVA training and closed-loop evaluation. Auxiliary
+representation metrics diagnose problems; they are not an all-pass prerequisite
+for policy training. The former v19 task-gated PI
 consensus run was stopped and marked `superseded`; it must not be resumed as the
 main method. Its predecessor v18 achieved Base `43/80` and ZeVA `43/80` in a
 paired closed-loop split despite improving offline expert-action MSE. A grouped
@@ -76,19 +79,19 @@ retaining ZeVA's action-effect semantics:
 - Brief Interaction Trace stores recent evidence within the current attempt.
 - Persistent Interaction Memory consolidates phase-matched evidence across
   attempts in the same fixed episode.
-- A zero-initialized global causal prompt is placed in the prefix/KV context
-  visible to the action expert. Separately, a phase-conditioned Gaussian prior
-  is added only to the noisy-action embedding. Nothing is added to the final
-  EEF16 output.
+- The current integration target retains the existing action-expert-side dual
+  residual: memory/context conditioning and a phase-conditioned Gaussian prior
+  modify action-expert inputs, not final EEF16 outputs. The before-VLM prefix
+  engineering smoke is a separate candidate, not the selected route or proof
+  of BehaviorVLA-equivalent injection.
 - PI0.5 still returns H50 and RoboTwin still executes H15 before replanning.
 
-Stage 1 is selected by preregistered held-out representation gates rather than
-training loss or epoch count. It must demonstrate non-leaking forward dynamics,
-language-masked task retrieval, phase ordering, causal interventions, batch vs.
-incremental equality, and expert-to-PI-rollout robustness. Stage 2 is forbidden
-until all gates pass. The complete frozen design is in
-`docs/ZTE_V2_SCIENTIFIC_DESIGN_CN.md`; older v11--v19 sections below are retained
-only as failure-analysis history.
+Stage 1 diagnostics guide representation improvements; the delivery criterion
+is normal matched Base capability and measured ZeVA closed-loop improvement.
+Checkpoint/bank lineage, no future/test leakage, H15 recurrence and numerical
+loading/injection correctness remain required. The scientific-design document
+records diagnostic hypotheses, not mandatory all-pass Stage2 gates. Older
+v11--v19 sections below are failure-analysis history, not current launch plans.
 
 Implementation evidence and outstanding gates are tracked separately in
 `docs/ZTE_V2_IMPLEMENTATION_STATUS_CN.md`. The legacy-path encoder passes eight
@@ -102,10 +105,10 @@ prediction losses sum coordinates before averaging valid times, while earlier
 v2 pilots averaged coordinate-wise SmoothL1. The explicit `vector_mse` control
 now sums feature/EEF coordinates and averages valid transitions (and H15 for
 actions), retaining the same external weights. It is not a capability pass.
-The matched 4096-step (about five-epoch) loss-control launcher is
-`scripts/launch_robotwin_zte_v2_loss_control.sh`; each simultaneous run requires
-its own fresh output directory, four GPUs, and distributed port. Full details
-and mathematical units are recorded in the scientific-design document.
+The vector-MSE run targets 4096 steps (about five epochs). The planned parallel
+legacy-Huber control and expanded old/v2 frozen-probe run were cancelled to
+prioritize policy integration. The loss-control launcher remains for
+reproducibility; its existence does not mean both experiments are running.
 
 ## H100 runtime
 
@@ -157,13 +160,15 @@ manifest.
 
 ## Three-stage training pipeline
 
-Stage 1 trains ZTE v2 and freezes a causal bank only after all representation
-gates pass. Stage 2 first freezes PI0.5 and trains zero-initialized prompt/prior
-adapters for an attribution smoke test. Only a correct prompt that measurably
-outperforms zero and shuffled controls is allowed to enter joint tuning, where
-ZTE/bank remain frozen, PI0.5 uses LR `5e-6`, new modules use `5e-5`, and global
-batch remains 256. Stage 3 is optional and may only address a diagnosed
-closed-loop deficiency; it is not an automatic extra training stage.
+Stage 1 trains ZTE v2; a selected checkpoint exports a train-only bank and
+matching recurrent live queries. After real checkpoint loading, zero-init and
+H15-state smoke tests, Stage 2 freezes ZTE/bank and the vision-language backbone,
+and trains the PI action expert (LR `5e-6`) plus ZeVA modules (LR `5e-5`) with
+global batch 256. Representation and shuffled-input probes are diagnostics,
+not mandatory all-pass prerequisites. Stage 2 must be followed by paired
+closed-loop evaluation. Stage 3 is optional and addresses an observed failure,
+not an automatic extra stage. The v2 integration is still in progress; historical
+commands below must not be mistaken for a completed v2 Stage2 run.
 
 The final requested comparison trains both ordinary Base and ZeVA from the
 specified best-v1 on the same selected ten tasks with matched PI optimization
