@@ -6,6 +6,8 @@
 
 ## 当前运行
 
+21:37 更新：普通Base完成5000steps，`baseline/005000` 与 `latest.json` 已保存，launcher710436不再存活；ZeVA仍在运行（约2829/5000）。双方完成后将使用 `scripts/robotwin_eval/select_robotwin_ztev2_pair.py` 分别按held-out flow选择；该selector的7项单测及真实mmap checkpoint元数据读取已通过。评测preflight使用真实Stage2 adapter/bank/retrieval核对且三份配置均通过真实server parser，尚未开展正式rollouts。当前正在接通完成后自动选步→preflight→Base/ZeVA/Anchor同seed评测的持久流程。
+
 20:52 只读runtime审计完成：Base和ZeVA的foundation config/model/tokenizer SHA、trainer/policy SHA、runtime版本和实际导入PI0/PaliGemma/Gemma源码SHA均一致。两个native overlay只有同样5个symlink，均指向同一个handoff源；ZeVA隔离路径不引入不同数学实现。实际使用Transformers5.5.4，不是后置依赖目录中的4.53；tokenizers module0.21.4与distribution0.22.2的差异两支相同且已记录。当前Base已保存3500、ZeVA已保存1500并继续训练，无新的闭环结果。
 
 20:06 更新：Base与ZeVA两个匹配Stage2进程均实际运行。Base PID710436，已保存step2500；ZeVA PID751929，GPU0/1/3/4、port29572，日志到step805，已保存step500。两者均5000steps、global256、AE LR5e-6；ZeVA新增模块LR5e-5、Gaussian NLL与prior residual dropout0.4，视觉语言backbone/ZTE/bank冻结。ZeVA最终产物为 `stage1-zte-v2-artifacts-scheduler-repaired-20260911`，完整26150/1350条、50tasks，retrieval train=98.4206%、validation=98.2963%，SHA连接核验完成。
