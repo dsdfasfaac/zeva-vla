@@ -39,8 +39,10 @@ else
 fi
 
 exec "$python_bin" -m accelerate.commands.launch \
+  --multi_gpu \
+  --main_process_port "${ZEVA_MAIN_PROCESS_PORT:-29500}" \
   --num_machines 1 \
-  --num_processes 8 \
+  --num_processes "${ZEVA_PROCESSES:-8}" \
   --mixed_precision no \
   "$zeva_root/scripts/train_robotwin_stage2.py" \
   "$@"
