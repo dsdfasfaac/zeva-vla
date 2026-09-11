@@ -88,6 +88,27 @@ class InformationFlowTest(unittest.TestCase):
         self.assertGreater(actions.grad.abs().sum().item(), 0)
         self.assertIsNone(after.grad)
 
+    def test_real_vision_training_cannot_mix_future_or_padding_via_batchnorm(self):
+        # Exercise actual ResNet rather than the tiny fixture for the temporal
+        # leakage risk introduced by flattening episode frames into a batch.
+        config = TransitionEncoderV2Config(
+            model_dim=16, phase_dim=8, signal_dim=8, task_dim=8, goal_dim=12,
+            num_mamba_layers=1, image_size=32, dropout=0.0,
+            vision_pretrained=False, use_mamba=self.device == "cuda",
+            vision_microbatch_size=2,
+        )
+        model = CausalTransitionEncoderV2(config).to(self.device).train()
+        for module in model.vision_encoder.modules():
+            if isinstance(module, nn.modules.batchnorm._BatchNorm):
+                self.assertFalse(module.training)
+        first = model(self.before, self.actions, self.after, self.goal)
+        changed = self.before.clone()
+        changed[:, 1:] = 0.5
+        second = model(changed, self.actions, self.after, self.goal)
+        torch.testing.assert_close(first.predicted_effect[:, 0], second.predicted_effect[:, 0], atol=1e-5, rtol=0)
+        first.predicted_effect.square().mean().backward()
+        self.assertTrue(any(p.grad is not None for p in model.vision_encoder.parameters()))
+
 
 if __name__ == "__main__":
     unittest.main()
