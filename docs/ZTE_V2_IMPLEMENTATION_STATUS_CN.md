@@ -4,6 +4,8 @@
 
 ## 当前运行
 
+当前实际长预算实验：`stage1-zte-v2-phase-vector-mse-4096-20260911h`，aigc29 launcher `513210`，GPU0/1/3/4，DDP port29541，每卡batch8、global32、4096 steps（约5.01epochs）、warmup256、每512步保存并完整验证。已检查进程存活且进入训练。匹配的 legacy-Huber phase 对照计划使用另一组4卡；尚未启动，需待 GPU6 的旧/新 exported-phase probe 使用结束后安排，不能把它写成已开训。
+
 `stage1-zte-v2-pilot-20260911d` 与同预算 `stage1-zte-v2-pilot-taskpaired-20260911e` 均已完成 256 steps，分别约 9 分 57 秒和 9 分 4 秒（包含两次完整 validation5）。均使用 aigc29 四张 H100（0/1/3/4），每卡 batch 8，global batch 32，warmup 32；在 step128/256 保存并跑完整 validation5。唯一训练方法变化是同任务跨 episode 配对采样。最新一轮 launcher PID `477001` 已退出，不能把仍存在的 pid 文件当成运行状态。两轮均未通过 Stage1。
 
 该预算是学习曲线与完整验证的 pilot，最多访问 8192 个 episode 样本，远未等同于 40/80 epochs。其职责是证明训练目标可学、观察 held-out 泛化与塌缩情况；不得因此自动放行 Stage2。Stage1 ZTE 使用原有 50-task 表征数据，后续 Base/ZeVA 的训练和正式比较仍在用户选定的 10 个任务上。
@@ -85,6 +87,20 @@ f 的原始 manifest 存在文字元数据勘误：旧 `information_flow.jepa_an
 对应的代码级差异已定位：[官方 BehaviorVLA](https://github.com/iLearn-Lab/ICML26-BehaviorVLA/blob/main/src/openpi/BehaviorEncoder/train.py) 对预测坐标先 sum 再平均有效时间；旧 v2 为 coordinate-mean SmoothL1。新 `prediction_loss_reduction=vector_mse` 保留外部权重，MSE sum 最后一维、平均有效 transition 与 H15。单测验证 256 维小误差梯度相对旧值为 512 倍、EEF16 为 32 倍，复制 H15 为 H30 不额外改变 loss，padding 不产生梯度。8/8 trainer tests 已通过。以上倍数是确定性小误差测试结论；真实数据存在 Huber 线性区间，不能机械声称所有实际梯度都精确放大这些倍数。
 
 旧 checkpoint 的 args 缺省补 `mean_coordinate_huber`，明确拒绝将 reduction 改变伪装成 exact-resume。新增控制训练 launcher 预注册 4096 steps（约 5.01 epochs），两支 phase 模型除 prediction reduction 外一致；启动状态以实时进程和独立目录为准，launcher 存在不等于已经开训。
+
+正常 batch8×8 的同样本审计现已完成（两个 JSON 的 `sample_ids_by_batch` 完全相同）：
+
+| pre-fusion 已加权梯度范数均值 | legacy Huber | vector MSE |
+|---|---:|---:|
+| action | 0.007152 | 0.283823 |
+| effect | 0.001461 | 0.754703 |
+| global | 6.800477 | 6.800477 |
+| local | 0.577194 | 0.577194 |
+| causal | 1.455897 | 1.455897 |
+
+报告为 `zte-v2-objective-gradient-audit-pilot-e-step256-gpu2-actckpt-b8x8-20260911.json` 与 `zte-v2-objective-gradient-audit-pilot-e-step256-gpu2-vector-mse-b8x8-20260911.json`。使用 deterministic activation checkpoint 保持正常batch8内的正负样本构成，首个真实batch与eval forward最大差0，Dropout/MHA/BN冻结，EMA digest未变，无optimizer更新。原报告 limitation 文案误写 Two batches，实际 `data.batches=8` 与8组IDs为准；代码已修正动态计数，旧报告不事后改写。
+
+`stage1-zte-v2-vector-mse-smoke-20260911g` 也已完成真实batch8、2steps的前向/反传/验证/保存（约30秒），没有OOM或非有限loss。该验证说明实现可训练，不证明表示已改善。
 
 ## 已完成的真实数据 smoke
 
