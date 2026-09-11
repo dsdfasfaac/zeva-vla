@@ -326,7 +326,7 @@ def _load_resume_context(
     A resumed trainer rewrites ``manifest.json`` before saving step 5000,
     while steps 500..4500 retain the original manifest embedded in their
     training states.  The selector may bridge that one metadata transition
-    only when an operator left a signed-by-hash provenance record and an
+    only when an operator left a hash-verified provenance record and an
     immutable source-manifest copy beside the run.  No model/objective/data
     field is relaxed here.
     """
@@ -506,13 +506,10 @@ def _inspect_candidate(
             f"{role} step {step} training state declares step {state.get('step')!r}"
         )
     state_manifest = state.get("manifest")
-    state_manifest_matches = state_manifest == manifest
-    if not state_manifest_matches and resume_context is not None:
-        source_step = int(resume_context["source_step"])
-        state_manifest_matches = (
-            step <= source_step and state_manifest == resume_context["source_manifest_payload"]
-        )
-    if not state_manifest_matches:
+    expected_manifest = manifest
+    if resume_context is not None and step <= int(resume_context["source_step"]):
+        expected_manifest = resume_context["source_manifest_payload"]
+    if state_manifest != expected_manifest:
         raise SelectionError(
             f"{role} step {step} training-state manifest differs from manifest.json"
         )

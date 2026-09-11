@@ -255,6 +255,19 @@ class PairSelectorTest(unittest.TestCase):
             )
             self.assertEqual(current_manifest["world_size"], 4)
 
+    def test_resume_rejects_old_and_new_manifest_swap(self):
+        for step in (500, 4500, 5000):
+            with self.subTest(step=step), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                states, manifests = self._fixture(root)
+                source, current, _ = self._make_same_world_resume(root, states, manifests)
+                path = str((root / "zeva" / f"{step:06d}" / "training_state.pt").resolve())
+                states[path]["manifest"] = current if step <= 4500 else source
+                with self.assertRaisesRegex(selector.SelectionError, "manifest differs"):
+                    selector.inspect_run(
+                        root / "zeva", "zeva", state_loader=lambda path: states[str(path)]
+                    )
+
     def test_resume_rejects_scientific_manifest_change(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
