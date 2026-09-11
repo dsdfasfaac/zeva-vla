@@ -335,12 +335,6 @@ class CausalTransitionEncoderV2(nn.Module):
             nn.SiLU(),
             nn.Linear(config.model_dim, config.task_dim),
         )
-        self.global_head = nn.Sequential(
-            nn.Linear(config.task_dim, config.model_dim),
-            nn.LayerNorm(config.model_dim),
-            nn.SiLU(),
-            nn.Linear(config.model_dim, config.task_dim),
-        )
         self.global_context_head = nn.Sequential(
             nn.Linear(config.task_dim + config.goal_dim, config.model_dim),
             nn.LayerNorm(config.model_dim),
@@ -588,34 +582,26 @@ class CausalTransitionEncoderV2(nn.Module):
         )
         effect_transitions = effect_sequence[:, 1:]
 
-        visual_contexts = []
-        action_contexts = []
-        for index in range(sequence_length):
-            visual_context, action_context = self._readout_action(
-                visual_transitions[:, index],
-                current_action_steps[:, index],
-                self.visual_to_action,
-                self.action_to_visual,
-                self.action_readout,
-            )
-            visual_contexts.append(visual_context)
-            action_contexts.append(action_context)
-        visual_context = torch.stack(visual_contexts, dim=1)
-        action_context = torch.stack(action_contexts, dim=1)
+        # Attention is local to each transition: combine B*T for parallel
+        # execution without permitting attention across future transitions.
+        visual_context, action_context = self._readout_action(
+            visual_transitions.flatten(0, 1),
+            current_action_steps.flatten(0, 1),
+            self.visual_to_action,
+            self.action_to_visual,
+            self.action_readout,
+        )
+        visual_context = visual_context.view(batch_size, sequence_length, -1)
+        action_context = action_context.view(batch_size, sequence_length, -1)
 
         pre_context = self.pre_fusion(torch.cat([visual_context, action_context], dim=-1))
         # The effect query is post-transition by construction.  It never feeds
         # ``pre_context`` or either prediction head.
-        post_contexts = []
-        for index in range(sequence_length):
-            effect_query = effect_transitions[:, index].unsqueeze(1)
-            keys = torch.stack([visual_context[:, index], action_context[:, index]], dim=1)
-            effect_context, _ = self.effect_to_pre(effect_query, keys, keys)
-            effect_context = effect_context + effect_query
-            post_contexts.append(
-                self.post_fusion(torch.cat([effect_context[:, 0], pre_context[:, index]], dim=-1))
-            )
-        post_context = torch.stack(post_contexts, dim=1)
+        effect_query = effect_transitions.flatten(0, 1).unsqueeze(1)
+        keys = torch.stack([visual_context, action_context], dim=2).flatten(0, 1)
+        effect_context, _ = self.effect_to_pre(effect_query, keys, keys)
+        effect_context = (effect_context + effect_query).view(batch_size, sequence_length, -1)
+        post_context = self.post_fusion(torch.cat([effect_context, pre_context], dim=-1))
 
         predicted_effect = self.predicted_effect_head(pre_context)
         predicted_action = self.predicted_action_head(pre_context).view(
@@ -632,7 +618,9 @@ class CausalTransitionEncoderV2(nn.Module):
 
         weights = valid_mask.to(task_embedding.dtype).unsqueeze(-1)
         task_pool = F.normalize((task_embedding * weights).sum(dim=1) / weights.sum(dim=1), dim=-1)
-        global_prompt = F.normalize(self.global_head(task_pool), dim=-1)
+        # The exported global token is exactly the supervised pooled feature;
+        # an extra unsupervised projector here would export a random coordinate.
+        global_prompt = task_pool
         global_context = self.global_context_head(
             torch.cat([task_pool, goal_value.to(dtype=task_pool.dtype)], dim=-1)
         )
