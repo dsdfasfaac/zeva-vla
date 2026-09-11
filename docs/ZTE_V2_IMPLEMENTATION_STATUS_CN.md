@@ -4,7 +4,7 @@
 
 ## 当前运行
 
-已在 aigc29 启动 `stage1-zte-v2-pilot-20260911d`，launcher PID `466477`，四张 H100（0/1/3/4），每卡 batch 8，global batch 32。固定 256 optimizer steps，warmup 32；在 step128/256 保存并跑完整 validation5。运行目录在下述统一结果根目录内，日志为 `train.log`。PID 仅是定位线索，每次监视必须检查实际进程，不能只相信 pid 文件。
+`stage1-zte-v2-pilot-20260911d` 已完成 256 steps，总计约 9 分 57 秒（包含两次完整 validation5）。当前在 aigc29 运行同预算的 `stage1-zte-v2-pilot-taskpaired-20260911e`，launcher PID `477001`，四张 H100（0/1/3/4），每卡 batch 8，global batch 32，warmup 32；在 step128/256 保存并跑完整 validation5。唯一训练方法变化是同任务跨 episode 配对采样。运行目录在下述统一结果根目录内，日志为 `train.log`。PID 仅是定位线索，每次监视必须检查实际进程，不能只相信 pid 文件。
 
 该预算是学习曲线与完整验证的 pilot，最多访问 8192 个 episode 样本，远未等同于 40/80 epochs。其职责是证明训练目标可学、观察 held-out 泛化与塌缩情况；不得因此自动放行 Stage2。Stage1 ZTE 使用原有 50-task 表征数据，后续 Base/ZeVA 的训练和正式比较仍在用户选定的 10 个任务上。
 
@@ -27,6 +27,24 @@ ZEVA_TEST_CUDA=1 python3 -m unittest openpi.zeva.transition_encoder_v2_test -v
 6. effect 预测对动作有梯度，对 after-image 没有梯度。
 7. 真实视觉网络训练时固定 BatchNorm 统计，未来图像不污染当前预测，视觉参数仍有梯度。
 8. 多个 episode 放在同一 batch 时，动作递归不会跨越 batch 维度；修改第二个 episode 不改变第一个。
+
+缓存版本另外验证了 phase、causal、forward-effect、next-action、progress 和 global token 与整段编码一致（容差 `1e-5`），且三个 Mamba cache 的 tensor 数量不随 transition 数增长。8 项测试全部通过；训练用的整段 forward 数学定义保持不变。
+
+## 首轮完整验证与采样归因
+
+| checkpoint | 有效 validation episodes | task probe | phase order | effect cosine |
+|---|---:|---:|---:|---:|
+| 首轮 step128 | 1350 | 7.037% | 53.026% | 0.00877 |
+| 首轮 step256 | 1350 | 7.481% | 53.099% | 0.00838 |
+
+两次均未通过 Stage1。首轮仅约 0.31 epoch，不能据此否定表示结构；同时，完整采样审计定位到一个与目标函数直接冲突的问题：
+
+| 完整 train95 sampler（26150 episodes） | 同卡内跨 episode 同任务正样本覆盖 | 不同任务负样本覆盖 | 每条 episode 恰好一次 |
+|---|---:|---:|---|
+| interleave + rank stride | 3.4646% | 99.9924% | 是 |
+| same-task pairs | 99.8088% | 100% | 是 |
+
+剩余约 0.19% 为各任务奇数条数的尾项，保留完整覆盖，不重复采样。复现审计：`bash scripts/run_robotwin_zte_v2.sh --run scripts/audit_robotwin_zte_sampler.py`。修正针对的是 global SupCon 缺少跨轨迹正样本的机制问题，不以闭环成功率搜索采样规则。
 
 ## 已完成的真实数据 smoke
 
@@ -52,11 +70,11 @@ ZEVA_TEST_CUDA=1 python3 -m unittest openpi.zeva.transition_encoder_v2_test -v
 
 ## 尚未通过的验收
 
-- 上述逐步路径仍是前缀重算参考实现，尚非固定计算量的 Mamba cache 部署实现。
+- 真实 Mamba cache 已通过一致性和固定内存测试；尚未接入正式 RoboTwin serving。
 - 多 episode 批处理和跨卡训练已通过 smoke；整份 validation5 的完整覆盖还需全量运行核实。
 - 预训练视觉、TorchCodec 与真实 backward/保存已通过；从 step2 恢复到 step4，与连续训练的 463 个模型张量最大差异为 `1.4901161193847656e-08`，达到数值一致但不是 bitwise 相同。对应目录为 `stage1-zte-v2-resume-control-20260911c` 和 `stage1-zte-v2-resumed-20260911c`。
 - global SupCon、effect-shuffle negatives 与 variance/covariance 已接入；action intervention 和完整 Stage1 对照 probe 尚未完成。effect-shuffle negatives 不能独自证明因果识别。
-- 真实 PI0.5 的零初始化等价、首次可学习梯度及 correct/shuffled 归因尚待验证。
+- 工程候选注入在原 `pretrained_model` 上已验证零初始化输出不变、首步 projector 梯度非零；`best-v1` 加原生 Transformers5 的复核正在执行。该实现将残差加到所有已有 prefix embedding，并未增加新 prompt token，因此不能声称与 BehaviorVLA 的 global-token prepend 等价。它目前只是注入工程对照，不代表已选定最终双通道接入；真实表征 correct/shuffled 的归因尚待验证。
 - 没有新的正式训练完成结果或闭环成功率；v18 的 Base 43/80、ZeVA 43/80 仍是最近已完成的对应实验。
 
 仅通过本记录中的结构测试，不能开始 Stage2，也不能声称表征已优于旧 ZTE。
