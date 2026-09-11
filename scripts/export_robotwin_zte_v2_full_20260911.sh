@@ -13,6 +13,7 @@ goal_embeddings=${ROBOTWIN_GOAL_EMBEDDINGS:-/data1/dingxin/zeva-runs/robotwin-v5
 checkpoint=${ROBOTWIN_ZTE_CHECKPOINT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-ddp-recovery/zte_v2_step_002048.pth}
 output_dir=${ROBOTWIN_ZTE_ARTIFACT_DIR:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-step2048-20260911}
 expected_checkpoint_sha256=${ROBOTWIN_ZTE_CHECKPOINT_SHA256:-d3d21c0acac9855a0a06311472d9ad773d914b57df311cf2648bafa9bc14bc5d}
+selection_json=${ROBOTWIN_ZTE_SELECTION_JSON:-}
 exporter=${repo_root}/scripts/export_robotwin_zte_v2_artifacts.py
 retrieval=${repo_root}/scripts/train_robotwin_task_retrieval.py
 
@@ -20,6 +21,11 @@ batch_size=${ROBOTWIN_ZTE_EXPORT_BATCH_SIZE:-2}
 num_workers=${ROBOTWIN_ZTE_EXPORT_WORKERS:-2}
 log_every=${ROBOTWIN_ZTE_EXPORT_LOG_EVERY:-100}
 world_size=4
+read -r -a gpus <<< "${ROBOTWIN_ZTE_GPU_LIST:-2 5 6 7}"
+if (( ${#gpus[@]} != world_size )); then
+  echo "ROBOTWIN_ZTE_GPU_LIST must contain exactly ${world_size} GPU ids." >&2
+  exit 2
+fi
 
 # The wrapper supplies the proven native Transformers5/TorchCodec runtime.
 export ZEVA_PROCESSES=1
@@ -38,6 +44,14 @@ if (( ${#existing[@]} != 0 )); then
 fi
 mkdir -p "${output_dir}/logs"
 exec > >(tee -a "${output_dir}/launcher.log") 2>&1
+
+if [[ -n "${selection_json}" ]]; then
+  if [[ ! -s "${selection_json}" ]]; then
+    echo "Selected-checkpoint metadata is missing or empty: ${selection_json}" >&2
+    exit 2
+  fi
+  cp -- "${selection_json}" "${output_dir}/checkpoint_selection.json"
+fi
 
 echo "export_start=$(date -Is)"
 echo "repo=${repo_root}"
@@ -92,7 +106,6 @@ for gpu in 2 5 6 7; do
 done
 
 declare -a pids=()
-declare -a gpus=(2 5 6 7)
 for rank in 0 1 2 3; do
   gpu=${gpus[$rank]}
   log="${output_dir}/logs/rank${rank}.log"
