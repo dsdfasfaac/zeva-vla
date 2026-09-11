@@ -797,6 +797,19 @@ def _manifest(args: Args, handoff: RobotWinHandoff, config: TransitionEncoderV2C
     }
 
 
+def _resume_metadata(checkpoint: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Canonicalize only the documented pre-head default in old checkpoints.
+
+    Missing settings must not silently inherit arbitrary current defaults.
+    The phase option is new; all checkpoints predating it used the pre head.
+    """
+    previous_config = dict(checkpoint["zte_config"])
+    previous_args = dict(checkpoint["manifest"]["train_args"])
+    previous_config.setdefault("action_prediction_context", "pre")
+    previous_args.setdefault("action_prediction_context", "pre")
+    return previous_config, previous_args
+
+
 def main(args: Args) -> None:
     if args.batch_size <= 0:
         raise ValueError("batch_size must be positive.")
@@ -868,11 +881,11 @@ def main(args: Args) -> None:
         checkpoint = torch.load(args.resume_checkpoint, map_location="cpu", weights_only=False)
         if checkpoint.get("schema") != "zeva-robotwin-zte-stage1-v2-checkpoint":
             raise ValueError("The resume checkpoint is not a Stage 1 v2 checkpoint.")
-        if checkpoint["zte_config"] != dataclasses.asdict(config):
+        previous_config, previous_args = _resume_metadata(checkpoint)
+        if previous_config != dataclasses.asdict(config):
             raise ValueError("Resume encoder configuration differs from checkpoint.")
         if checkpoint.get("world_size") != accelerator.num_processes or "rng_by_rank" not in checkpoint:
             raise ValueError("Exact resume requires saved RNG state and the same distributed world size.")
-        previous_args = checkpoint["manifest"]["train_args"]
         # Output location and diagnostic verbosity can change; the training
         # schedule, data order, and objective cannot silently change on resume.
         mutable = {"resume_checkpoint", "save_dir", "num_workers", "log_freq"}

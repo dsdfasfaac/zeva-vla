@@ -72,6 +72,8 @@ f 的原始 manifest 存在文字元数据勘误：旧 `information_flow.jepa_an
 
 该元数据修正与原有 sampler/mask/next-H15 tests 在隔离副本中 6/6 通过（不改写运行中 f 的 source）。GitHub `publish` 可读，但本次 HTTPS push 被 403 拒绝，SSH 也无可用 publickey；本地提交不等于已上传，需恢复仓库写权限后再推送。
 
+恢复兼容补充：trainer 仅为历史 checkpoint 缺少的 `action_prediction_context` 补上已知的 `pre` 默认值，其他缺失设置不继承当前默认值。这样保留旧 pre 配置的语义兼容检查，同时仍拒绝 pre→phase、改变步数/损失/数据顺序的所谓 exact-resume。相关 sampler/targets/manifest/migration 共 7/7 unit tests 在隔离副本通过；这不等于已经执行一次旧长跑 checkpoint 的完整恢复训练。
+
 ## 已完成的真实数据 smoke
 
 统一结果根目录：`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/`。

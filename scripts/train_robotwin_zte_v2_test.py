@@ -12,6 +12,7 @@ from scripts.train_robotwin_zte_v2 import PairedTaskSampler
 from scripts.train_robotwin_zte_v2 import collate_robotwin_episodes  # noqa: E402
 from scripts.train_robotwin_zte_v2 import compute_v2_losses  # noqa: E402
 from scripts.train_robotwin_zte_v2 import _manifest
+from scripts.train_robotwin_zte_v2 import _resume_metadata
 from openpi.zeva.transition_encoder_v2 import TransitionEncoderV2Config
 
 
@@ -33,6 +34,19 @@ def test_manifest_describes_effect_and_next_action_boundaries_separately():
         assert "jepa_and_action_prediction" not in flow
         assert "no-current-after-image" in flow["forward_effect_prediction"]
         assert ("current-after-visible" in flow["next_action_prediction"]) == (context == "phase")
+
+
+def test_resume_only_migrates_documented_legacy_pre_context_default():
+    legacy = {"zte_config": {"model_dim": 256}, "manifest": {"train_args": {"steps": 256}}}
+    config, args = _resume_metadata(legacy)
+    assert config == {"model_dim": 256, "action_prediction_context": "pre"}
+    assert args == {"steps": 256, "action_prediction_context": "pre"}
+    assert "action_prediction_context" not in legacy["zte_config"]
+    current = {
+        "zte_config": {"action_prediction_context": "phase"},
+        "manifest": {"train_args": {"action_prediction_context": "phase"}},
+    }
+    assert _resume_metadata(current) == (current["zte_config"], current["manifest"]["train_args"])
 
 
 def _episode(length: int, *, valid: bool = True):
