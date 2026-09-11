@@ -6,6 +6,10 @@
 
 ## 当前运行
 
+23:30 更新：ZeVA未正常完成5000步。原launcher751929已退出，runtimefix2日志显示23:07:47 rank2收到SIGTERM（exit -15），最后完整checkpoint为4500。信号来源尚未查明，不将其误报为OOM或模型发散。正在检查资源与恢复条件，计划从完整4500保留model/adapter/optimizer/scheduler补齐剩余预算；当前Stage2 checkpoint未保存完整RNG，若恢复须明确为非bit-exact continuation。
+
+自动waiter另有自匹配bug：`ps|awk`把含训练脚本字符串的awk自身当成训练worker，因而无法退出等待。修复9fd3c72限定Python进程并通过回归测试；已仅停止旧waiter823924/823926，原eval目录仅log/state，无选步或rollout结果，完整保留。恢复真实训练进程后需新建waiter，不能把旧等待状态当作评测已运行。aigc29当时显存高占用但compute进程列表为空，未重置GPU或停止其他作业。
+
 21:37 更新：普通Base完成5000steps，`baseline/005000` 与 `latest.json` 已保存，launcher710436不再存活；ZeVA仍在运行（约2829/5000）。双方完成后将使用 `scripts/robotwin_eval/select_robotwin_ztev2_pair.py` 分别按held-out flow选择；该selector的7项单测及真实mmap checkpoint元数据读取已通过。评测preflight使用真实Stage2 adapter/bank/retrieval核对且三份配置均通过真实server parser，尚未开展正式rollouts。当前正在接通完成后自动选步→preflight→Base/ZeVA/Anchor同seed评测的持久流程。
 
 20:52 只读runtime审计完成：Base和ZeVA的foundation config/model/tokenizer SHA、trainer/policy SHA、runtime版本和实际导入PI0/PaliGemma/Gemma源码SHA均一致。两个native overlay只有同样5个symlink，均指向同一个handoff源；ZeVA隔离路径不引入不同数学实现。实际使用Transformers5.5.4，不是后置依赖目录中的4.53；tokenizers module0.21.4与distribution0.22.2的差异两支相同且已记录。当前Base已保存3500、ZeVA已保存1500并继续训练，无新的闭环结果。
