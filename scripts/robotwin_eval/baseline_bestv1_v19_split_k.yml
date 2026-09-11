@@ -1,0 +1,6 @@
+policy_name: zeva_policy
+handoff_root: /mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1
+foundation_checkpoint: /data1/dingxin/zeva-checkpoint-cache/pretrained_model-best-v1
+baseline_only: true
+device: cuda
+model_rng_seed: 20260909

@@ -113,6 +113,7 @@ class ZevaModel:
         self._candidate_selector = args.get("candidate_selector")
         self._candidate_count = int(args.get("candidate_count", 4))
         self._phase_confidence_floor = float(args.get("phase_confidence_floor", 0.85))
+        self._consensus_tasks = frozenset(str(x) for x in args.get("consensus_tasks", ()))
         if self._candidate_selector not in {None, "phase_gated_consensus_medoid"}:
             raise ValueError(f"Unsupported candidate selector: {self._candidate_selector!r}.")
         if self._candidate_selector and self._candidate_count != 4:
@@ -140,6 +141,10 @@ class ZevaModel:
             retrieval_checkpoint=None if self._baseline_only else args["retrieval_checkpoint"],
             causal_bank=None if self._baseline_only else args["causal_bank"],
         )
+        if self._consensus_tasks:
+            unknown = sorted(self._consensus_tasks.difference(self.policy.retrieval_task_names))
+            if unknown:
+                raise ValueError(f"Unknown consensus_tasks entries: {unknown}.")
         # Keep the frozen PI0.5 evaluator's continuous diffusion stream, while
         # making the process-initial stream reproducible across paired
         # Anchor/Base/ZeVA conditions.  Loading can consume RNG while modules
@@ -217,12 +222,30 @@ class ZevaModel:
             executed_actions=self._previous_commands,
             actions_normalized=False,
         )
+        task_ids = self.policy._retrieved_task_ids  # noqa: SLF001
+        if task_ids is None:
+            raise RuntimeError("Consensus selector requires task-language retrieval.")
+        retrieved_tasks = tuple(
+            self.policy.retrieval_task_names[int(task_id)] for task_id in task_ids.detach().cpu()
+        )
+        if self._consensus_tasks and any(task not in self._consensus_tasks for task in retrieved_tasks):
+            # Exact safe fallback: draw only the ordinary Base candidate.  This
+            # preserves both the action and the future Base RNG stream.
+            selected = self.policy.foundation.predict_action_chunk(batch)
+            self.policy._previous_image = robotwin_multiview_image(batch).detach().clone()  # noqa: SLF001
+            self.policy._pending_normalized_actions = selected.detach().clone()  # noqa: SLF001
+            confidence = self._torch.full(
+                (len(selected),), -self._torch.inf, device=selected.device, dtype=selected.dtype
+            )
+            selected_index = self._torch.zeros(
+                len(selected), device=selected.device, dtype=self._torch.long
+            )
+            return self.policy.postprocessor(selected), confidence, selected_index, retrieved_tasks
         candidates = self._frozen_pi_candidates(batch)
         prefix = candidates[:, :, :15]
         pairwise = (prefix[:, :, None] - prefix[:, None, :]).square().mean(dim=(3, 4))
         medoid_index = pairwise.sum(dim=-1).argmin(dim=-1)
 
-        task_ids = self.policy._retrieved_task_ids  # noqa: SLF001
         live_phase = self.policy._last_live_phase_token  # noqa: SLF001
         bank = self.policy.causal_bank
         if task_ids is None or live_phase is None or bank is None:
@@ -245,7 +268,7 @@ class ZevaModel:
         ]
         self.policy._previous_image = robotwin_multiview_image(batch).detach().clone()  # noqa: SLF001
         self.policy._pending_normalized_actions = selected.detach().clone()  # noqa: SLF001
-        return self.policy.postprocessor(selected), confidence, selected_index
+        return self.policy.postprocessor(selected), confidence, selected_index, retrieved_tasks
 
     def commit_executed_actions(self, value: np.ndarray) -> None:
         """Record only the H15 controls that RoboTwin actually executed."""
@@ -286,11 +309,14 @@ class ZevaModel:
             normalized = self.policy.foundation.predict_action_chunk(batch)
             chunk = self.policy.postprocessor(normalized)
         elif self._candidate_selector == "phase_gated_consensus_medoid":
-            chunk, phase_confidence, selected_index = self._phase_gated_consensus_chunk(raw)
+            chunk, phase_confidence, selected_index, retrieved_tasks = self._phase_gated_consensus_chunk(raw)
             selector_diagnostics = {
                 "phase_confidence": float(phase_confidence[0].detach().cpu()),
                 "selected_candidate": int(selected_index[0].detach().cpu()),
                 "fallback_to_base": bool(int(selected_index[0].detach().cpu()) == 0),
+                "retrieved_task": retrieved_tasks[0],
+                "in_consensus_scope": not self._consensus_tasks
+                or retrieved_tasks[0] in self._consensus_tasks,
             }
         else:
             chunk = self.policy.infer_chunk(raw, executed_actions=self._previous_commands)
@@ -325,7 +351,9 @@ def eval(task_env: Any, model: Any, observation: dict[str, Any]) -> None:
             "Zeva PI consensus: "
             f"candidate={item['selected_candidate']} "
             f"phase_score={item['phase_confidence']:.4f} "
-            f"base_fallback={item['fallback_to_base']}"
+            f"base_fallback={item['fallback_to_base']} "
+            f"task={item['retrieved_task']} "
+            f"in_scope={item['in_consensus_scope']}"
         )
     executed_model_actions = []
     for model_action, action in zip(response["actions"][:15], actions[:15], strict=True):
