@@ -178,6 +178,12 @@ specified best-v1 on the same selected ten tasks with matched PI optimization
 and data budgets. Untouched best-v1 remains a separate capability anchor, not
 a replacement for that trained Base; a degraded Base cannot establish success.
 
+For this matched run, finish both 5,000-step budgets and select each side's
+checkpoint by minimum held-out **flow loss** (earlier step breaks a tie).
+ZeVA's total loss includes Gaussian NLL and is not the common selection metric.
+Freeze the selected paths before closed-loop evaluation; neither test successes
+nor the ZeVA model's internal residual-off proxy selects the final pair.
+
 Replacing only the PI base does not automatically invalidate Stage 1. ZTE,
 the bank, and retrieval can be reused when the new base keeps the same model
 architecture, tokenizer/vocabulary, image/state/action contract, H50/H15

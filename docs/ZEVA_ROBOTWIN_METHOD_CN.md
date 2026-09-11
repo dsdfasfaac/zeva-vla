@@ -8,6 +8,8 @@
 
 ## 1. 问题定义与设计原则
 
+当前这轮的选步口径：两支均完成5000步预算后，分别在完整保存的checkpoints中按 held-out validation **flow loss最低**选择，完全同分取较早step。不能用混有Gaussian NLL的ZeVA total loss代替共同指标，也不依据正式闭环成功率或ZeVA内部residual-off代理挑选最终pair。路径固定后再做同seed闭环比较；仅有offline flow改善不算交付成功。
+
 RoboTwin 的基础策略已经是一个在相同 50-task 数据分布上训练完成的 PI0.5。我们的目标不是重新训练一个 VLA，而是在不破坏其已有能力的前提下，让策略利用执行动作之后真实发生的视觉变化，推断：
 
 1. 当前任务是什么；
