@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+try:
+    from outcome_trace import validate_decision_trace
+except ImportError:  # pragma: no cover - package import path in unit tests.
+    from .outcome_trace import validate_decision_trace
 
 _WORLD_FROM_CAMERA_ROTATION = np.stack(
     (
@@ -110,6 +116,10 @@ class ZevaModel:
         self._torch = torch
         self._prepare_robotwin_pi_image = prepare_robotwin_pi_image
         self._baseline_only = bool(args.get("baseline_only", False))
+        trace_value = args.get("outcome_trace_enabled", os.environ.get("ZEVA_OUTCOME_TRACE", "0"))
+        self._trace_enabled = str(trace_value).strip().lower() in {"1", "true", "yes", "on"}
+        self._trace_replan_index = 0
+        self._last_decision_trace: dict[str, Any] | None = None
         self._candidate_selector = args.get("candidate_selector")
         self._candidate_count = int(args.get("candidate_count", 4))
         self._phase_confidence_floor = float(args.get("phase_confidence_floor", 0.85))
@@ -187,6 +197,72 @@ class ZevaModel:
             self._reset_proposal_rng(seed)
         self.policy.reset(scope="episode")
         self._previous_commands = None
+        self._trace_replan_index = 0
+        self._last_decision_trace = None
+
+    def _make_decision_trace(
+        self,
+        *,
+        batch: dict[str, Any],
+        candidates: Any,
+        pairwise_distances: Any,
+        selected_index: Any,
+        retrieved_task: str | None,
+        phase_confidence: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Build and validate one optional closed-loop replan trace.
+
+        This method is completely bypassed in ordinary evaluation.  It records
+        post-processor actions (the RoboTwin execution domain), while the
+        selector's pairwise distances remain the server-computed diagnostics.
+        """
+        if not self._trace_enabled:
+            return None
+        torch = self._torch
+        candidate_tensor = torch.as_tensor(candidates).detach()
+        if candidate_tensor.ndim == 2:
+            candidate_tensor = candidate_tensor.unsqueeze(0)
+        if candidate_tensor.ndim != 3:
+            raise ValueError(
+                "Outcome trace candidates must be [K,15,16] after batch selection, "
+                f"got {tuple(candidate_tensor.shape)}"
+            )
+        pairwise_tensor = torch.as_tensor(pairwise_distances).detach()
+        selected_tensor = torch.as_tensor(selected_index).detach()
+        if candidate_tensor.shape[0] != pairwise_tensor.shape[0]:
+            raise ValueError("Outcome trace candidate/pairwise dimensions disagree")
+        selected_value = int(selected_tensor.reshape(-1)[0].cpu())
+        previous = None
+        if self._previous_commands is not None:
+            previous_tensor = torch.as_tensor(self._previous_commands).detach()
+            if previous_tensor.ndim == 3:
+                previous_tensor = previous_tensor[0]
+            previous = previous_tensor.cpu().numpy()
+        eos = None
+        if self._trace_replan_index == 0:
+            eos_tensor = self.policy.extract_vlm_features(batch)
+            if eos_tensor.ndim != 2 or eos_tensor.shape[0] < 1:
+                raise ValueError(
+                    "PI VLM EOS feature must be [B,2048], "
+                    f"got {tuple(eos_tensor.shape)}"
+                )
+            eos = eos_tensor[0].detach().cpu().numpy()
+        record: dict[str, Any] = {
+            "replan_index": self._trace_replan_index,
+            "retrieved_task": retrieved_task,
+            "candidate_h15_actions": candidate_tensor[:, :15].cpu().numpy(),
+            "pairwise_distances": pairwise_tensor.cpu().numpy(),
+            "selected_candidate": selected_value,
+            "pi_vlm_eos_feature": eos,
+            "previous_executed_h15": previous,
+        }
+        if phase_confidence is not None:
+            confidence_tensor = torch.as_tensor(phase_confidence).detach().reshape(-1)
+            record["phase_confidence"] = float(confidence_tensor[0].cpu())
+        validate_decision_trace(record)
+        self._trace_replan_index += 1
+        self._last_decision_trace = record
+        return record
 
     def _frozen_pi_candidates(self, batch: dict[str, Any]):
         """Draw K candidates while preserving candidate-0's future Base RNG."""
@@ -240,7 +316,21 @@ class ZevaModel:
             selected_index = self._torch.zeros(
                 len(selected), device=selected.device, dtype=self._torch.long
             )
-            return self.policy.postprocessor(selected), confidence, selected_index, retrieved_tasks
+            selected_postprocessed = self.policy.postprocessor(selected)
+            if self._trace_enabled:
+                self._make_decision_trace(
+                    batch=batch,
+                    candidates=selected_postprocessed[0:1, :15],
+                    pairwise_distances=self._torch.zeros(
+                        (1, 1), device=selected.device, dtype=selected.dtype
+                    ),
+                    selected_index=selected_index,
+                    retrieved_task=retrieved_tasks[0],
+                    # The out-of-scope sentinel is -inf by design; the trace
+                    # contract is finite-only, so omit that optional score.
+                    phase_confidence=None,
+                )
+            return selected_postprocessed, confidence, selected_index, retrieved_tasks
         candidates = self._frozen_pi_candidates(batch)
         prefix = candidates[:, :, :15]
         pairwise = (prefix[:, :, None] - prefix[:, None, :]).square().mean(dim=(3, 4))
@@ -268,7 +358,21 @@ class ZevaModel:
         ]
         self.policy._previous_image = robotwin_multiview_image(batch).detach().clone()  # noqa: SLF001
         self.policy._pending_normalized_actions = selected.detach().clone()  # noqa: SLF001
-        return self.policy.postprocessor(selected), confidence, selected_index, retrieved_tasks
+        selected_postprocessed = self.policy.postprocessor(selected)
+        if self._trace_enabled:
+            postprocessed_candidates = self._torch.stack(
+                [self.policy.postprocessor(candidates[:, index]) for index in range(candidates.shape[1])],
+                dim=1,
+            )
+            self._make_decision_trace(
+                batch=batch,
+                candidates=postprocessed_candidates[0],
+                pairwise_distances=pairwise[0],
+                selected_index=selected_index,
+                retrieved_task=retrieved_tasks[0],
+                phase_confidence=confidence,
+            )
+        return selected_postprocessed, confidence, selected_index, retrieved_tasks
 
     def commit_executed_actions(self, value: np.ndarray) -> None:
         """Record only the H15 controls that RoboTwin actually executed."""
@@ -303,11 +407,27 @@ class ZevaModel:
             ),
             "task": observation["task"],
         }
+        self._last_decision_trace = None
         selector_diagnostics = None
         if self._baseline_only:
             batch = self.policy.preprocessor(raw)
             normalized = self.policy.foundation.predict_action_chunk(batch)
             chunk = self.policy.postprocessor(normalized)
+            if self._trace_enabled:
+                trace_chunk = self._torch.as_tensor(chunk)
+                if trace_chunk.ndim == 2:
+                    trace_chunk = trace_chunk.unsqueeze(0)
+                self._make_decision_trace(
+                    batch=batch,
+                    candidates=trace_chunk[:, :15],
+                    pairwise_distances=self._torch.zeros(
+                        (1, 1), device=normalized.device, dtype=normalized.dtype
+                    ),
+                    selected_index=self._torch.zeros(
+                        (1,), device=normalized.device, dtype=self._torch.long
+                    ),
+                    retrieved_task=None,
+                )
         elif self._candidate_selector == "phase_gated_consensus_medoid":
             chunk, phase_confidence, selected_index, retrieved_tasks = self._phase_gated_consensus_chunk(raw)
             selector_diagnostics = {
@@ -320,16 +440,35 @@ class ZevaModel:
             }
         else:
             chunk = self.policy.infer_chunk(raw, executed_actions=self._previous_commands)
+            if self._trace_enabled:
+                trace_batch = self.policy.preprocessor(raw)
+                trace_chunk = self._torch.as_tensor(chunk)
+                if trace_chunk.ndim == 2:
+                    trace_chunk = trace_chunk.unsqueeze(0)
+                self._make_decision_trace(
+                    batch=trace_batch,
+                    candidates=trace_chunk[:, :15],
+                    pairwise_distances=self._torch.zeros(
+                        (1, 1), dtype=self._torch.float32
+                    ),
+                    selected_index=self._torch.zeros((1,), dtype=self._torch.long),
+                    retrieved_task=None,
+                )
         chunk = self._torch.as_tensor(chunk).detach().cpu()
         if chunk.ndim == 3:
             if chunk.shape[0] != 1:
                 raise ValueError(f"Formal RoboTwin eval requires batch size one, got {tuple(chunk.shape)}.")
             chunk = chunk[0]
-        return {
+        response = {
             "actions": chunk.numpy().astype(np.float32),
             "retrieval": [] if self._baseline_only else self.policy.retrieval_diagnostics(),
             "selector": selector_diagnostics,
         }
+        if self._trace_enabled:
+            if self._last_decision_trace is None:
+                raise RuntimeError("Outcome tracing enabled but no decision trace was produced")
+            response["trace"] = self._last_decision_trace
+        return response
 
 
 def get_model(args: dict[str, Any]) -> ZevaModel:

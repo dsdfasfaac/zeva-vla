@@ -50,6 +50,19 @@ import json
 from typing import Any
 import base64
 
+try:
+    from outcome_trace import OutcomeTraceError
+    from outcome_trace import atomic_write_episode_trace
+    from outcome_trace import bind_episode_trace
+    from outcome_trace import trace_filename
+    from outcome_trace import validate_decision_trace
+except ImportError:  # pragma: no cover - package import path in unit tests.
+    from .outcome_trace import OutcomeTraceError
+    from .outcome_trace import atomic_write_episode_trace
+    from .outcome_trace import bind_episode_trace
+    from .outcome_trace import trace_filename
+    from .outcome_trace import validate_decision_trace
+
 class NumpyEncoder(json.JSONEncoder):
     """Enhanced json encoder for numpy types with array reconstruction info"""
     def default(self, obj):
@@ -364,13 +377,48 @@ def get_embodiment_config(robot_file):
     return embodiment_args
 
 class ModelClient:
-    def __init__(self, host='localhost', port=9999, timeout=600, max_attempts=120, retry_delay=5):
+    def __init__(
+        self,
+        host='localhost',
+        port=9999,
+        timeout=600,
+        max_attempts=120,
+        retry_delay=5,
+        outcome_trace_dir=None,
+        outcome_trace_condition=None,
+        outcome_trace_policy_name=None,
+        outcome_trace_split=None,
+        outcome_trace_protocol=None,
+    ):
         self.host = host
         self.port = port
         self.timeout = timeout
         self.max_attempts = max_attempts
         self.retry_delay = retry_delay
         self.sock = None
+        self._outcome_trace_dir = Path(outcome_trace_dir).expanduser() if outcome_trace_dir else None
+        self._outcome_trace_condition = (
+            str(outcome_trace_condition).strip() if outcome_trace_condition else None
+        )
+        self._outcome_trace_policy_name = (
+            str(outcome_trace_policy_name).strip() if outcome_trace_policy_name else None
+        )
+        self._outcome_trace_split = (
+            str(outcome_trace_split).strip() if outcome_trace_split else None
+        )
+        self._outcome_trace_protocol = (
+            str(outcome_trace_protocol).strip() if outcome_trace_protocol else None
+        )
+        if self._outcome_trace_dir is not None and not self._outcome_trace_condition:
+            raise ValueError("outcome_trace_condition is required when outcome tracing is enabled")
+        if self._outcome_trace_dir is not None and not self._outcome_trace_policy_name:
+            raise ValueError("outcome_trace_policy_name is required when outcome tracing is enabled")
+        if self._outcome_trace_dir is not None and not self._outcome_trace_split:
+            raise ValueError("outcome_trace_split is required when outcome tracing is enabled")
+        if self._outcome_trace_dir is not None and not self._outcome_trace_protocol:
+            raise ValueError("outcome_trace_protocol is required when outcome tracing is enabled")
+        self._trace_episode: dict[str, Any] | None = None
+        self._trace_replans: list[dict[str, Any]] = []
         self._connect()
 
     def _connect(self):
@@ -438,12 +486,86 @@ class ModelClient:
         # Deserialize with numpy reconstruction
         return json_to_numpy(b''.join(chunks).decode('utf-8'))
 
+    def begin_episode_trace(
+        self,
+        *,
+        task: str,
+        seed: int,
+        episode_index: int,
+        instruction: str,
+    ) -> None:
+        """Start an opt-in trace; no-op for ordinary evaluation."""
+        if self._outcome_trace_dir is None:
+            return
+        if self._trace_episode is not None:
+            raise RuntimeError("Cannot begin an outcome trace before finalizing the previous episode")
+        self._trace_episode = {
+            "task": str(task),
+            "seed": int(seed),
+            "episode_index": int(episode_index),
+            "instruction": str(instruction),
+        }
+        self._trace_replans = []
+
+    def _record_prediction_trace(self, response: dict[str, Any]) -> None:
+        if self._outcome_trace_dir is None:
+            return
+        if self._trace_episode is None:
+            raise RuntimeError("Received a prediction before begin_episode_trace")
+        raw_trace = response.get("trace")
+        if raw_trace is None:
+            raise OutcomeTraceError(
+                "Outcome tracing is enabled, but the model server returned no 'trace' payload"
+            )
+        trace = validate_decision_trace(raw_trace)
+        expected_index = len(self._trace_replans)
+        if trace["replan_index"] != expected_index:
+            raise OutcomeTraceError(
+                "Model server returned non-contiguous replan_index: "
+                f"expected {expected_index}, got {trace['replan_index']}"
+            )
+        self._trace_replans.append(trace)
+
+    def finalize_episode_trace(
+        self,
+        *,
+        success: bool,
+        steps: int,
+        step_limit: int,
+    ) -> Path | None:
+        """Validate and atomically commit one completed episode trace."""
+        if self._outcome_trace_dir is None:
+            return None
+        if self._trace_episode is None:
+            raise RuntimeError("Cannot finalize an outcome trace before begin_episode_trace")
+        payload = bind_episode_trace(
+            **self._trace_episode,
+            condition=self._outcome_trace_condition,
+            policy_name=self._outcome_trace_policy_name,
+            split=self._outcome_trace_split,
+            protocol=self._outcome_trace_protocol,
+            success=bool(success),
+            steps=int(steps),
+            step_limit=int(step_limit),
+            replans=self._trace_replans,
+        )
+        path = self._outcome_trace_dir / trace_filename(
+            payload["task"], payload["episode_index"], payload["seed"]
+        )
+        result = atomic_write_episode_trace(path, payload)
+        self._trace_episode = None
+        self._trace_replans = []
+        print(f"Outcome trace committed atomically: {result}")
+        return result
+
     def call(self, func_name=None, obs=None):
         response = self._send_recv({"cmd": func_name, "obs": obs})
         if "error" in response:
             raise RuntimeError(f"Model server error: {response['error']}\n{response.get('traceback', '')}")
         if "res" not in response:
             raise RuntimeError(f"Malformed model server response: {response!r}")
+        if func_name == "predict":
+            self._record_prediction_trace(response["res"])
         return response['res']
 
     def close(self):
@@ -616,6 +738,30 @@ def main(usr_args):
             resume_identity,
         )
 
+    outcome_trace_enabled = as_bool(usr_args.get("outcome_trace_enabled"), False)
+    outcome_trace_dir = usr_args.get("outcome_trace_dir")
+    if outcome_trace_enabled and not outcome_trace_dir:
+        raise ValueError("outcome_trace_enabled=True requires outcome_trace_dir")
+    if not outcome_trace_enabled:
+        outcome_trace_dir = None
+    outcome_trace_condition = str(
+        usr_args.get("outcome_trace_condition", policy_name)
+    )
+    outcome_trace_split = (
+        str(usr_args.get("outcome_trace_split", "")).strip()
+        if outcome_trace_enabled
+        else None
+    )
+    outcome_trace_protocol = (
+        str(usr_args.get("outcome_trace_protocol", "")).strip()
+        if outcome_trace_enabled
+        else None
+    )
+    if outcome_trace_enabled and not outcome_trace_split:
+        raise ValueError("outcome_trace_enabled=True requires outcome_trace_split")
+    if outcome_trace_enabled and not outcome_trace_protocol:
+        raise ValueError("outcome_trace_enabled=True requires outcome_trace_protocol")
+
     # model = get_model(usr_args)
     if len(resumed_episode_results) < test_num:
         model = ModelClient(
@@ -624,6 +770,11 @@ def main(usr_args):
             timeout=float(usr_args.get("client_timeout", 600)),
             max_attempts=int(usr_args.get("connect_attempts", 120)),
             retry_delay=float(usr_args.get("connect_retry_seconds", 5)),
+            outcome_trace_dir=outcome_trace_dir,
+            outcome_trace_condition=outcome_trace_condition,
+            outcome_trace_policy_name=policy_name,
+            outcome_trace_split=outcome_trace_split,
+            outcome_trace_protocol=outcome_trace_protocol,
         )
         try:
             st_seed, suc_num, episode_results = eval_policy(
@@ -879,6 +1030,14 @@ def eval_policy(task_name,
             )
             TASK_ENV._set_eval_video_ffmpeg(ffmpeg)
 
+        if hasattr(model, "begin_episode_trace"):
+            model.begin_episode_trace(
+                task=task_name,
+                seed=now_seed,
+                episode_index=now_id,
+                instruction=instruction,
+            )
+
         succ = False
         # Match the frozen PI0.5 protocol: reset recurrent state without
         # overwriting diffusion RNG from the environment seed. Reusing the
@@ -921,6 +1080,13 @@ def eval_policy(task_name,
             "step_limit": int(TASK_ENV.step_lim),
             "instruction": str(instruction),
         })
+
+        if hasattr(model, "finalize_episode_trace"):
+            model.finalize_episode_trace(
+                success=bool(succ),
+                steps=int(TASK_ENV.take_action_cnt),
+                step_limit=int(TASK_ENV.step_lim),
+            )
 
         now_id += 1
 

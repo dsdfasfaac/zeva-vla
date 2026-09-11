@@ -55,6 +55,14 @@ seed_manifest=$output/seed_manifest.json
 frozen_seed_manifest=${FROZEN_SEED_MANIFEST:-}
 baseline_only_precompute=${BASELINE_ONLY_PRECOMPUTE:-false}
 reuse_existing_baseline=${REUSE_EXISTING_BASELINE:-false}
+outcome_trace_enabled=${OUTCOME_TRACE_ENABLED:-false}
+outcome_trace_root=${OUTCOME_TRACE_ROOT:-$output/outcome-traces}
+# Provenance is mandatory for collected traces.  Formal paired evaluation is
+# treated as final-test by default, so its success labels cannot accidentally
+# be joined into an outcome-selector supervision dataset.  Development runs
+# must opt in explicitly with OUTCOME_TRACE_SPLIT=development or validation.
+outcome_trace_split=${OUTCOME_TRACE_SPLIT:-test}
+outcome_trace_protocol=${OUTCOME_TRACE_PROTOCOL:-chunk-start-relative-eef16-predict-h50-execute-h15}
 
 if [[ -n "$precomputed_baseline_root" ]]; then
   baseline_is_untouched_anchor=true
@@ -82,6 +90,24 @@ fi
 if [[ "$reuse_existing_baseline" != true && "$reuse_existing_baseline" != false ]]; then
   echo "REUSE_EXISTING_BASELINE must be true or false" >&2
   exit 2
+fi
+if [[ "$outcome_trace_enabled" != true && "$outcome_trace_enabled" != false ]]; then
+  echo "OUTCOME_TRACE_ENABLED must be true or false" >&2
+  exit 2
+fi
+if [[ "$outcome_trace_enabled" == true && -z "$outcome_trace_root" ]]; then
+  echo "OUTCOME_TRACE_ENABLED=true requires OUTCOME_TRACE_ROOT" >&2
+  exit 2
+fi
+if [[ "$outcome_trace_enabled" == true ]]; then
+  if [[ ! "$outcome_trace_split" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "OUTCOME_TRACE_SPLIT must be a non-empty label using [A-Za-z0-9_.-]" >&2
+    exit 2
+  fi
+  if [[ ! "$outcome_trace_protocol" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "OUTCOME_TRACE_PROTOCOL must be a non-empty label using [A-Za-z0-9_.-]" >&2
+    exit 2
+  fi
 fi
 if [[ "$baseline_only_precompute" == true && "$reuse_existing_baseline" == true ]]; then
   echo "BASELINE_ONLY_PRECOMPUTE and REUSE_EXISTING_BASELINE are mutually exclusive" >&2
@@ -190,6 +216,10 @@ trap stop_servers EXIT INT TERM
 start_servers() {
   local config=$1
   local condition_root=$2
+  local trace_server_env=""
+  if [[ "$outcome_trace_enabled" == true ]]; then
+    trace_server_env="ZEVA_OUTCOME_TRACE=1"
+  fi
   mkdir -p "$condition_root/logs" "$condition_root/server-pids"
   server_pids=()
   for slot in $(seq 0 $((slots - 1))); do
@@ -198,6 +228,7 @@ start_servers() {
     local pid
     pid=$(ssh "$model_host" "cd '$shared_runtime'; nohup env \
       PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$slot' PYTHONPATH='$model_pythonpath' \
+      $trace_server_env \
       HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \
       python3 script/policy_model_server.py --port '$port' --config '$config' \
         --overrides --host 0.0.0.0 > '$log' 2>&1 < /dev/null & echo \$!")
@@ -244,6 +275,12 @@ run_condition() {
         local log="$condition_root/logs/$task.log"
         local status="$condition_root/status/$task.json"
         local result_dir="$condition_root/results/$task"
+        local outcome_trace_args="--outcome_trace_enabled False"
+        if [[ "$outcome_trace_enabled" == true ]]; then
+          local task_trace_dir="$outcome_trace_root/$condition/$task"
+          ssh "$render_host" "mkdir -p '$task_trace_dir'"
+          outcome_trace_args="--outcome_trace_enabled True --outcome_trace_dir '$task_trace_dir' --outcome_trace_condition '$condition' --outcome_trace_split '$outcome_trace_split' --outcome_trace_protocol '$outcome_trace_protocol'"
+        fi
         local seed_args="--fixed_seed_sequence False"
         if [[ -n "$seeds" ]]; then
           seed_args="--fixed_seed_sequence True --seed_manifest '$seeds'"
@@ -259,6 +296,7 @@ run_condition() {
           --policy_name zeva_policy --ckpt_setting '$ckpt_label' \
           --eval_video_log True --result_dir '$result_dir' \
           --execute_horizon 15 --chunk_length 50 --action_dim 16 \
+          $outcome_trace_args \
           --server_host '$model_ip' --resume_progress_path '$progress'" > "$log" 2>&1
         local rc=$?
         set -e
@@ -376,6 +414,10 @@ cat > "$output/manifest.json" <<EOF
   "precomputed_baseline_expected_successes": $precomputed_baseline_expected_successes,
   "baseline_only_precompute": $baseline_only_precompute,
   "reuse_existing_baseline": $reuse_existing_baseline,
+  "outcome_trace_enabled": $outcome_trace_enabled,
+  "outcome_trace_root": "$outcome_trace_root",
+  "outcome_trace_split": "$outcome_trace_split",
+  "outcome_trace_protocol": "$outcome_trace_protocol",
   "model_runtime": "native_handoff_transformers_5.5.4",
   "model_host": "$model_host",
   "render_host": "$render_host",

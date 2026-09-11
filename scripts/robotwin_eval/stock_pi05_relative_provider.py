@@ -10,6 +10,7 @@ reproduces the published RoboTwin baseline before comparing trained models.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import os
 from pathlib import Path
 import sys
 import typing
@@ -19,6 +20,11 @@ from typing import Any
 import numpy as np
 import torch
 import typing_extensions
+
+try:
+    from outcome_trace import validate_decision_trace
+except ImportError:  # pragma: no cover - package import path in unit tests.
+    from .outcome_trace import validate_decision_trace
 
 
 for _name in ("Self", "Unpack", "NotRequired"):
@@ -114,9 +120,58 @@ class Provider:
                 ):
                     step.relative_step = relative_step
 
+        trace_value = args.get("outcome_trace_enabled", os.environ.get("ZEVA_OUTCOME_TRACE", "0"))
+        self.trace_enabled = str(trace_value).strip().lower() in {"1", "true", "yes", "on"}
+        self.replan_index = 0
+        self.previous_executed_h15: np.ndarray | None = None
+        self.last_trace: dict[str, Any] | None = None
+
     def reset_episode(self, context: Mapping[str, Any]) -> None:
         del context
         self.policy.reset()
+        self.replan_index = 0
+        self.previous_executed_h15 = None
+        self.last_trace = None
+
+    @torch.inference_mode()
+    def _extract_vlm_eos_feature(self, batch: Mapping[str, Any]) -> np.ndarray:
+        """Extract the same normalized first-frame PI VLM feature as ZeVA."""
+        from lerobot.policies.common.vla_utils import make_att_2d_masks
+        from lerobot.policies.common.vla_utils import prepare_attention_masks_4d
+        from lerobot.utils.constants import OBS_LANGUAGE_ATTENTION_MASK
+        from lerobot.utils.constants import OBS_LANGUAGE_TOKENS
+
+        foundation = self.policy
+        core = foundation.model
+        images, image_masks = foundation._preprocess_images(batch)
+        states, state_masks = foundation._prepare_memory_states(batch)
+        embeddings, pad_masks, attention_masks = core.embed_prefix(
+            images,
+            image_masks,
+            batch[OBS_LANGUAGE_TOKENS],
+            batch[OBS_LANGUAGE_ATTENTION_MASK],
+            states,
+            state_masks,
+        )
+        q_proj = core.paligemma_with_expert.paligemma.model.language_model.layers[0].self_attn.q_proj
+        embeddings = embeddings.to(q_proj.weight.dtype)
+        attention_2d = make_att_2d_masks(pad_masks, attention_masks)
+        attention_4d = prepare_attention_masks_4d(attention_2d, dtype=embeddings.dtype)
+        position_ids = torch.cumsum(pad_masks, dim=1) - 1
+        outputs, _ = core.paligemma_with_expert.forward(
+            attention_mask=attention_4d,
+            position_ids=position_ids,
+            past_key_values=None,
+            inputs_embeds=[embeddings, None],
+            use_cache=False,
+        )
+        hidden = outputs[0].float()
+        last_valid = pad_masks.long().sum(dim=1).sub(1).clamp_min(0)
+        gather_index = last_valid[:, None, None].expand(-1, 1, hidden.shape[-1])
+        feature = torch.nn.functional.normalize(hidden.gather(1, gather_index).squeeze(1), dim=-1)
+        if tuple(feature.shape) != (1, 2048) or not torch.isfinite(feature).all():
+            raise ValueError(f"PI VLM EOS feature must be finite [1,2048], got {tuple(feature.shape)}")
+        return feature[0].detach().cpu().numpy()
 
     @torch.inference_mode()
     def predict_action_chunk(
@@ -144,6 +199,20 @@ class Provider:
             actions = actions[0]
         if tuple(actions.shape) != (50, 16) or not torch.isfinite(actions).all():
             raise ValueError(f"PI0.5 must return finite [50,16], got {tuple(actions.shape)}.")
+        self.last_trace = None
+        if self.trace_enabled:
+            eos = self._extract_vlm_eos_feature(batch) if self.replan_index == 0 else None
+            trace = {
+                "replan_index": self.replan_index,
+                "retrieved_task": None,
+                "candidate_h15_actions": actions[:15].numpy()[None, ...],
+                "pairwise_distances": np.zeros((1, 1), dtype=np.float32),
+                "selected_candidate": 0,
+                "pi_vlm_eos_feature": eos,
+                "previous_executed_h15": self.previous_executed_h15,
+            }
+            self.last_trace = validate_decision_trace(trace)
+            self.replan_index += 1
         return actions.float().numpy()
 
     def begin_attempt(self, context: Mapping[str, Any]) -> None:
@@ -174,16 +243,26 @@ class StockSocketModel:
         del payload
         self.provider.reset_episode({})
 
-    def predict(self, request: Mapping[str, Any]) -> dict[str, np.ndarray]:
+    def predict(self, request: Mapping[str, Any]) -> dict[str, Any]:
         actions = self.provider.predict_action_chunk(
             request,
             str(request["task"]),
             {},
         )
-        return {"actions": actions, "retrieval": []}
+        response: dict[str, Any] = {"actions": actions, "retrieval": []}
+        if self.provider.trace_enabled:
+            if self.provider.last_trace is None:
+                raise RuntimeError("Outcome tracing enabled but PI baseline produced no trace")
+            response["trace"] = self.provider.last_trace
+        return response
 
     def commit_executed_actions(self, actions: np.ndarray) -> None:
-        del actions
+        if not self.provider.trace_enabled:
+            return
+        value = np.asarray(actions, dtype=np.float32)
+        if value.shape != (15, 16) or not np.isfinite(value).all():
+            raise ValueError(f"Executed actions must be finite [15,16], got {value.shape}")
+        self.provider.previous_executed_h15 = value.copy()
 
 
 def get_model(args: Mapping[str, Any]) -> StockSocketModel:
