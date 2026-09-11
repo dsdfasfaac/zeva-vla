@@ -235,9 +235,20 @@ if [[ -e "${retrieval_output}" ]]; then
   echo "Refusing to overwrite existing retrieval output: ${retrieval_output}" >&2
   exit 2
 fi
-echo "stage1_5_start=$(date -Is) gpu=5"
-CUDA_VISIBLE_DEVICES=5 cd "${repo_root}"
-CUDA_VISIBLE_DEVICES=5 bash scripts/run_robotwin_zte_v2.sh --run "${retrieval}" \
+retrieval_gpu=${ROBOTWIN_ZTE_RETRIEVAL_GPU:-${gpus[0]}}
+if ! printf '%s\n' "${gpus[@]}" | grep -Fxq "${retrieval_gpu}"; then
+  echo "Retrieval GPU ${retrieval_gpu} is outside the export GPU set ${gpus[*]}." >&2
+  exit 2
+fi
+retrieval_compute=$(nvidia-smi -i "${retrieval_gpu}" --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+if [[ -n "${retrieval_compute}" ]]; then
+  echo "Retrieval GPU ${retrieval_gpu} is occupied; refusing overlap:" >&2
+  echo "${retrieval_compute}" >&2
+  exit 1
+fi
+echo "stage1_5_start=$(date -Is) gpu=${retrieval_gpu}"
+CUDA_VISIBLE_DEVICES="${retrieval_gpu}" cd "${repo_root}"
+CUDA_VISIBLE_DEVICES="${retrieval_gpu}" bash scripts/run_robotwin_zte_v2.sh --run "${retrieval}" \
   --handoff-root "${handoff_root}" \
   --dataset-root "${dataset_root}" \
   --goal-embeddings "${goal_embeddings}" \
