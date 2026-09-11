@@ -6,6 +6,12 @@
 
 ## 当前运行
 
+17:09 更新：恢复进程已结束并保存 step4096，但 checkpoint 审计发现 **学习率调度计数错误**，不能把这轮称为正常完成5epochs。保存的 `(global step, scheduler.last_epoch, LR)` 为 `(512,2048,[5e-6,5e-5])`、`(1024,4096,[0,0])`、`(2048,8192,[0,0])`、`(4096,16384,[0,0])`。Accelerate 包装导致每个 global step 推进4次，step1024 后无有效参数学习；后续 EMA 收敛使指标几乎不变。正在修复为每个 global step 只推进一次，并从 step1024 做显式 scheduler-repair continuation；这种改变学习率状态的补训不能称为 exact resume。
+
+现有 checkpoint 中 step2048 的完整 validation loss 最低（6.957496039，和末步6.957496073几乎相同），仅选为**已冻结的临时 PI 接入候选**，不是证明它最能提高闭环成功率。其 task probe=90.2222%、order=76.9403%、effect cosine=0.183846。全量 bank/live 导出与同源 task-language retrieval 将使用这个不可变 step 文件；后续修复产生的新 ZTE 不能静默替换对应 bank 或 policy 的权重。
+
+真实 best-v1 PI0.5 + h512 ZTE 联合 smoke 已通过（`zte-v2-bestv1-real-pi-h512-smoke-20260911.json`）：Base/residual-off/on 最大差0，实际 `[1,50,16]` 输出、pending `[1,15,16]`、三类 Mamba cache 和有限动作。输入为 synthetic zero images，不是闭环成功率。26项集成单测通过。完整导出器现支持不同长度 batch、固定大小 CPU bank 统计、分片覆盖与同源校验，8项单测和两分片 merge smoke 通过；这些 bounded smoke 明确标为 incomplete，不可用于正式训练。
+
 当前长预算实验：`stage1-zte-v2-phase-vector-mse-4096-20260911h`，aigc29 原 launcher `513210`，GPU0/1/3/4，DDP port29541，每卡batch8、global32、4096 steps（约5.01epochs）、warmup256、每512步保存并完整验证。step512 已保存，完整验证1350条。原进程在 13:26 因 DDP reduction/未参与梯度参数报错退出，不能称为正常训完。
 
 15:16 恢复核验：Luna worker 的修复 `bc5dbc2` 为 all-padding batch 的输出增加零值 autograd 依赖，避免 epoch 尾部被 mask 掉的 action head/task prototype 分支不触发 DDP reduction。新目录 `stage1-zte-v2-phase-vector-mse-4096-20260911h-ddp-recovery` 保留原 step512 权重、optimizer/scheduler 和逐 rank RNG，world4 与4096步计划不变，原目录不覆盖。launcher `574892` 存活，日志实际推进到 **step999**，已越过原报错位置；这证明恢复在推进，不表示4096步已完成。恢复入口为 `scripts/recover_robotwin_zte_v2_ddp.sh`，已有输出目录会拒绝覆盖。
