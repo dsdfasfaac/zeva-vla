@@ -1111,6 +1111,7 @@ def _manifest(
         zeva_enabled and not output_correction and not output_residual
     ) or action_expert_control
     prior_only = args.training_variant in {"prior_adapter", "prior_zeva"}
+    stage1_prediction_enabled = zeva_enabled
     frozen_foundation = args.training_variant in {
         "adapter",
         "prior_adapter",
@@ -1191,7 +1192,26 @@ def _manifest(
         "dataset_adapter": str((Path(args.dataset_root) / "adapter.json").resolve()),
         "train_split": "train95",
         "validation_split": "validation5",
-        "retrieval_protocol": "task-language inferred task + recurrent H15 ZTE phase; no oracle progress",
+        "retrieval_protocol": (
+            "task-language inferred task + recurrent H15 ZTE phase; no oracle progress"
+            if stage1_prediction_enabled
+            else "loaded for lineage validation only; not used for Base predictions or training"
+        ),
+        "stage1_usage": {
+            "checkpoint_and_artifacts_loaded_for_lineage_validation": True,
+            "used_for_predictions": stage1_prediction_enabled,
+            "used_for_training": stage1_prediction_enabled,
+            "task_language_retrieval_used": stage1_prediction_enabled,
+            "memory_streams": {
+                "brief": stage1_prediction_enabled,
+                "persistent": stage1_prediction_enabled,
+            },
+            "base_contract": (
+                "ordinary_untouched_best_v1_action_expert_flow; H50 flow with H15 decision sampling"
+                if not stage1_prediction_enabled
+                else None
+            ),
+        },
         "pi_image_contract": {
             "layout": "CHW",
             "dtype": "float32",
@@ -1258,10 +1278,10 @@ def _manifest(
             ),
         },
         "causal_context_residual": {
-            "source": "memory_context_encoder",
+            "source": "memory_context_encoder" if stage1_prediction_enabled else "disabled",
             "target": (
                 "disabled"
-                if action_expert_control
+                if not stage1_prediction_enabled or action_expert_control
                 else "post_diffusion_action_residual_h15"
                 if output_residual
                 else
@@ -1270,36 +1290,41 @@ def _manifest(
                 else "noisy_action_embedding"
             ),
             "direct_injection_enabled": (
-                False if action_expert_control or output_correction or output_residual else not prior_only
+                False
+                if not stage1_prediction_enabled
+                or action_expert_control
+                or output_correction
+                or output_residual
+                else not prior_only
             ),
             "broadcast_horizon": 50,
             "gate": (
                 "disabled"
-                if prior_only or action_expert_control
+                if not stage1_prediction_enabled or prior_only or action_expert_control
                 else "bounded_task_language_plus_recurrent_h15_phase_router"
             ),
         },
         "action_prior": {
-            "distribution": "disabled" if action_expert_control else "diagonal_gaussian",
-            "parameterization": None if action_expert_control else "mean_and_log_std",
-            "log_std_range": None if action_expert_control else [-5.0, 2.0],
-            "loss": "disabled" if action_expert_control else "negative_log_likelihood_sum_action_mean_executed_horizon",
-            "supervision_horizon": None if action_expert_control else args.prior_injection_horizon,
-            "residual_source": None if action_expert_control else "mean",
+            "distribution": "disabled" if not stage1_prediction_enabled or action_expert_control else "diagonal_gaussian",
+            "parameterization": None if not stage1_prediction_enabled or action_expert_control else "mean_and_log_std",
+            "log_std_range": None if not stage1_prediction_enabled or action_expert_control else [-5.0, 2.0],
+            "loss": "disabled" if not stage1_prediction_enabled or action_expert_control else "negative_log_likelihood_sum_action_mean_executed_horizon",
+            "supervision_horizon": None if not stage1_prediction_enabled or action_expert_control else args.prior_injection_horizon,
+            "residual_source": None if not stage1_prediction_enabled or action_expert_control else "mean",
             "residual_target": (
                 None
-                if action_expert_control
+                if not stage1_prediction_enabled or action_expert_control
                 else "post_diffusion_h15_expert_minus_base_delta"
                 if output_residual
                 else "post_diffusion_h15_output"
                 if output_correction
                 else "noisy_action_embedding"
             ),
-            "residual_dropout_probability": 0.0 if action_expert_control else args.prior_residual_dropout_probability,
-            "injection_horizon": None if action_expert_control else args.prior_injection_horizon,
+            "residual_dropout_probability": 0.0 if not stage1_prediction_enabled or action_expert_control else args.prior_residual_dropout_probability,
+            "injection_horizon": None if not stage1_prediction_enabled or action_expert_control else args.prior_injection_horizon,
             "scalar_gate": (
                 "disabled"
-                if action_expert_control
+                if not stage1_prediction_enabled or action_expert_control
                 else "direct_bounded_residual_with_floor"
                 if output_residual
                 else "learned_per_step_output_gate"

@@ -1901,6 +1901,12 @@ class RobotWinZevaPolicy(nn.Module):
             module.requires_grad_(True)
         self._full_pi05_finetune = False
         self._action_expert_finetune = True
+        # Keep the ordinary Base path structurally inert even if a caller
+        # passes Stage-1/cache tensors to the wrapper.  The Stage-2 baseline
+        # uses ``foundation_only=True``; this flag makes the same contract
+        # explicit for serving/debug calls and prevents either memory stream
+        # from becoming an accidental teacher or training input.
+        self._direct_context_injection_enabled = False
         self.foundation.train()
         core.paligemma_with_expert.paligemma.eval()
         self.causal_transition_encoder.eval()

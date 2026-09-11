@@ -198,6 +198,17 @@ class Stage2V2ManifestTest(unittest.TestCase):
         self.assertEqual(manifest["zte_checkpoint_schema"], schema)
         self.assertEqual(manifest["causal_transition_horizon"], 15)
 
+    def test_baseline_manifest_marks_stage1_as_lineage_only(self):
+        args = self._args_and_checkpoint()
+        args.training_variant = "baseline"
+        bank = self._bank(args)
+        manifest = _manifest(args, self.handoff, bank, {})
+        self.assertEqual(manifest["stage1_usage"]["used_for_predictions"], False)
+        self.assertEqual(manifest["stage1_usage"]["used_for_training"], False)
+        self.assertEqual(manifest["stage1_usage"]["memory_streams"], {"brief": False, "persistent": False})
+        self.assertEqual(manifest["causal_context_residual"]["direct_injection_enabled"], False)
+        self.assertEqual(manifest["action_prior"]["distribution"], "disabled")
+
 
 if __name__ == "__main__":
     unittest.main()
