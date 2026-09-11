@@ -4,7 +4,9 @@ from types import SimpleNamespace
 
 import unittest
 from unittest.mock import patch
+from accelerate import Accelerator
 import torch
+from torch import nn
 
 from scripts.train_robotwin_zte_v2 import Args  # noqa: E402
 from scripts.train_robotwin_zte_v2 import GroupedTaskSampler  # noqa: E402
@@ -14,6 +16,9 @@ from scripts.train_robotwin_zte_v2 import compute_v2_losses  # noqa: E402
 from scripts.train_robotwin_zte_v2 import _manifest
 from scripts.train_robotwin_zte_v2 import _resume_metadata
 from scripts.train_robotwin_zte_v2 import _ddp_graph_anchor
+from scripts.train_robotwin_zte_v2 import _cosine_warmup_factor
+from scripts.train_robotwin_zte_v2 import _rebase_scheduler
+from scripts.train_robotwin_zte_v2 import _scheduler_resume_provenance
 from scripts.train_robotwin_zte_v2 import prediction_loss
 from openpi.zeva.transition_encoder_v2 import TransitionEncoderV2Config
 
@@ -42,13 +47,81 @@ def test_resume_only_migrates_documented_legacy_pre_context_default():
     legacy = {"zte_config": {"model_dim": 256}, "manifest": {"train_args": {"steps": 256}}}
     config, args = _resume_metadata(legacy)
     assert config == {"model_dim": 256, "action_prediction_context": "pre"}
-    assert args == {"steps": 256, "action_prediction_context": "pre", "prediction_loss_reduction": "mean_coordinate_huber"}
+    assert args == {
+        "steps": 256,
+        "action_prediction_context": "pre",
+        "prediction_loss_reduction": "mean_coordinate_huber",
+        "scheduler_repair": False,
+    }
     assert "action_prediction_context" not in legacy["zte_config"]
     current = {
         "zte_config": {"action_prediction_context": "phase"},
-        "manifest": {"train_args": {"action_prediction_context": "phase", "prediction_loss_reduction": "vector_mse"}},
+        "manifest": {
+            "train_args": {
+                "action_prediction_context": "phase",
+                "prediction_loss_reduction": "vector_mse",
+                "scheduler_repair": False,
+            }
+        },
     }
     assert _resume_metadata(current) == (current["zte_config"], current["manifest"]["train_args"])
+
+
+def test_accelerate_scheduler_is_advanced_once_per_global_optimizer_step():
+    accelerator = Accelerator(step_scheduler_with_optimizer=False)
+    model = nn.Linear(2, 1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=1.0)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: 1.0)
+    model, optimizer, scheduler = accelerator.prepare(model, optimizer, scheduler)
+    assert scheduler.state_dict()["last_epoch"] == 0
+    optimizer.zero_grad(set_to_none=True)
+    accelerator.backward(model(torch.ones(1, 2, device=accelerator.device)).sum())
+    optimizer.step()
+    # The optimizer wrapper must not implicitly advance the scheduler.
+    assert scheduler.state_dict()["last_epoch"] == 0
+    scheduler.step()
+    assert scheduler.state_dict()["last_epoch"] == 1
+
+
+def test_exact_resume_rejects_world_size_scheduler_counter_and_repair_is_explicit():
+    state = {"last_epoch": 4096, "_step_count": 4097}
+    try:
+        _scheduler_resume_provenance(state, global_step=1024, world_size=4, repair=False)
+    except ValueError as exc:
+        assert "scheduler counter mismatch" in str(exc)
+    else:
+        raise AssertionError("ordinary exact resume accepted an overstepped scheduler")
+    provenance = _scheduler_resume_provenance(
+        state, global_step=1024, world_size=4, repair=True
+    )
+    assert provenance["mode"] == "non_exact_scheduler_repaired_continuation"
+    assert provenance["source_scheduler_last_epoch"] == 4096
+    assert provenance["target_scheduler_last_epoch"] == 1024
+
+
+def test_scheduler_rebase_sets_global_step_counter_and_learning_rate():
+    parameter = nn.Parameter(torch.ones(()))
+    optimizer = torch.optim.AdamW([parameter], lr=1e-4)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lambda step: _cosine_warmup_factor(step, warmup_steps=256, total_steps=4096),
+    )
+    for _ in range(4):
+        parameter.grad = torch.ones_like(parameter)
+        optimizer.step()
+        scheduler.step()
+    rebased = _rebase_scheduler(
+        scheduler,
+        optimizer,
+        global_step=1024,
+        warmup_steps=256,
+        total_steps=4096,
+    )
+    expected = _cosine_warmup_factor(1024, warmup_steps=256, total_steps=4096)
+    assert scheduler.state_dict()["last_epoch"] == 1024
+    assert scheduler.state_dict()["_step_count"] == 1025
+    assert rebased["target_optimizer_lrs"] == [1e-4 * expected]
+    assert optimizer.param_groups[0]["lr"] == 1e-4 * expected
 
 
 def test_vector_prediction_loss_sums_coordinates_but_averages_h15_and_valid_times():

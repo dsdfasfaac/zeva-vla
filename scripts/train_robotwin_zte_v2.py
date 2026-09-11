@@ -63,6 +63,10 @@ class Args:
     goal_embeddings: str = "/data1/dingxin/zeva-runs/robotwin-v5-h15-tasklang/pi05_task_embeddings.pt"
     save_dir: str = "/data1/dingxin/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2"
     resume_checkpoint: str | None = None
+    # Explicit opt-in for continuing from the historical multi-process
+    # scheduler bug.  Ordinary exact resume rejects a mismatched scheduler
+    # counter; this flag rebases only the known world-size-multiplied state.
+    scheduler_repair: bool = False
     steps: int = 30_000
     # Complete episodes are padded in ``collate_robotwin_episodes``.  Eight
     # episodes per device gives the task probe useful negatives while the
@@ -852,6 +856,109 @@ def _manifest(args: Args, handoff: RobotWinHandoff, config: TransitionEncoderV2C
     }
 
 
+SCHEDULER_MODE = "manual_step_once"
+SCHEDULER_REPAIR_REASON = (
+    "The source checkpoint was produced before the trainer disabled Accelerate's "
+    "world-size scheduler stepping; its saved last_epoch was multiplied by the "
+    "distributed world size."
+)
+
+
+def _cosine_warmup_factor(step: int, *, warmup_steps: int, total_steps: int) -> float:
+    """Return the LambdaLR multiplier at the supplied global optimizer step."""
+
+    return min(1.0, (step + 1) / max(1, warmup_steps)) * 0.5 * (
+        1.0 + math.cos(math.pi * min(step, total_steps) / max(1, total_steps))
+    )
+
+
+def _scheduler_lrs(
+    base_lrs: list[float],
+    *,
+    global_step: int,
+    warmup_steps: int,
+    total_steps: int,
+) -> list[float]:
+    multiplier = _cosine_warmup_factor(
+        global_step,
+        warmup_steps=warmup_steps,
+        total_steps=total_steps,
+    )
+    return [float(base_lr) * multiplier for base_lr in base_lrs]
+
+
+def _scheduler_resume_provenance(
+    scheduler_state: dict[str, Any],
+    *,
+    global_step: int,
+    world_size: int,
+    repair: bool,
+) -> dict[str, Any] | None:
+    """Validate the saved counter and describe an explicit repair if needed."""
+
+    observed = scheduler_state.get("last_epoch")
+    if observed is None:
+        raise ValueError("Exact resume requires scheduler_state_dict.last_epoch.")
+    observed = int(observed)
+    if observed == global_step:
+        return None
+    if not repair:
+        raise ValueError(
+            "Exact resume scheduler counter mismatch: "
+            f"checkpoint step={global_step}, scheduler last_epoch={observed}; "
+            "use --scheduler-repair only for the known world-size-multiplied state."
+        )
+    expected_overstepped = global_step * world_size
+    if world_size <= 1 or observed != expected_overstepped:
+        raise ValueError(
+            "--scheduler-repair only accepts a scheduler counter equal to "
+            f"step*world_size ({expected_overstepped}); got {observed}."
+        )
+    return {
+        "mode": "non_exact_scheduler_repaired_continuation",
+        "reason": SCHEDULER_REPAIR_REASON,
+        "source_global_step": global_step,
+        "source_scheduler_last_epoch": observed,
+        "source_scheduler_step_count": scheduler_state.get("_step_count"),
+        "source_scheduler_last_lr": scheduler_state.get("_last_lr"),
+        "world_size": world_size,
+        "target_scheduler_last_epoch": global_step,
+    }
+
+
+def _rebase_scheduler(
+    scheduler: torch.optim.lr_scheduler.LambdaLR,
+    optimizer: torch.optim.Optimizer,
+    *,
+    global_step: int,
+    warmup_steps: int,
+    total_steps: int,
+) -> dict[str, Any]:
+    """Rebase a loaded scheduler to one step per global optimizer update."""
+
+    state = scheduler.state_dict()
+    base_lrs = [float(value) for value in state.get("base_lrs", [])]
+    if not base_lrs:
+        base_lrs = [float(group["initial_lr"]) for group in optimizer.param_groups]
+    if len(base_lrs) != len(optimizer.param_groups):
+        raise ValueError("Scheduler/optimizer parameter-group count differs during repair.")
+    lrs = _scheduler_lrs(
+        base_lrs,
+        global_step=global_step,
+        warmup_steps=warmup_steps,
+        total_steps=total_steps,
+    )
+    state["last_epoch"] = global_step
+    state["_step_count"] = global_step + 1
+    state["_last_lr"] = lrs
+    state["base_lrs"] = base_lrs
+    scheduler.load_state_dict(state)
+    for group, base_lr, lr in zip(optimizer.param_groups, base_lrs, lrs, strict=True):
+        group["initial_lr"] = base_lr
+        group["lr"] = lr
+    return {"target_optimizer_lrs": lrs}
+
+
 def _resume_metadata(checkpoint: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Canonicalize only the documented pre-head default in old checkpoints.
 
@@ -863,6 +970,7 @@ def _resume_metadata(checkpoint: dict[str, Any]) -> tuple[dict[str, Any], dict[s
     previous_config.setdefault("action_prediction_context", "pre")
     previous_args.setdefault("action_prediction_context", "pre")
     previous_args.setdefault("prediction_loss_reduction", "mean_coordinate_huber")
+    previous_args.setdefault("scheduler_repair", False)
     return previous_config, previous_args
 
 
@@ -877,6 +985,7 @@ def main(args: Args) -> None:
     # allow DDP to mark those parameters unused instead of hanging at the
     # first all-reduce.
     accelerator = Accelerator(
+        step_scheduler_with_optimizer=False,
         kwargs_handlers=[DistributedDataParallelKwargs(find_unused_parameters=True)]
     )
     torch.manual_seed(args.seed + accelerator.process_index)
@@ -926,13 +1035,16 @@ def main(args: Args) -> None:
     )
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer,
-        lambda step: min(1.0, (step + 1) / max(1, args.warmup_steps))
-        * 0.5
-        * (1.0 + math.cos(math.pi * min(step, args.steps) / max(1, args.steps))),
+        lambda step: _cosine_warmup_factor(
+            step,
+            warmup_steps=args.warmup_steps,
+            total_steps=args.steps,
+        ),
     )
     start_step = 0
     best_validation = math.inf
     resume_rng = None
+    scheduler_repair_provenance = None
     if args.resume_checkpoint:
         checkpoint = torch.load(args.resume_checkpoint, map_location="cpu", weights_only=False)
         if checkpoint.get("schema") != "zeva-robotwin-zte-stage1-v2-checkpoint":
@@ -944,7 +1056,7 @@ def main(args: Args) -> None:
             raise ValueError("Exact resume requires saved RNG state and the same distributed world size.")
         # Output location and diagnostic verbosity can change; the training
         # schedule, data order, and objective cannot silently change on resume.
-        mutable = {"resume_checkpoint", "save_dir", "num_workers", "log_freq"}
+        mutable = {"resume_checkpoint", "save_dir", "num_workers", "log_freq", "scheduler_repair"}
         for key, value in dataclasses.asdict(args).items():
             if key not in mutable and previous_args.get(key) != value:
                 raise ValueError(f"Resume changes training setting {key}; start a new experiment instead.")
@@ -954,8 +1066,33 @@ def main(args: Args) -> None:
             raise ValueError("Resume goal embedding coordinates changed.")
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         start_step = int(checkpoint["step"])
+        scheduler_state = checkpoint.get("scheduler_state_dict")
+        if not isinstance(scheduler_state, dict):
+            raise ValueError("Exact resume requires scheduler_state_dict metadata.")
+        scheduler_repair_provenance = _scheduler_resume_provenance(
+            scheduler_state,
+            global_step=start_step,
+            world_size=accelerator.num_processes,
+            repair=args.scheduler_repair,
+        )
+        scheduler.load_state_dict(scheduler_state)
+        if scheduler_repair_provenance is not None:
+            scheduler_repair_provenance["source_checkpoint"] = str(
+                Path(args.resume_checkpoint).resolve()
+            )
+            scheduler_repair_provenance["source_optimizer_lrs"] = [
+                float(group["lr"]) for group in optimizer.param_groups
+            ]
+            scheduler_repair_provenance.update(
+                _rebase_scheduler(
+                    scheduler,
+                    optimizer,
+                    global_step=start_step,
+                    warmup_steps=args.warmup_steps,
+                    total_steps=args.steps,
+                )
+            )
         best_validation = float(checkpoint.get("best_validation", math.inf))
         resume_rng = checkpoint["rng_by_rank"][accelerator.process_index]
 
@@ -1002,6 +1139,15 @@ def main(args: Args) -> None:
     normalizer = MeanStdActionNormalizer.from_stats_file(handoff.statistics)
     save_dir = Path(args.save_dir)
     manifest = _manifest(args, handoff, config, train_dataset)
+    manifest["scheduler"] = {
+        "mode": SCHEDULER_MODE,
+        "step_scheduler_with_optimizer": False,
+        "steps_per_global_optimizer_step": 1,
+    }
+    manifest["resume_provenance"] = scheduler_repair_provenance or {
+        "mode": "exact_or_fresh",
+        "scheduler_counter_matches_global_step": True,
+    }
     if accelerator.is_main_process:
         save_dir.mkdir(parents=True, exist_ok=True)
         (save_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -1088,6 +1234,10 @@ def main(args: Args) -> None:
         accelerator.backward(losses["total"])
         accelerator.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+        # The Accelerator wrapper is configured with
+        # step_scheduler_with_optimizer=False below.  This explicit call is
+        # therefore exactly one LambdaLR step per global optimizer update,
+        # independent of distributed world size.
         scheduler.step()
         accelerator.unwrap_model(model).update_ema()
         completed = step + 1
@@ -1122,6 +1272,8 @@ def main(args: Args) -> None:
                     "model_state_dict": unwrapped.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "scheduler_state_dict": scheduler.state_dict(),
+                    "scheduler_provenance": manifest["scheduler"],
+                    "resume_provenance": manifest["resume_provenance"],
                     "zte_config": dataclasses.asdict(config),
                     "manifest": manifest,
                     "action_normalization": normalizer.metadata(),
