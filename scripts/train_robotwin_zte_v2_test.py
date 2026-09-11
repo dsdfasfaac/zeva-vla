@@ -1,0 +1,145 @@
+"""Focused CPU tests for the v2 episode sampler, collator, and targets."""
+
+from types import SimpleNamespace
+
+import pytest
+
+torch = pytest.importorskip("torch")
+pytest.importorskip("accelerate")
+
+from scripts.train_robotwin_zte_v2 import Args  # noqa: E402
+from scripts.train_robotwin_zte_v2 import GroupedTaskSampler  # noqa: E402
+from scripts.train_robotwin_zte_v2 import collate_robotwin_episodes  # noqa: E402
+from scripts.train_robotwin_zte_v2 import compute_v2_losses  # noqa: E402
+
+
+class _FakeGroupedDataset:
+    indices_by_task = ((0, 2, 4), (1, 3))
+
+    def __len__(self):
+        return 5
+
+
+def _episode(length: int, *, valid: bool = True):
+    return {
+        "images_before": torch.zeros(length, 3, 2, 6, dtype=torch.uint8),
+        "images_after": torch.zeros(length, 3, 2, 6, dtype=torch.uint8),
+        "actions": torch.zeros(length, 15, 16),
+        "progress": torch.arange(length, dtype=torch.float32),
+        "initial_progress": torch.tensor(0.0),
+        "goal_embedding": torch.zeros(4),
+        "task_id": torch.tensor(0),
+        "episode_valid": torch.tensor(valid),
+    }
+
+
+def test_sampler_covers_every_episode_once_and_validation_is_deterministic():
+    dataset = _FakeGroupedDataset()
+    train_samplers = [
+        GroupedTaskSampler(dataset, seed=17, replicas=2, rank=rank, shuffle=True)
+        for rank in range(2)
+    ]
+    first = [list(sampler) for sampler in train_samplers]
+    valid_indices = [index for values in first for index in values if index >= 0]
+    assert sorted(valid_indices) == list(range(len(dataset)))
+    assert len(valid_indices) == len(set(valid_indices))
+
+    validation_samplers = [
+        GroupedTaskSampler(dataset, seed=999, replicas=2, rank=rank, shuffle=False)
+        for rank in range(2)
+    ]
+    expected = [list(sampler) for sampler in validation_samplers]
+    for sampler in validation_samplers:
+        sampler.set_epoch(10)
+    assert [list(sampler) for sampler in validation_samplers] == expected
+    valid_indices = [index for values in expected for index in values if index >= 0]
+    assert sorted(valid_indices) == list(range(len(dataset)))
+
+
+def test_collator_right_pads_and_marks_only_real_transitions():
+    assert Args().batch_size == 8
+    batch = collate_robotwin_episodes([_episode(2), _episode(4), _episode(1, valid=False)])
+    assert batch["images_before"].shape == (3, 4, 3, 2, 6)
+    assert batch["actions"].shape == (3, 4, 15, 16)
+    assert batch["valid_mask"].tolist() == [
+        [True, True, False, False],
+        [True, True, True, True],
+        [False, False, False, False],
+    ]
+    assert batch["episode_mask"].tolist() == [True, True, False]
+
+
+def test_action_loss_targets_the_next_h15_and_ignores_padding():
+    target_action = torch.tensor([[[[0.0]], [[3.0]], [[100.0]]]])
+    predicted_action = torch.tensor([[[[3.0]], [[0.0]], [[-9.0]]]])
+    valid_mask = torch.tensor([[True, True, False]])
+    ones = torch.ones(1, 3, 2)
+    outputs = SimpleNamespace(
+        global_prompt=torch.ones(1, 2),
+        task_prototypes=None,
+        task_embedding=ones,
+        target_action=target_action,
+        predicted_action=predicted_action,
+        predicted_effect=torch.zeros(1, 3, 2),
+        target_effect=torch.zeros(1, 3, 2),
+        causal_signal=ones,
+        causal_target_signal=ones,
+        phase_token=ones,
+        phase_progress=torch.zeros(1, 3),
+    )
+    args = Args(
+        effect_loss_weight=0.0,
+        action_loss_weight=1.0,
+        task_loss_weight=0.0,
+        causal_alignment_weight=0.0,
+        phase_contrastive_weight=0.0,
+        phase_order_weight=0.0,
+        language_consistency_weight=0.0,
+    )
+    losses = compute_v2_losses(
+        outputs,
+        outputs,
+        outputs,
+        torch.zeros(1, 3),
+        torch.zeros(1, dtype=torch.long),
+        args,
+        valid_mask=valid_mask,
+    )
+    # t=0 predicts target action t=1 exactly; t=1 has no valid successor.
+    assert float(losses["action"]) == pytest.approx(0.0)
+
+
+def test_transition_losses_ignore_right_padding():
+    ones = torch.ones(1, 3, 2)
+    outputs = SimpleNamespace(
+        global_prompt=torch.ones(1, 2),
+        task_prototypes=None,
+        task_embedding=ones,
+        target_action=torch.zeros(1, 3, 1, 1),
+        predicted_action=torch.zeros(1, 3, 1, 1),
+        predicted_effect=torch.zeros(1, 3, 2),
+        target_effect=torch.tensor([[[0.0, 0.0], [0.0, 0.0], [99.0, 99.0]]]),
+        causal_signal=ones,
+        causal_target_signal=ones,
+        phase_token=ones,
+        phase_progress=torch.zeros(1, 3),
+    )
+    args = Args(
+        effect_loss_weight=1.0,
+        action_loss_weight=0.0,
+        task_loss_weight=0.0,
+        causal_alignment_weight=0.0,
+        phase_contrastive_weight=0.0,
+        phase_order_weight=0.0,
+        language_consistency_weight=0.0,
+    )
+    losses = compute_v2_losses(
+        outputs,
+        outputs,
+        outputs,
+        torch.zeros(1, 3),
+        torch.zeros(1, dtype=torch.long),
+        args,
+        valid_mask=torch.tensor([[True, True, False]]),
+    )
+    assert float(losses["effect"]) == pytest.approx(0.0)

@@ -64,6 +64,15 @@ class InformationFlowTest(unittest.TestCase):
         right = self.run_model(actions=self.actions.flip(2))
         self.assertGreater((left.pre_context - right.pre_context).abs().max().item(), 1e-5)
 
+    def test_action_recurrence_does_not_cross_episode_batch_dimension(self):
+        full = self.run_model()
+        single = self.model(self.before[:1], self.actions[:1], self.after[:1], self.goal[:1])
+        torch.testing.assert_close(full.pre_context[:1], single.pre_context, rtol=0, atol=1e-5)
+        changed = self.actions.clone()
+        changed[1] *= -10
+        alternative = self.run_model(actions=changed)
+        torch.testing.assert_close(full.pre_context[:1], alternative.pre_context[:1], rtol=0, atol=1e-5)
+
     def test_padding_does_not_change_valid_outputs_or_pool(self):
         mask = torch.tensor([[True, True, False], [True, True, False]], device=self.device)
         padded = self.run_model(valid_mask=mask)

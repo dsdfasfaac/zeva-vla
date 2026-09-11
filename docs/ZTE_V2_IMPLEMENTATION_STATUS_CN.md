@@ -11,7 +11,7 @@ PYTHONPATH=/data1/dingxin/zeva-runtime-deps:src CUDA_VISIBLE_DEVICES=0 \
 ZEVA_TEST_CUDA=1 python3 -m unittest openpi.zeva.transition_encoder_v2_test -v
 ```
 
-结果：7 tests，全部通过（2.190 秒）。六项使用小型视觉 fixture 隔离时序机制；第七项使用真实 ResNet-18 验证训练模式下 BatchNorm 与梯度，不声称测试了预训练权重的任务效果。
+结果：8 tests，全部通过（1.859 秒）。七项使用小型视觉 fixture 隔离时序机制；一项使用真实 ResNet-18 验证训练模式下 BatchNorm 与梯度，不声称测试了预训练权重的任务效果。另有 3 项 representation objectives 测试通过，验证匹配/置换 effect、增强正样本与防塌缩损失的方向。
 
 1. 置换 after-image 不改变 forward-effect/next-action 预测，改变 post-transition causal signal。
 2. 修改未来的 before/after/action 不改变过去的 phase、causal signal 或预测。
@@ -20,6 +20,19 @@ ZEVA_TEST_CUDA=1 python3 -m unittest openpi.zeva.transition_encoder_v2_test -v
 5. 逐步回放与整段编码一致。
 6. effect 预测对动作有梯度，对 after-image 没有梯度。
 7. 真实视觉网络训练时固定 BatchNorm 统计，未来图像不污染当前预测，视觉参数仍有梯度。
+8. 多个 episode 放在同一 batch 时，动作递归不会跨越 batch 维度；修改第二个 episode 不改变第一个。
+
+## 已完成的真实数据 smoke
+
+统一结果根目录：`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/`。
+
+| 实验目录 | 配置 | 已验证结果 |
+|---|---|---|
+| `stage1-zte-v2-smoke-b2-20260911a` | GPU0，batch 2，2 steps | 真实 TorchCodec 加载、预训练 ResNet、backward、验证、完整 checkpoint 保存完成 |
+| `stage1-zte-v2-smoke-b8-20260911b` | GPU0，batch 8，2 steps；新增对比和防塌缩目标 | 完成，无 OOM；验证统计 8 个 episode，诊断 loss 12.7925 |
+| `stage1-zte-v2-smoke-ddp2-20260911b` | GPU1/3，每卡 batch 2，2 steps | DDP 完成，验证跨卡汇总 4 个 episode，诊断 loss 6.0612 |
+
+三个实验均保存 model/optimizer/scheduler，均输出 `probe_gate_passed=false`、`probe_gate_status=diagnostic_only`、`validation_complete=false`。这些 smoke 的目标和 batch 数不同，不能比较其总 loss 来判断表征优劣。单卡 batch 8 的两个步骤与一次小验证共 16 秒，仅是短 smoke 测量，不是正式训练耗时预测。
 
 ## 验收中修正的问题
 
@@ -34,10 +47,10 @@ ZEVA_TEST_CUDA=1 python3 -m unittest openpi.zeva.transition_encoder_v2_test -v
 ## 尚未通过的验收
 
 - 上述逐步路径仍是前缀重算参考实现，尚非固定计算量的 Mamba cache 部署实现。
-- 真实数据多 episode 批处理、分布式完整覆盖、验证聚合仍在整合。
-- 预训练视觉初始化、loader 速度、真实数据 backward/保存恢复尚需端到端 smoke。
-- global SupCon、causal negatives、variance/covariance 与完整 Stage1 对照 probe 需核实到实现；现有四个简单指标不能颁发 Stage1 pass。
+- 多 episode 批处理和跨卡训练已通过 smoke；整份 validation5 的完整覆盖还需全量运行核实。
+- 预训练视觉、TorchCodec 与真实 backward/保存已通过；断点续训的 RNG 和数据位置等价测试进行中。
+- global SupCon、effect-shuffle negatives 与 variance/covariance 已接入；action intervention 和完整 Stage1 对照 probe 尚未完成。effect-shuffle negatives 不能独自证明因果识别。
 - 真实 PI0.5 的零初始化等价、首次可学习梯度及 correct/shuffled 归因尚待验证。
-- 没有新的训练完成结果或闭环成功率；v18 的 Base 43/80、ZeVA 43/80 仍是最近已完成的对应实验。
+- 没有新的正式训练完成结果或闭环成功率；v18 的 Base 43/80、ZeVA 43/80 仍是最近已完成的对应实验。
 
 仅通过本记录中的结构测试，不能开始 Stage2，也不能声称表征已优于旧 ZTE。
