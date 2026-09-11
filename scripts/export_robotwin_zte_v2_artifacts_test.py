@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import tempfile
 import unittest
+from pathlib import Path
 
 import torch
 
@@ -11,8 +13,15 @@ from scripts.export_robotwin_zte_v2_artifacts import HORIZON
 from scripts.export_robotwin_zte_v2_artifacts import LIVE_QUERY_SCHEMA
 from scripts.export_robotwin_zte_v2_artifacts import V2_STAGE1_SCHEMA
 from scripts.export_robotwin_zte_v2_artifacts import _collection_mask
+from scripts.export_robotwin_zte_v2_artifacts import _new_bank_accumulator
+from scripts.export_robotwin_zte_v2_artifacts import _assert_output_available
+from scripts.export_robotwin_zte_v2_artifacts import _shard_indices
 from scripts.export_robotwin_zte_v2_artifacts import aggregate_bank
 from scripts.export_robotwin_zte_v2_artifacts import expected_decision_frames
+from scripts.export_robotwin_zte_v2_artifacts import finalize_bank_accumulator
+from scripts.export_robotwin_zte_v2_artifacts import make_live_record
+from scripts.export_robotwin_zte_v2_artifacts import merge_bank_accumulators
+from scripts.export_robotwin_zte_v2_artifacts import update_bank_accumulator
 from scripts.export_robotwin_zte_v2_artifacts import validate_live_payload
 from scripts.export_robotwin_zte_v2_artifacts import validate_live_record
 
@@ -91,6 +100,74 @@ class RobotWinV2ArtifactContractTest(unittest.TestCase):
         bad["stage1_checkpoint_schema"] = "old-schema"
         with self.assertRaisesRegex(ValueError, "Stage1 checkpoint schema"):
             validate_live_payload(bad, task_names=("a", "b"), complete=False)
+
+    def test_live_record_trims_right_padding_for_unequal_episode_lengths(self) -> None:
+        initial = torch.zeros(128)
+        phase = torch.arange(5 * 128, dtype=torch.float32).reshape(5, 128)
+        causal = torch.arange(5 * 256, dtype=torch.float32).reshape(5, 256)
+        record = make_live_record(
+            record_index=9,
+            task_id=2,
+            length=46,
+            initial_phase=initial,
+            phase_token=phase,
+            causal_signal=causal,
+        )
+        self.assertEqual(tuple(record["phase_queries"].shape), (4, 128))
+        self.assertEqual(tuple(record["causal_signals"].shape), (3, 256))
+        self.assertTrue(torch.equal(record["phase_queries"][1].float(), phase[0]))
+        self.assertTrue(torch.equal(record["causal_signals"][-1].float(), causal[2]))
+
+    def test_streaming_bank_handles_unequal_batch_lengths_without_cat(self) -> None:
+        state_a = _new_bank_accumulator(
+            task_count=2, phase_bins=4, task_dim=2, phase_dim=2, signal_dim=3
+        )
+        state_b = _new_bank_accumulator(
+            task_count=2, phase_bins=4, task_dim=2, phase_dim=2, signal_dim=3
+        )
+        kwargs_a = {
+            "task_ids": torch.tensor([0]),
+            "progress": torch.tensor([[0.2, 0.8]]),
+            "phase": torch.ones(1, 2, 2),
+            "initial_phase": torch.tensor([[1.0, 0.0]]),
+            "causal": torch.ones(1, 2, 3),
+            "global_prompt_masked": torch.tensor([[1.0, 0.0]]),
+            "valid_mask": torch.tensor([[True, True]]),
+            "samples_per_episode": 2,
+        }
+        kwargs_b = {
+            "task_ids": torch.tensor([1]),
+            "progress": torch.tensor([[0.1, 0.3, 0.7, 0.99]]),
+            "phase": torch.full((1, 4, 2), 2.0),
+            "initial_phase": torch.tensor([[0.0, 1.0]]),
+            "causal": torch.full((1, 4, 3), 2.0),
+            "global_prompt_masked": torch.tensor([[0.0, 1.0]]),
+            "valid_mask": torch.tensor([[True, True, True, False]]),
+            "samples_per_episode": 2,
+        }
+        update_bank_accumulator(state_a, **kwargs_a)
+        update_bank_accumulator(state_a, **kwargs_b)
+        update_bank_accumulator(state_b, **kwargs_a)
+        update_bank_accumulator(state_b, **kwargs_b)
+        result = finalize_bank_accumulator(state_a)
+        merged = finalize_bank_accumulator(merge_bank_accumulators([state_b]))
+        for key in result:
+            self.assertTrue(torch.allclose(result[key].float(), merged[key].float()), key)
+        self.assertEqual(int(result["count"].sum()), 6)  # two B0 + four selected transitions
+
+    def test_shard_indices_are_disjoint_and_cover_source_order(self) -> None:
+        source = list(range(11))
+        shards = [_shard_indices(source, rank=rank, world_size=3) for rank in range(3)]
+        self.assertEqual(sorted(value for shard in shards for value in shard), source)
+        self.assertEqual(sum((len(shard) for shard in shards), 0), len(source))
+        self.assertEqual(len({value for shard in shards for value in shard}), len(source))
+
+    def test_output_guard_refuses_existing_final_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            (output / "train_causal_bank.pt").write_bytes(b"existing")
+            with self.assertRaises(FileExistsError):
+                _assert_output_available(output)
 
 
 if __name__ == "__main__":
