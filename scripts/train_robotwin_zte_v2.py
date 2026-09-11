@@ -389,6 +389,46 @@ def _zero_loss(value: torch.Tensor) -> torch.Tensor:
     return value.new_zeros(())
 
 
+def _ddp_graph_anchor(*outputs) -> torch.Tensor:
+    """Keep every trainable output head in the DDP autograd graph.
+
+    The complete-episode sampler pads each rank to an equal number of local
+    batches.  At an epoch boundary a rank can therefore receive a synthetic
+    all-padding batch (``sequence_length == 1`` and no valid episodes).  The
+    normal masked objectives intentionally become zero for that batch, but
+    their early-return branches would otherwise omit heads such as
+    ``predicted_action_head`` and ``task_prototypes`` from the reduction.
+    A zero-valued dependency is numerically inert while still giving DDP a
+    completed gradient hook for every output-producing branch.
+    """
+
+    fields = (
+        "global_prompt",
+        "phase_token",
+        "causal_signal",
+        "phase_progress",
+        "task_embedding",
+        "predicted_effect",
+        "predicted_action",
+        "pre_context",
+        "post_context",
+        "initial_phase_token",
+        "task_prototypes",
+    )
+    anchor = None
+    for output in outputs:
+        for field in fields:
+            value = getattr(output, field, None)
+            if torch.is_tensor(value) and value.requires_grad:
+                term = value.reshape(-1).sum() * 0.0
+                anchor = term if anchor is None else anchor + term
+    if anchor is None:
+        # Keep the helper usable with the lightweight SimpleNamespace fixtures
+        # used by CPU tests, while real encoder outputs always have a graph.
+        return torch.zeros((), dtype=torch.float32)
+    return anchor
+
+
 def _masked_mean(value: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     """Mean only over right-padded-valid elements, preserving gradients."""
 
@@ -602,6 +642,9 @@ def compute_v2_losses(
         + args.global_contrastive_weight * global_contrastive
         + args.causal_contrastive_weight * causal_contrastive
         + args.variance_covariance_weight * variance_covariance
+        # See _ddp_graph_anchor: this is exactly zero and only protects the
+        # all-padding rank-local batch from DDP's unfinished-reduction check.
+        + _ddp_graph_anchor(outputs, augmented_outputs, language_masked_outputs)
     )
     return {
         "total": total,

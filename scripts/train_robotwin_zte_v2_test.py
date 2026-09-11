@@ -13,6 +13,7 @@ from scripts.train_robotwin_zte_v2 import collate_robotwin_episodes  # noqa: E40
 from scripts.train_robotwin_zte_v2 import compute_v2_losses  # noqa: E402
 from scripts.train_robotwin_zte_v2 import _manifest
 from scripts.train_robotwin_zte_v2 import _resume_metadata
+from scripts.train_robotwin_zte_v2 import _ddp_graph_anchor
 from scripts.train_robotwin_zte_v2 import prediction_loss
 from openpi.zeva.transition_encoder_v2 import TransitionEncoderV2Config
 
@@ -216,6 +217,48 @@ def test_transition_losses_ignore_right_padding():
         valid_mask=torch.tensor([[True, True, False]]),
     )
     assert abs(float(losses["effect"])) < 1e-8
+
+
+def test_all_padding_batch_keeps_action_and_task_prototype_ddp_graph():
+    """Epoch-end rank padding must not leave reducer buckets unfinished."""
+
+    def tensor(*shape):
+        return torch.zeros(*shape, requires_grad=True)
+
+    outputs = SimpleNamespace(
+        global_prompt=tensor(1, 2),
+        task_prototypes=tensor(2, 2),
+        task_embedding=tensor(1, 1, 2),
+        target_action=torch.zeros(1, 1, 1, 1),
+        predicted_action=tensor(1, 1, 1, 1),
+        predicted_effect=tensor(1, 1, 2),
+        target_effect=torch.zeros(1, 1, 2),
+        causal_signal=tensor(1, 1, 2),
+        causal_target_signal=torch.ones(1, 1, 2),
+        phase_token=tensor(1, 1, 2),
+        phase_progress=tensor(1, 1),
+        pre_context=tensor(1, 1, 2),
+        post_context=tensor(1, 1, 2),
+        initial_phase_token=tensor(1, 2),
+    )
+    args = Args()
+    losses = compute_v2_losses(
+        outputs,
+        outputs,
+        outputs,
+        torch.zeros(1, 1),
+        torch.zeros(1, dtype=torch.long),
+        args,
+        valid_mask=torch.zeros(1, 1, dtype=torch.bool),
+        episode_mask=torch.zeros(1, dtype=torch.bool),
+    )
+    losses["total"].backward()
+    assert outputs.predicted_action.grad is not None
+    assert outputs.task_prototypes.grad is not None
+    assert torch.count_nonzero(outputs.predicted_action.grad) == 0
+    assert torch.count_nonzero(outputs.task_prototypes.grad) == 0
+    anchor = _ddp_graph_anchor(outputs)
+    assert float(anchor) == 0.0
 
 
 def load_tests(loader, tests, pattern):
