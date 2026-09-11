@@ -86,6 +86,13 @@ until all gates pass. The complete frozen design is in
 `docs/ZTE_V2_SCIENTIFIC_DESIGN_CN.md`; older v11--v19 sections below are retained
 only as failure-analysis history.
 
+Implementation evidence and outstanding gates are tracked separately in
+`docs/ZTE_V2_IMPLEMENTATION_STATUS_CN.md`. The current encoder passes seven
+information-flow tests using real Mamba on H100, including a real ResNet
+training-mode test. These are correctness tests, not a Stage 1 capability pass.
+The v2 smoke entry point is `scripts/run_robotwin_zte_v2.sh`; the historical
+Stage 1/2 commands below do not launch the redesigned method.
+
 ## H100 runtime
 
 Use the exact LeRobot source and dependency overlays contained in the handoff.
