@@ -484,6 +484,8 @@ def run_audit(
         CausalTransitionEncoderV2,
         TransitionEncoderV2Config,
     )
+    trainer_source_path = Path(trainer.__file__).resolve()
+    trainer_source_sha256 = sha256_file(trainer_source_path)
 
     checkpoint_payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
     if checkpoint_payload.get("schema") != "zeva-robotwin-zte-stage1-v2-checkpoint":
@@ -689,6 +691,8 @@ def run_audit(
             "checkpoint": str(checkpoint),
             "checkpoint_sha256": sha256_file(checkpoint),
             "checkpoint_schema": checkpoint_payload["schema"],
+            "trainer_source": str(trainer_source_path),
+            "trainer_source_sha256": trainer_source_sha256,
             "device": str(target_device),
             "physical_gpu_visible_index": os.environ.get("CUDA_VISIBLE_DEVICES"),
             "torch_version": torch.__version__,
