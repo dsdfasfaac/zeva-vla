@@ -68,6 +68,10 @@ Luna worker 在真实 H100、step128 checkpoint 上仅对 next-action loss 反�
 
 `stage1-zte-v2-pilot-phaseaction-20260911f` 已由 launcher `495287` 在 aigc29 启动，配置为上述唯一监督路径变化。日志/checkpoint/独立诊断与旧 e 对照分目录保存；训练完成后必须复核实际进程及 step256，不依赖 pid 文件判断状态。
 
+f 的原始 manifest 存在文字元数据勘误：旧 `information_flow.jepa_and_action_prediction` 未区分两条 head；其 `zte_config.action_prediction_context=phase` 与实际代码正确。保留原始 manifest 与源文件 hash，不事后改写实验档案。后续 trainer 已改为分别记录 forward-effect 与 next-action 信息边界；这是描述修正，不改变 f 的计算或权重。
+
+该元数据修正与原有 sampler/mask/next-H15 tests 在隔离副本中 6/6 通过（不改写运行中 f 的 source）。GitHub `publish` 可读，但本次 HTTPS push 被 403 拒绝，SSH 也无可用 publickey；本地提交不等于已上传，需恢复仓库写权限后再推送。
+
 ## 已完成的真实数据 smoke
 
 统一结果根目录：`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/`。

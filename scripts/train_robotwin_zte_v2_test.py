@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import unittest
+from unittest.mock import patch
 import torch
 
 from scripts.train_robotwin_zte_v2 import Args  # noqa: E402
@@ -10,6 +11,8 @@ from scripts.train_robotwin_zte_v2 import GroupedTaskSampler  # noqa: E402
 from scripts.train_robotwin_zte_v2 import PairedTaskSampler
 from scripts.train_robotwin_zte_v2 import collate_robotwin_episodes  # noqa: E402
 from scripts.train_robotwin_zte_v2 import compute_v2_losses  # noqa: E402
+from scripts.train_robotwin_zte_v2 import _manifest
+from openpi.zeva.transition_encoder_v2 import TransitionEncoderV2Config
 
 
 class _FakeGroupedDataset:
@@ -17,6 +20,19 @@ class _FakeGroupedDataset:
 
     def __len__(self):
         return 5
+
+
+def test_manifest_describes_effect_and_next_action_boundaries_separately():
+    handoff = SimpleNamespace(root="/fixture", statistics="/fixture/stats.json")
+    dataset = SimpleNamespace(task_names=("task",))
+    for context in ("pre", "phase"):
+        config = TransitionEncoderV2Config(action_prediction_context=context)
+        with patch("scripts.train_robotwin_zte_v2._sha256", return_value="fixture"):
+            manifest = _manifest(Args(action_prediction_context=context), handoff, config, dataset)
+        flow = manifest["information_flow"]
+        assert "jepa_and_action_prediction" not in flow
+        assert "no-current-after-image" in flow["forward_effect_prediction"]
+        assert ("current-after-visible" in flow["next_action_prediction"]) == (context == "phase")
 
 
 def _episode(length: int, *, valid: bool = True):

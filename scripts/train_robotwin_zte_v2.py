@@ -750,7 +750,12 @@ def _manifest(args: Args, handoff: RobotWinHandoff, config: TransitionEncoderV2C
         "architecture": "three-causal-mamba-streams-plus-per-transition-cross-attention",
         "information_flow": {
             "b0": "task-only-pi05-language-plus-first-three-view-visual-state",
-            "jepa_and_action_prediction": "pre-transition-visual-plus-ordered-previous-H15-action-only",
+            "forward_effect_prediction": "pre-transition-visual-plus-ordered-executed-H15-no-current-after-image",
+            "next_action_prediction": (
+                "normalized-exported-post-transition-phase-current-after-visible-future-hidden"
+                if config.action_prediction_context == "phase"
+                else "pre-transition-context-no-current-after-image"
+            ),
             "causal_signal": "post-transition-EMA-effect-stream",
             "effect_target": "loss-only-target-for-pre-transition-JEPA",
             "language_shortcut_control": "task-probe-from-visual-effect-stream-plus-goal-masked-consistency",
