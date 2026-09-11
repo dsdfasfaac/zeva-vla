@@ -175,8 +175,10 @@ check_pid_identity() {
 }
 
 training_children_live() {
-  ps -eo pid=,args= 2>/dev/null | awk -v root="$train_root" \
-    'index($0, root) && index($0, "train_robotwin_stage2.py") {print $1}'
+  # Match Python executables, not this awk's own command line (which contains
+  # both the root and the training filename and otherwise matches itself).
+  ps -eo pid=,comm=,args= 2>/dev/null | awk -v root="$train_root" \
+    '$2 ~ /^python([0-9.]+)?$/ && index($0, root) && index($0, "train_robotwin_stage2.py") {print $1}'
 }
 
 checkpoint_complete() {
