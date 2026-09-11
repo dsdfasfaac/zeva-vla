@@ -59,7 +59,7 @@ h_z <- h_z + Attn(h_z, [h_v; h_a; h_e], [h_v; h_a; h_e])
 
 ```text
 hat_delta_t = F_dyn(q_t, a_t)
-hat_a_{t+1} = F_act(q_t)
+hat_a_{t+1} = F_act(z_phase(t))  # 新增 opt-in 对照，见下文时间边界
 ```
 
 目标视觉特征来自 stop-gradient EMA encoder：
@@ -69,6 +69,10 @@ delta_t = SG(V_ema(s_{t+15}) - V_ema(s_t))
 ```
 
 真实 effect 仅在生成 post-transition `e_causal(t)` 时输入，不允许进入 `hat_delta_t` 的预测路径。
+
+2026-09-11 梯度审计修订：历史 pilot 的 `action_prediction_context=pre` 使用 `F_act(q_t)`，next-action loss 对导出的 `phase_head` 和 `post_fusion` 均无梯度。新增 `phase` 对照直接从 normalized `z_phase(t)` 预测下一 H15，不拼接可绕过 phase 的 hidden state。它在执行完当前 H15、已观察到 `s_{t+15}` 后预测下一段动作，故可读取当前 after-image，但不可读取下一段动作或未来图像；forward-effect 仍严格不能读取当前 after-image。旧 checkpoint 缺省保持 `pre`，不能隐式改变已训练语义。
+
+这不是 BehaviorVLA 原代码的逐行复制：所核查官方实现是 `action_predictor(h_a)`，其 action stream 输入经过时间右移；不是 `action_predictor(h_b)`。本对照检验的是“让实际导出的 phase 直接受到未来动作监督”能否带来增量价值，必须通过同预算验证，不能预先声称更优。
 
 ## 4. Stage1 损失
 
@@ -82,7 +86,7 @@ L_stage1 =
   + 0.1 L_variance_covariance
 ```
 
-- `L_next_action`：从 pre-effect state 预测下一 H15 chunk。
+- `L_next_action`：`phase` 对照从 post-transition phase 预测下一 H15 chunk；历史 `pre` 对照仍从 pre-effect state 预测，二者分别记录配置。
 - `L_forward_effect`：JEPA-style forward dynamics；预测端看不到 after image。
 - `L_global_supcon`：完整轨迹 `z_proto` 的同任务跨 episode 对比学习；主损失在 language-masked view 上计算。
 - `L_local_temporal`：同一 transition 的两种图像增强为正样本，其他阶段为负样本，并加 pairwise order ranking；不使用“向量与自己对比”的退化正样本。
@@ -143,6 +147,7 @@ guidance = 0.5 during inference
 - 首先冻结 PI，仅训练 zero-init prompt/PBD 并做 attribution smoke；确认 correct prompt 优于 shuffled prompt 后，才进入 joint tuning。
 - joint tuning 使用 PI LR `5e-6`、新模块 LR `5e-5`、global batch 256。先比较 5k/10k checkpoint；只有闭环 paired validation 与 loss 均继续改善才延长。
 - 保存完整 PI `model.safetensors`、ZTE/PBD/prompt adapter、optimizer 和 scheduler state。
+- 最终交付的普通 Base 与 ZeVA 都从指定 best-v1 出发，在相同选定 10-task 数据、训练预算和 PI 优化设置下训练。untouched best-v1 单独作为 Anchor 核查基础能力，不替代用户要求的训练后 Base；不得选择异常退化的 Base 制造优势。
 
 Stage2 准入闭环前必须通过四个固定消融：Base、global-only、prior-only、both。记录每支 prompt/prior RMS、gate、gradient norm、flow delta、prior NLL/std，并做 correct/zero/shuffled retrieval 因果置换。
 

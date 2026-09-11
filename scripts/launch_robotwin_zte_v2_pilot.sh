@@ -14,6 +14,7 @@ CUDA_VISIBLE_DEVICES=0,1,3,4 ZEVA_PROCESSES=4 \
   nohup bash "$zeva_root/scripts/run_robotwin_zte_v2.sh" \
     --steps 256 --batch-size 8 --num-workers 2 \
     --warmup-steps 32 --save-freq 128 --eval-batches 0 --log-freq 8 \
+    "$@" \
     --save-dir "$run_dir" \
     > "$run_dir/train.log" 2>&1 < /dev/null &
 pilot_pid=$!

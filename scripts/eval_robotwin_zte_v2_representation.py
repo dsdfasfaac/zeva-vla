@@ -616,8 +616,10 @@ def main(args: Args) -> None:
                 "effect_prediction_no_leakage": all(
                     intervention_report[name]["mean_abs_delta"][field] < 1e-7
                     for name in ("zero_effect", "shuffled_effect")
-                    for field in ("pre_context", "predicted_action", "predicted_effect")
+                    for field in ("pre_context", "predicted_effect")
                 ),
+                "action_prediction_context": model.config.action_prediction_context,
+                "next_action_current_after_dependency_allowed": model.config.action_prediction_context == "phase",
                 "required_comparison": "causal utility, not merely sensitivity to changed inputs",
                 "required": [
                     "zero_effect",

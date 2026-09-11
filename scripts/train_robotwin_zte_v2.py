@@ -73,6 +73,8 @@ class Args:
     transition_stride: int = 15
     effect_steps: int = 15
     executed_action_steps: int = 15
+    # Explicit experiment axis; old checkpoints/configurations remain pre.
+    action_prediction_context: str = "pre"
     learning_rate: float = 1e-4
     vision_learning_rate: float = 1e-5
     weight_decay: float = 1e-4
@@ -829,6 +831,7 @@ def main(args: Args) -> None:
         action_horizon=ROBOTWIN_ACTION_HORIZON,
         executed_action_steps=args.executed_action_steps,
         num_views=len(ROBOTWIN_CAMERA_KEYS),
+        action_prediction_context=args.action_prediction_context,
         task_count=train_dataset.task_count,
         vision_pretrained=True,
     )

@@ -62,9 +62,13 @@ retaining ZeVA's action-effect semantics:
 - Separate causal Mamba streams encode visual state, the ordered H15 EEF16
   chunk, and the observed visual effect. The action stream may not mean-pool the
   raw chunk.
-- A pre-effect state predicts the next action and EMA visual change without
-  reading the target after-image. The after-image is used only to construct the
-  post-transition causal token.
+- A pre-effect state predicts EMA visual change without reading the target
+  after-image. A controlled `--action-prediction-context phase` variant predicts
+  the next H15 directly from the exported post-transition phase: the current
+  after-image is already available at that replanning boundary, but future
+  images/actions are not. Legacy checkpoints and the `pre` control retain the
+  old next-action head. This new supervision path is a hypothesis under test,
+  not a demonstrated improvement or a verbatim BehaviorVLA implementation.
 - The representation is factorized into an episode-level task prototype,
   recurrent local phase, and action-effect token. Language is permitted in
   `B0`, but every sensorimotor representation claim must also pass a
@@ -87,7 +91,7 @@ until all gates pass. The complete frozen design is in
 only as failure-analysis history.
 
 Implementation evidence and outstanding gates are tracked separately in
-`docs/ZTE_V2_IMPLEMENTATION_STATUS_CN.md`. The current encoder passes seven
+`docs/ZTE_V2_IMPLEMENTATION_STATUS_CN.md`. The legacy-path encoder passes eight
 information-flow tests using real Mamba on H100, including a real ResNet
 training-mode test. These are correctness tests, not a Stage 1 capability pass.
 The v2 smoke entry point is `scripts/run_robotwin_zte_v2.sh`; the historical
@@ -150,6 +154,11 @@ outperforms zero and shuffled controls is allowed to enter joint tuning, where
 ZTE/bank remain frozen, PI0.5 uses LR `5e-6`, new modules use `5e-5`, and global
 batch remains 256. Stage 3 is optional and may only address a diagnosed
 closed-loop deficiency; it is not an automatic extra training stage.
+
+The final requested comparison trains both ordinary Base and ZeVA from the
+specified best-v1 on the same selected ten tasks with matched PI optimization
+and data budgets. Untouched best-v1 remains a separate capability anchor, not
+a replacement for that trained Base; a degraded Base cannot establish success.
 
 Replacing only the PI base does not automatically invalidate Stage 1. ZTE,
 the bank, and retrieval can be reused when the new base keeps the same model
