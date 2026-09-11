@@ -44,6 +44,9 @@ DEFAULT_DEVICE = "cuda:0"
 DEFAULT_BATCH_SIZE = 8
 DEFAULT_BATCHES = 2
 DEFAULT_SEED = 1000
+DEFAULT_DIAGNOSTIC_MODE = "eval"
+DIAGNOSTIC_MODES = ("eval", "activation_checkpoint")
+PREDICTION_LOSS_REDUCTION_OVERRIDES = ("mean_coordinate_huber", "vector_mse")
 
 
 # These are exactly the terms returned by train_robotwin_zte_v2.compute_v2_losses.
@@ -114,6 +117,86 @@ def _parameter_groups(model: torch.nn.Module) -> tuple[dict[str, list[torch.nn.P
         groups[group_name] = [parameter for _, parameter in selected]
         names[group_name] = [name for name, _ in selected]
     return groups, names
+
+
+def _configure_diagnostic_mode(model: torch.nn.Module, mode: str) -> dict[str, Any]:
+    """Set deterministic audit mode, optionally retaining vision checkpointing.
+
+    ``activation_checkpoint`` deliberately sets the parent module to train mode
+    so :meth:`CausalTransitionEncoderV2._encode_visuals` takes its existing
+    activation-checkpoint path.  Every stochastic module is then put back into
+    eval mode, and every BatchNorm is frozen, so this is not a train-mode
+    dropout/BN estimate.  No parameter or buffer is modified here.
+    """
+
+    if mode not in DIAGNOSTIC_MODES:
+        raise ValueError(f"Unsupported diagnostic mode {mode!r}; choose from {DIAGNOSTIC_MODES}.")
+    if mode == "eval":
+        model.eval()
+    else:
+        model.train()
+        for module in model.modules():
+            if isinstance(module, (torch.nn.Dropout, torch.nn.MultiheadAttention)):
+                module.eval()
+            if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+                module.eval()
+    dropout_training = sum(
+        isinstance(module, torch.nn.Dropout) and module.training
+        for module in model.modules()
+    )
+    attention_training = sum(
+        isinstance(module, torch.nn.MultiheadAttention) and module.training
+        for module in model.modules()
+    )
+    batchnorm_training = sum(
+        isinstance(module, torch.nn.modules.batchnorm._BatchNorm) and module.training
+        for module in model.modules()
+    )
+    return {
+        "mode": mode,
+        "model_training_flag": bool(model.training),
+        "activation_checkpoint_enabled": mode == "activation_checkpoint",
+        "dropout_training_modules": int(dropout_training),
+        "multihead_attention_training_modules": int(attention_training),
+        "batchnorm_training_modules": int(batchnorm_training),
+        "stochastic_modules_disabled": dropout_training == 0 and attention_training == 0,
+        "batchnorm_frozen": batchnorm_training == 0,
+    }
+
+
+def _module_state_digest(module: torch.nn.Module) -> str:
+    """Digest parameters/buffers without retaining another GPU copy."""
+
+    digest = hashlib.sha256()
+    for name, tensor in sorted(module.state_dict().items()):
+        digest.update(name.encode("utf-8"))
+        digest.update(str(tensor.dtype).encode("utf-8"))
+        digest.update(str(tuple(tensor.shape)).encode("utf-8"))
+        digest.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+    return digest.hexdigest()
+
+
+def _max_tensor_difference(left: Any, right: Any) -> float:
+    """Compare every tensor field in two TransitionEncodingV2 dataclasses."""
+
+    differences: list[float] = []
+    if dataclasses.is_dataclass(left) and dataclasses.is_dataclass(right):
+        for field in dataclasses.fields(left):
+            left_value = getattr(left, field.name)
+            right_value = getattr(right, field.name)
+            if left_value is None or right_value is None:
+                if left_value is not right_value:
+                    raise AssertionError(f"Mode comparison disagrees on {field.name} None-ness")
+                continue
+            differences.append(_max_tensor_difference(left_value, right_value))
+        return max(differences, default=0.0)
+    if torch.is_tensor(left) and torch.is_tensor(right):
+        if left.shape != right.shape:
+            raise AssertionError(f"Mode comparison shape mismatch: {left.shape} != {right.shape}")
+        return float((left.detach() - right.detach()).abs().max().cpu())
+    if left != right:
+        raise AssertionError(f"Mode comparison disagrees on non-tensor values: {left!r} != {right!r}")
+    return 0.0
 
 
 def _gradient_snapshot(
@@ -365,11 +448,20 @@ def run_audit(
     batch_size: int = DEFAULT_BATCH_SIZE,
     batches: int = DEFAULT_BATCHES,
     seed: int = DEFAULT_SEED,
+    diagnostic_mode: str = DEFAULT_DIAGNOSTIC_MODE,
+    prediction_loss_reduction_override: str | None = None,
 ) -> dict[str, Any]:
     """Run the read-only gradient audit and atomically persist its report."""
 
     if batch_size < 2 or batch_size % 2 or batches <= 0:
         raise ValueError("batch_size must be an even value >=2 and batches must be positive")
+    if diagnostic_mode not in DIAGNOSTIC_MODES:
+        raise ValueError(f"Unsupported diagnostic mode {diagnostic_mode!r}; choose from {DIAGNOSTIC_MODES}.")
+    if prediction_loss_reduction_override not in (None, *PREDICTION_LOSS_REDUCTION_OVERRIDES):
+        raise ValueError(
+            "prediction_loss_reduction_override must be unset or one of "
+            f"{PREDICTION_LOSS_REDUCTION_OVERRIDES}"
+        )
     checkpoint = Path(checkpoint).expanduser().resolve()
     handoff_root = Path(handoff_root).expanduser().resolve()
     dataset_root = Path(dataset_root).expanduser().resolve()
@@ -401,6 +493,16 @@ def run_audit(
     args = _args_from_manifest(trainer, checkpoint_payload)
     if int(args.seed) != seed:
         raise ValueError(f"Requested seed {seed} differs from checkpoint train seed {args.seed}")
+    checkpoint_prediction_loss_reduction = getattr(
+        args, "prediction_loss_reduction", "mean_coordinate_huber"
+    )
+    if prediction_loss_reduction_override is not None:
+        if not hasattr(args, "prediction_loss_reduction"):
+            raise RuntimeError(
+                "The loaded trainer Args has no prediction_loss_reduction field; "
+                "cannot run the requested counterfactual."
+            )
+        args.prediction_loss_reduction = prediction_loss_reduction_override
     if batch_size > int(args.batch_size):
         raise ValueError(
             f"Requested batch_size {batch_size} exceeds checkpoint train batch_size {args.batch_size}"
@@ -416,11 +518,16 @@ def run_audit(
     model.load_state_dict(checkpoint_payload["model_state_dict"], strict=True)
     target_device = torch.device(device)
     model.to(target_device)
-    model.eval()
-    if model.training or any(module.training for module in model.modules() if isinstance(module, torch.nn.Dropout)):
-        raise RuntimeError("Objective audit requires eval mode with dropout disabled")
+    mode_config = _configure_diagnostic_mode(model, diagnostic_mode)
+    if any(module.training for module in model.modules() if isinstance(module, torch.nn.Dropout)):
+        raise RuntimeError("Objective audit requires every Dropout module to be in eval mode")
+    if any(module.training for module in model.modules() if isinstance(module, torch.nn.MultiheadAttention)):
+        raise RuntimeError("Objective audit requires every MultiheadAttention module to be in eval mode")
+    if any(module.training for module in model.modules() if isinstance(module, torch.nn.modules.batchnorm._BatchNorm)):
+        raise RuntimeError("Objective audit requires every BatchNorm module to be frozen")
 
     groups, group_parameter_names = _parameter_groups(model)
+    target_ema_digest_before = _module_state_digest(model.target_vision_encoder)
     normalizer = MeanStdActionNormalizer.from_stats_file(
         checkpoint_payload["manifest"]["statistics"]
     )
@@ -450,6 +557,7 @@ def run_audit(
 
     batch_reports: list[dict[str, Any]] = []
     sample_batches: list[list[dict[str, Any]]] = []
+    mode_equivalence: dict[str, Any] | None = None
     for batch_index, indices in enumerate(selected_batches):
         samples = [train_dataset[index] for index in indices]
         raw_batch = trainer.collate_robotwin_episodes(samples)
@@ -465,10 +573,46 @@ def run_audit(
         encoder_mask[:, 0] = True
         actions = normalizer.normalize(batch["actions"])
 
+        if batch_index == 0 and diagnostic_mode == "activation_checkpoint":
+            # Compare the first real batch under eval/dropout-off and the
+            # checkpoint-enabled deterministic mode before retaining any
+            # gradient graph.  This validates the mode switch itself without
+            # spending the audit's gradient memory twice.
+            _configure_diagnostic_mode(model, "eval")
+            with torch.no_grad():
+                eval_output = model(
+                    batch["images_before"],
+                    actions,
+                    batch["images_after"],
+                    batch["goal_embedding"],
+                    valid_mask=encoder_mask,
+                )
+            _configure_diagnostic_mode(model, "activation_checkpoint")
+            with torch.no_grad():
+                checkpoint_output = model(
+                    batch["images_before"],
+                    actions,
+                    batch["images_after"],
+                    batch["goal_embedding"],
+                    valid_mask=encoder_mask,
+                )
+            max_abs_difference = _max_tensor_difference(eval_output, checkpoint_output)
+            mode_equivalence = {
+                "checked": True,
+                "batch_index": 0,
+                "scope": "first_real_goal_conditioned_forward",
+                "max_abs_difference": max_abs_difference,
+                "allclose_atol_1e-5_rtol_1e-4": max_abs_difference <= 1e-5,
+            }
+            del eval_output, checkpoint_output
+            if target_device.type == "cuda":
+                torch.cuda.empty_cache()
+
         # The trainer's three-view information flow is preserved verbatim:
         # goal-conditioned, augmented language-masked, and original
-        # language-masked.  The only change is eval mode/dropout-off for a
-        # repeatable diagnostic gradient, as required by this audit.
+        # language-masked.  Both diagnostic modes disable stochastic modules;
+        # activation_checkpoint additionally retains the existing vision
+        # checkpoint path to bound memory.
         outputs = model(
             batch["images_before"],
             actions,
@@ -532,6 +676,8 @@ def run_audit(
         if target_device.type == "cuda":
             torch.cuda.empty_cache()
 
+    target_ema_digest_after = _module_state_digest(model.target_vision_encoder)
+
     all_weight_fields = {
         field.name for field in dataclasses.fields(args) if field.name.endswith("_weight")
     }
@@ -553,15 +699,33 @@ def run_audit(
                 else None
             ),
             "model_eval": not model.training,
+            "diagnostic_mode": diagnostic_mode,
+            "mode_configuration": mode_config,
+            "mode_equivalence": mode_equivalence,
             "dropout_disabled": not any(
                 module.training for module in model.modules() if isinstance(module, torch.nn.Dropout)
             ),
+            "multihead_attention_disabled": not any(
+                module.training for module in model.modules() if isinstance(module, torch.nn.MultiheadAttention)
+            ),
+            "batchnorm_frozen": not any(
+                module.training
+                for module in model.modules()
+                if isinstance(module, torch.nn.modules.batchnorm._BatchNorm)
+            ),
+            "ema_target_state_sha256_before": target_ema_digest_before,
+            "ema_target_state_sha256_after": target_ema_digest_after,
+            "ema_target_state_unchanged": target_ema_digest_before == target_ema_digest_after,
             "optimizer_used": False,
             "training_step_performed": False,
             "estimate_scope": "selected_real_train95_episodes_only",
             "limitations": [
                 "Two fixed first-epoch paired-sampler batches, not a training-distribution estimate.",
-                "Eval/dropout-off gradients are intentionally not the stochastic train-mode gradient.",
+                (
+                    "Eval/dropout-off gradients are intentionally not the stochastic train-mode gradient."
+                    if diagnostic_mode == "eval"
+                    else "Activation-checkpoint mode keeps Dropout/MultiheadAttention/BatchNorm deterministic; it is not a stochastic train-mode estimate."
+                ),
                 "No optimizer, scheduler, weight update, or checkpoint write was performed.",
                 "Loss magnitudes alone do not establish objective dominance; compare weighted gradients and cosines.",
             ],
@@ -596,6 +760,11 @@ def run_audit(
         },
         "objective": {
             "loss_weight_fields": LOSS_WEIGHT_FIELDS,
+            "prediction_loss_reduction_checkpoint": checkpoint_prediction_loss_reduction,
+            "prediction_loss_reduction_audit": getattr(
+                args, "prediction_loss_reduction", checkpoint_prediction_loss_reduction
+            ),
+            "prediction_loss_reduction_override": prediction_loss_reduction_override,
             "loss_weights": {
                 field: float(getattr(args, field)) for field in sorted(used_weight_fields)
             },
@@ -626,6 +795,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--batches", type=int, default=DEFAULT_BATCHES)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--diagnostic-mode", choices=DIAGNOSTIC_MODES, default=DEFAULT_DIAGNOSTIC_MODE)
+    parser.add_argument(
+        "--prediction-loss-reduction-override",
+        choices=PREDICTION_LOSS_REDUCTION_OVERRIDES,
+        default=None,
+    )
     return parser.parse_args()
 
 
@@ -641,6 +816,8 @@ def main() -> None:
         batch_size=args.batch_size,
         batches=args.batches,
         seed=args.seed,
+        diagnostic_mode=args.diagnostic_mode,
+        prediction_loss_reduction_override=args.prediction_loss_reduction_override,
     )
     print(json.dumps({
         "output": str(args.output),
