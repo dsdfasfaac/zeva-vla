@@ -105,7 +105,7 @@ train95 causal bank ──► 最大 phase similarity ──► OOD gate（floor
 
 candidate-0 在每次 replan 先消耗正常 Base RNG；保存其后的 RNG 状态，再切到独立 proposal RNG 生成三个额外候选，最后恢复 Base RNG。故选择 candidate-0 时，本次动作与未来 Base 随机流都严格一致。medoid 是四个候选中到其余候选平均 H15 距离最小的实际样本，不做坐标平均。`0.85` 来自 train phase-bank 最大余弦相似度的第 1 百分位，在闭环结果出现前固定。离线指标只决定能否进入闭环，最终唯一判据是相同 seed/instruction/RNG 下的成功率。
 
-同时进行严格的表示审计：用相同的 grouped split 比较 Stage1 ZTE、PI-native 表征及二者联合对候选优劣/闭环成败的预测力。若联合模型相对 PI-only 没有稳定增量，Stage1 不进入下一版控制器；下一版只允许使用 PI-native 时序状态和闭环 outcome supervision。下文 v11--v18 的训练公式、残差校准和历史目录均保留作失败分析；凡与本节冲突者均不是当前方法。
+表示审计已经完成：11,679 个决策样本来自 4,529 个 episode group，使用按 task/episode 分组且无 group overlap 的 5-fold。action-only AUC 为 `0.5563`，Stage1+action 为 `0.5416`，PI-VLM+action 为 `0.5473`，联合表征为 `0.5375`；四种 selector 的 expert-MSE 都劣于 candidate-0。结论为 **discard Stage1 for candidate ranking**。已经冻结的 v19 仍按预注册协议跑完，但此后的学习控制器只允许使用 PI-native 时序状态与真实闭环 outcome supervision，不能继续用 Stage1 或 expert-MSE 反复调参。完整机器可读结果位于 `stage1_representation_audit_v1.json`。下文 v11--v18 的训练公式、残差校准和历史目录均保留作失败分析；凡与本节冲突者均不是当前方法。
 
 方法包含六个核心部件：
 

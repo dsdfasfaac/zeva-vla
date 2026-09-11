@@ -84,8 +84,17 @@ Therefore all-task consensus is rejected. v19 freezes the three-task scope once
 from that split and evaluates it on new seeds beginning at 17000; failure to
 reproduce a positive delta rejects v19 without changing seeds. In parallel, a
 grouped representation audit decides whether Stage1 adds predictive information
-beyond native PI features. Sections describing v11--v18 below are retained as
-historical failure analysis, not active methods.
+beyond native PI features.
+
+That grouped audit is now complete: 11,679 decisions from 4,529 episode groups
+were evaluated with five-fold task/episode grouping and no group overlap.
+Action-only AUC was 0.5563, Stage1-plus-action was 0.5416, PI-VLM-plus-action was
+0.5473, and the joint representation was 0.5375. Every learned selector also
+worsened candidate-zero expert MSE. Stage1 is therefore marked `discard` for
+candidate ranking. The already frozen v19 run is allowed to finish as its
+preregistered test, but no later learned controller may use ZTE unless new
+closed-loop outcome evidence reverses this result. Sections describing v11--v18
+below are retained as historical failure analysis, not active methods.
 
 ## H100 runtime
 
