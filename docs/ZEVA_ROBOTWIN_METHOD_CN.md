@@ -2,7 +2,7 @@
 
 > 文档状态：当前候选方法与实验证据（2026-09-11）
 > 目标：在已经完成 RoboTwin 训练的 PI0.5 上加入 ZeVA 的因果表征、记忆与检索能力，同时保持 PI0.5 的物理输入输出协议和基础能力。
-> 主线定义：Stage1 训练 ZTE/Mamba 并产生 causal bank、H15 live queries 和 task-language retrieval；当前 v18 完全冻结 untouched best-v1 PI0.5 与 Stage1，由 PI 生成 4 个原生动作候选，ZeVA 用真实 recurrent phase 做 OOD 安全门控并选择 H15 分布 medoid。v11--v17 的 token 注入、action-expert 微调、prior/残差和 expert-MSE ranker 均已被闭环或独立 audit 否决。
+> 主线定义：Stage1 训练 ZTE/Mamba 并产生 causal bank、H15 live queries 和 task-language retrieval；当前 v19 完全冻结 untouched best-v1 PI0.5 与 Stage1，只在一次性验证选出的三个时序/语言消歧任务上启用 K=4 phase-gated PI medoid，其余任务精确退回 Base。v11--v18 的 token 注入、action-expert 微调、prior/残差、expert-MSE ranker 和全任务 medoid 均已被闭环或独立 audit 否决。
 
 ## 1. 问题定义与设计原则
 
@@ -33,10 +33,10 @@ RoboTwin 的基础策略已经是一个在相同 50-task 数据分布上训练�
 | 外部知识 | 方法相关 memory/retrieval | train95-only causal bank + task/phase retrieval |
 | 在线记忆 | 历史上下文 | BIT（短期）+ PIM（持久） |
 | 接入基础模型 | 下游策略适配 | PI0.5 生成 K=4 个原生 H50；ZeVA 以 task-language + 真实 H15 phase 做安全门控，选择 H15 medoid，不改写动作 |
-| Stage 2 | 下游策略适配 | 当前 v18 不微调 PI/ZTE/bank；候选价值学习仅作否决性消融，部署采用无需 expert-MSE ranker 的 phase-gated consensus |
+| Stage 2 | 下游策略适配 | 当前 v19 不微调 PI/ZTE/bank；只在预注册的适用任务域使用 phase-gated consensus，其余任务 exact Base |
 | Stage 3 | 对最终策略特征做检索对齐 | 仅在 Stage2 paired 闭环评测后决定是否需要 |
 
-这里最关键的改动是：**当前方法不在 VLM 前注入、不写 diffusion/action-expert token，也不在 PI 输出后添加 residual。untouched PI0.5 独立生成四个 H50；candidate-0 使用正常 Base 连续 RNG，额外候选使用隔离 RNG。ZeVA 通过 task-language 检索任务，用真实 recurrent H15 phase 和 train95 causal bank 判断是否在分布内；在分布内选择实际 PI medoid，分布外精确回退 candidate-0。训练和部署都不使用 BehaviorVLA 的 episode-index oracle。**
+这里最关键的改动是：**当前方法不在 VLM 前注入、不写 diffusion/action-expert token，也不在 PI 输出后添加 residual。对三个适用域任务，untouched PI0.5 独立生成四个 H50；candidate-0 使用正常 Base 连续 RNG，额外候选使用隔离 RNG，phase 在分布内时选择实际 PI medoid。对其余七个任务，只生成 candidate-0，动作与未来 RNG 都精确等同 Base。训练和部署都不使用 BehaviorVLA 的 episode-index oracle。**
 
 ## 3. 冻结的 RoboTwin–PI0.5 契约
 
@@ -74,9 +74,11 @@ checkpoint/pretrained_model-best-v1
 
 Stage1 的 B0 语言坐标、causal bank 与 retrieval 由 `pretrained_model` 对应的冻结语言初始化产生；当前 v14 的 Base 严格使用 `pretrained_model-best-v1`。两者模型 hash 不同，因此 v14 显式加载独立的 Stage1 language checkpoint 来保持既有语言坐标，不把 best-v1 的 embedding 偷换进已冻结的 Stage1。更换 PI-base 时的规则见第 16 节。
 
-## 4. 方法总览（当前主线：v18 phase-gated PI consensus）
+## 4. 方法总览（当前主线：v19 task-safe PI consensus）
 
-当前候选是 v18 phase-gated PI consensus。untouched `pretrained_model-best-v1`、PaliGemma/VLM、action expert、ZTE/Mamba、causal bank 和 task retrieval 全部冻结。v14 虽在 validation5 上 10/10 任务 expert-action MSE 改善，但 development split-j 为 Base `43/80`、ZeVA `38/80`；二值路由在独立 split-i 到 73/80 时已数学上不可能超过 Base，故全部 residual 方法停止。随后 K=4 PI 候选验证 oracle 相对 candidate-0 改善 `57.27%`；学习 ranker 只能捕获 `3.9%--8.7%` oracle 空间且任务符号不稳定，也被否决。无需学习的 PI medoid 在 validation 上改善 `13.76%` 且 10/10 任务为正，因此只允许它进入闭环开发验证：
+v18 全任务 phase-gated consensus 已完成闭环开发验证：Base `43/80`、ZeVA `43/80`，其中 13 对只由 Base 成功、13 对只由 ZeVA 成功。这个结果否定了“离线 expert-action MSE 改善可以代理闭环收益”：即便 medoid 在 validation MSE 上改善 `13.76%` 且 10/10 任务为正，整体闭环收益仍为零。
+
+当前 v19 不再扩大注入或搜索阈值，而是引入一次性、可复现的适用域风险控制。根据已经结束且随后冻结的 split-j，只在 `blocks_ranking_rgb`、`blocks_ranking_size`、`scan_object` 启用 medoid；三者在该 split 上合计 Base `7/24`、ZeVA `12/24`。其余七个任务只运行 candidate-0。随后在结果未知的新 split-k（seed 从 17000 开始）独立验证三任务；若增益不为正，v19 立即淘汰且不更换 seed。
 
 ```text
 离线 Stage1
@@ -86,8 +88,12 @@ PI-base 冻结 task embedding + s0 ──► B0
                                       └── train95 bank / live queries / task retrieval
                                            在 Stage2 开始前全部冻结
 
-当前 v18 与部署的因果条件链
+当前 v19 与部署的因果条件链
 instruction ──► task-language retrieval ──► task prototype
+                         │
+             不在三任务适用域 ──► candidate-0 exact Base
+                         │
+                    在适用域
 真实 H15 历史 ──► 冻结 ZTE ────────► live phase
 train95 causal bank ──► 最大 phase similarity ──► OOD gate（floor=0.85）
 三相机 + Joint14 + instruction ──► 冻结 PI0.5 ──► K=4 原生 EEF16 [50,16]
@@ -99,30 +105,7 @@ train95 causal bank ──► 最大 phase similarity ──► OOD gate（floor
 
 candidate-0 在每次 replan 先消耗正常 Base RNG；保存其后的 RNG 状态，再切到独立 proposal RNG 生成三个额外候选，最后恢复 Base RNG。故选择 candidate-0 时，本次动作与未来 Base 随机流都严格一致。medoid 是四个候选中到其余候选平均 H15 距离最小的实际样本，不做坐标平均。`0.85` 来自 train phase-bank 最大余弦相似度的第 1 百分位，在闭环结果出现前固定。离线指标只决定能否进入闭环，最终唯一判据是相同 seed/instruction/RNG 下的成功率。
 
-下文 v11--v17 的训练公式、残差校准和历史目录均保留作失败分析；凡与本节冲突者均不是当前方法。
-
-下图表示单次在线重规划时的注入位置：
-
-```text
-任务语言 instruction
-        │
-        ├── 冻结 PI0.5 language embedding ── task retrieval ── task prototype
-        │                                                    │
-三相机 s_t ── B0/ZTE-Mamba ── live phase + causal signal ────┤
-        ▲                                                    │
-        │                 train95 causal bank ────────────────┤
-        │                                                    ▼
-执行的 EEF16 H15 ── visual effect s_{t+15}       Memory Context Encoder
-                                                             │
-                                         ├── Gaussian prior statistics（NLL 辅助）
-                                         └── Base-conditioned residual corrector
-                                                             ▲
-                    冻结 PI0.5 ──► Base EEF16 H50 ────────────┘
-                                                             │
-                                  Base[:15] + bounded Delta；H35 exact Base
-                                                             │
-                                                       执行前 H15
-```
+同时进行严格的表示审计：用相同的 grouped split 比较 Stage1 ZTE、PI-native 表征及二者联合对候选优劣/闭环成败的预测力。若联合模型相对 PI-only 没有稳定增量，Stage1 不进入下一版控制器；下一版只允许使用 PI-native 时序状态和闭环 outcome supervision。下文 v11--v18 的训练公式、残差校准和历史目录均保留作失败分析；凡与本节冲突者均不是当前方法。
 
 方法包含六个核心部件：
 
@@ -131,7 +114,7 @@ candidate-0 在每次 replan 先消耗正常 Base RNG；保存其后的 RNG 状�
 3. **Task-language retrieval**：使用 PI-base 的冻结任务语言坐标选择 task prototype，不使用 `episode_index` 或 oracle task ID。
 4. **BIT（Brief Interaction Trace）**：保存当前 attempt 的近期因果证据。
 5. **PIM（Persistent Interaction Memory）**：合并同一 episode 内跨 attempt 的相似阶段证据。
-6. **ZeVA direct residual corrector**：将 task、phase、offline bank、BIT/PIM、Base action 和 prior uncertainty 融合，预测有界 H15 `expert - Base` 残差；不改 VLM/action expert token，也不让 prior mean 直接替代 Base。
+6. **Task-safe native-PI selector**：在预注册适用域内选择 PI 原生 medoid；域外以及 phase OOD 时 exact Base，不预测或注入动作残差。
 
 Stage3 不是固定必训阶段。Stage2 训完后先使用同一批环境 seed、instruction 和固定的模型 RNG 起点做 paired PI/ZeVA 闭环评测；每个 condition 内的 flow RNG 按 handoff 口径连续消耗。只有 Stage2 不回退但收益仍不足时，才进入可选 Stage3。
 

@@ -48,7 +48,7 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 ## Zeva architecture
 
 The selected PI0.5 has already been trained on the same RoboTwin distribution.
-The current v18 candidate starts from untouched `pretrained_model-best-v1` and
+The current v19 candidate starts from untouched `pretrained_model-best-v1` and
 keeps every PI0.5, Stage 1 ZTE/Mamba, causal-bank, and task-retrieval tensor
 frozen. It does not inject tokens, fine-tune the action expert, interpolate
 toward an action prior, or add a post-diffusion residual. Those v11--v17 paths
@@ -66,20 +66,26 @@ higher closed-loop success. The active path is:
 - Frozen PI0.5 samples four native H50 EEF16 candidates. Candidate zero consumes
   the ordinary Base RNG stream; the other three use an isolated proposal RNG,
   so selecting candidate zero also preserves every future Base draw.
-- ZeVA selects the H15 distribution medoid: an actual PI sample nearest the
-  other samples, never an averaged or residual-modified action.
+- A preregistered task-safety router enables the H15 distribution medoid only
+  for `blocks_ranking_rgb`, `blocks_ranking_size`, and `scan_object`. These are
+  the three tasks that improved on the completed v18 development split and
+  whose semantics require language/temporal disambiguation. The other seven
+  tasks generate candidate zero only and are exact untouched-PI fallbacks.
 - Task-language retrieval identifies the causal-bank task. The real recurrent
   H15 Mamba phase is compared with that task's train95 phase bank. If maximum
   phase similarity is below the preregistered train-distribution 1% quantile
   (`0.85`), selection falls back exactly to candidate zero.
 - The policy still returns H50 and RoboTwin still executes H15 before replanning.
 
-Offline expert-MSE is now diagnostic only. K=4 has a 57.27% validation oracle
-gap, while the non-learned medoid improves validation MSE by 13.76% on all ten
-selected tasks. The current development split replays the already frozen 80
-expert-valid seeds against the audited Base result `43/80`; v18 must exceed it
-before any independent confirmation or 10x20 final run. Sections describing
-v11--v17 below are retained as historical failure analysis, not active methods.
+Offline expert-MSE is diagnostic only. Although the non-learned medoid improves
+validation MSE by 13.76%, the completed v18 paired closed-loop split was exactly
+Base `43/80` versus ZeVA `43/80` (13 Base-only and 13 ZeVA-only successes).
+Therefore all-task consensus is rejected. v19 freezes the three-task scope once
+from that split and evaluates it on new seeds beginning at 17000; failure to
+reproduce a positive delta rejects v19 without changing seeds. In parallel, a
+grouped representation audit decides whether Stage1 adds predictive information
+beyond native PI features. Sections describing v11--v18 below are retained as
+historical failure analysis, not active methods.
 
 ## H100 runtime
 
@@ -132,10 +138,13 @@ manifest.
 ## Three-stage training pipeline
 
 Stage 1 learns ZTE and calibrates the exact task/phase retrieval inputs used at
-deployment. Stage 2 starts from untouched RoboTwin best-v1, freezes the entire
-PI0.5 and all Stage 1 artifacts, then trains a direct Base-conditioned H15
-output residual. Stage 3 is
-optional and is considered only after paired Base/Zeva closed-loop evaluation.
+deployment. Current Stage 2 starts from untouched RoboTwin best-v1 and freezes
+the entire PI0.5 and all Stage 1 artifacts; it performs task-safe native-PI
+candidate selection and does not train or inject an action residual. Stage 3 is
+optional. If the grouped audit shows that Stage1 has no incremental predictive
+value, Stage3 replaces it with a PI-native temporal state and trains only from
+closed-loop outcome supervision; it is not permitted to return to expert-MSE
+checkpoint selection.
 The historical Stage 2a action-expert specialization is not part of the current
 pipeline: it was tested and rejected because it degraded the already-trained
 RoboTwin policy.
@@ -161,8 +170,8 @@ and deployment.
 | Stage | Frozen | Trainable | Required output |
 |---|---|---|---|
 | 1. ZTE and retrieval calibration | PI0.5 weights | ZTE, then a separate task-language retrieval head | `zte_best.pth`, train95 bank, H15 live-query cache, `task_retrieval.pth` |
-| 2. H15 direct output residual (active v14) | complete PI0.5, ZTE/Mamba, bank, retrieval, all token-injection branches | task/context/prior representation and bounded residual corrector at `5e-5` | bit-identical full PI `model.safetensors`, `zeva_adapter.pth`, optimizer/scheduler state, direct held-out paired metrics |
-| 3. Optional post-Stage2 adaptation | ZTE, bank, retrieval | selected modules determined by paired Stage2 results | selectively tuned checkpoint |
+| 2. Task-safe PI consensus (active v19) | complete PI0.5, ZTE/Mamba, bank, retrieval | none; preregistered task router plus K=4 native PI sampling | paired split-k report; exact Base fallback audit outside the three-task scope |
+| 3. Optional outcome-supervised selector | foundation PI0.5 | PI-native temporal selector; Stage1 retained only if grouped audit proves incremental value | grouped representation audit, selector checkpoint, two independent paired closed-loop reports |
 
 ### Stage 1: train ZTE and build the training causal bank
 
