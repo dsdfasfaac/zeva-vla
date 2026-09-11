@@ -6,6 +6,12 @@
 
 ## 当前运行
 
+19:00 更新：修复后的Stage1已完成step4096，按完整validation loss选择不可变 `zte_v2_step_004096.pth`（SHA=`ce9402981b8e2f1ce597e2cb150b795ae246f84fb81b3bb72fae023a3decf899`）。最终1350条验证：loss=6.190151、task=96.8889%、order=88.6432%、effect cosine=0.375731、language consistency=0.851242。选择记录在修复run的 `checkpoint_selection.json`；不使用闭环结果选这个Stage1 checkpoint。
+
+普通Base已实际开训：`advantage10-ztev2-schedulerfix-pair-20260911/baseline`，launcher710436，GPU2/5/6/7、port29571，global256（16×acc4×4卡），AE LR5e-6，compile/TorchCodec启用。step500已保存8.8GB `model.safetensors` 和2.1GB `training_state.pt`，validation flow=0.0190017；未启用prior/retrieval对应NaN字段表示不适用，不是flow发散。Base manifest明确ZTE仅作历史接口/同源检查、不用于预测或loss，BIT/PIM关闭，仅action expert及其投影可训练。
+
+最终新bank/live/retrieval工作流已在GPU0/1/3/4实际启动，输出 `stage1-zte-v2-artifacts-scheduler-repaired-20260911`。ZeVA匹配训练安排在这套产物完整验证、检索训练和同checkpoint联合smoke后接续启动；截至本条核验尚未声称ZeVA进入optimizer steps。旧step2048产物不用于这次ZeVA策略训练。
+
 18:12 更新：调度修复 `b4fbb0e` 已通过31项测试并实际补训。新目录 `stage1-zte-v2-phase-vector-mse-4096-20260911h-scheduler-repair-20260911i`，launcher `672753`，从旧step1024保留权重/optimizer/RNG，但显式重设 scheduler 到 global step1024；manifest 标记 `non_exact_scheduler_repaired_continuation`，不是 exact resume。step1536 的 scheduler.last_epoch=1536、LR=`[6.913417e-6,6.913417e-5]`，确认恢复了有效学习。最新step2560完整1350条验证：task=**96.1481%**、order=**87.3814%**、effect cosine=**0.350909**、language consistency=**0.848188**，四项均达到配置中的诊断参考；不把这个结果等同闭环成功率。
 
 旧临时候选step2048的全量导出已完成：`stage1-zte-v2-artifacts-step2048-20260911`，26150 train +1350 validation、50tasks、`usable_for_training=true`，checkpoint SHA=`d3d21c0acac9855a0a06311472d9ad773d914b57df311cf2648bafa9bc14bc5d`，task-language retrieval train=97.8891%、validation=97.7037%。为避免用已明显落后的表征启动ZeVA长训，**ZeVA正式训练改用补训完成后选择的不可变checkpoint及重新导出的同源bank/live/retrieval**；旧产物保留作工程验证与Base的无记忆数据接口依赖，不静默替换任何权重。
