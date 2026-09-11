@@ -204,11 +204,22 @@ PY
 }
 
 check_idle_gpus() {
-  command -v nvidia-smi >/dev/null 2>&1 || fail "nvidia-smi is unavailable"
+  command -v nvidia-smi >/dev/null 2>&1 || return 1
   nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits | awk -F, '
     {gsub(/[[:space:]]/, "", $2); if (($2 + 0) > 1024) {print "GPU " $1 " has " $2 " MiB in use" > "/dev/stderr"; bad=1}}
     END {exit bad+0}
-  ' || fail "one or more model GPUs are still occupied"
+  '
+}
+
+wait_for_idle_gpus() {
+  for attempt in $(seq 1 4); do
+    if check_idle_gpus; then
+      return 0
+    fi
+    write_state waiting_for_idle_gpus "attempt=${attempt}/4"
+    sleep "$poll_seconds"
+  done
+  fail "one or more model GPUs are still occupied after launcher shutdown"
 }
 
 check_model_ports_free() {
@@ -254,7 +265,7 @@ while true; do
 done
 
 write_state training_complete "both_launchers_stopped_and_all_checkpoints_verified"
-check_idle_gpus
+wait_for_idle_gpus
 check_model_ports_free
 check_render_runtime
 
