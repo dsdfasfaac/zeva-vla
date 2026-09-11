@@ -310,6 +310,9 @@ class CausalTransitionEncoderV2(nn.Module):
             nn.Linear(config.model_dim, config.signal_dim),
             nn.LayerNorm(config.signal_dim),
         )
+        # This is a fixed target coordinate, not an accidentally unused online
+        # head. The predictor is trained against its detached outputs.
+        self.effect_target_projector.requires_grad_(False)
         self.predicted_effect_head = nn.Sequential(
             nn.Linear(config.model_dim, config.model_dim),
             nn.SiLU(),
@@ -334,11 +337,6 @@ class CausalTransitionEncoderV2(nn.Module):
             nn.Linear(config.model_dim, config.model_dim),
             nn.SiLU(),
             nn.Linear(config.model_dim, config.task_dim),
-        )
-        self.global_context_head = nn.Sequential(
-            nn.Linear(config.task_dim + config.goal_dim, config.model_dim),
-            nn.LayerNorm(config.model_dim),
-            nn.SiLU(),
         )
         self.progress_head = nn.Linear(config.model_dim, 1)
         self.task_prototypes = (
@@ -621,9 +619,9 @@ class CausalTransitionEncoderV2(nn.Module):
         # The exported global token is exactly the supervised pooled feature;
         # an extra unsupervised projector here would export a random coordinate.
         global_prompt = task_pool
-        global_context = self.global_context_head(
-            torch.cat([task_pool, goal_value.to(dtype=task_pool.dtype)], dim=-1)
-        )
+        # Any learned language/trajectory fusion belongs to Stage2 and must
+        # receive its loss. Export the unprojected coordinates from Stage1.
+        global_context = torch.cat([task_pool, goal_value.to(dtype=task_pool.dtype)], dim=-1)
         initial_phase = F.normalize(self.phase_head(b0[:, 0]), dim=-1)
 
         return TransitionEncodingV2(
