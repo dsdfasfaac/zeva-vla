@@ -48,53 +48,43 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 ## Zeva architecture
 
 The selected PI0.5 has already been trained on the same RoboTwin distribution.
-The current v19 candidate starts from untouched `pretrained_model-best-v1` and
-keeps every PI0.5, Stage 1 ZTE/Mamba, causal-bank, and task-retrieval tensor
-frozen. It does not inject tokens, fine-tune the action expert, interpolate
-toward an action prior, or add a post-diffusion residual. Those v11--v17 paths
-were rejected because lower held-out expert-action MSE did not reproduce as
-higher closed-loop success. The active path is:
+The active work is a scientific ZTE v2 redesign. The former v19 task-gated PI
+consensus run was stopped and marked `superseded`; it must not be resumed as the
+main method. Its predecessor v18 achieved Base `43/80` and ZeVA `43/80` in a
+paired closed-loop split despite improving offline expert-action MSE. A grouped
+audit also showed that the former Stage 1 representation did not add candidate
+ranking information. These results reject that implementation and proxy, not
+the goal of learning an action-effect representation.
 
-- The Mamba Causal Transition Encoder consumes all three camera views before an
-  executed chunk, the exact normalized EEF16 chunk, and the three resulting
-  views. It predicts phase, causal signal, progress, and visual effect.
+ZTE v2 follows the three-stream temporal factorization of BehaviorVLA while
+retaining ZeVA's action-effect semantics:
+
+- Separate causal Mamba streams encode visual state, the ordered H15 EEF16
+  chunk, and the observed visual effect. The action stream may not mean-pool the
+  raw chunk.
+- A pre-effect state predicts the next action and EMA visual change without
+  reading the target after-image. The after-image is used only to construct the
+  post-transition causal token.
+- The representation is factorized into an episode-level task prototype,
+  recurrent local phase, and action-effect token. Language is permitted in
+  `B0`, but every sensorimotor representation claim must also pass a
+  language-masked probe.
 - Brief Interaction Trace stores recent evidence within the current attempt.
 - Persistent Interaction Memory consolidates phase-matched evidence across
   attempts in the same fixed episode.
-- Frozen PI0.5 task-language embeddings identify a ZTE task prototype through
-  a calibrated retrieval head shared by training and deployment.
-- Frozen PI0.5 samples four native H50 EEF16 candidates. Candidate zero consumes
-  the ordinary Base RNG stream; the other three use an isolated proposal RNG,
-  so selecting candidate zero also preserves every future Base draw.
-- A preregistered task-safety router enables the H15 distribution medoid only
-  for `blocks_ranking_rgb`, `blocks_ranking_size`, and `scan_object`. These are
-  the three tasks that improved on the completed v18 development split and
-  whose semantics require language/temporal disambiguation. The other seven
-  tasks generate candidate zero only and are exact untouched-PI fallbacks.
-- Task-language retrieval identifies the causal-bank task. The real recurrent
-  H15 Mamba phase is compared with that task's train95 phase bank. If maximum
-  phase similarity is below the preregistered train-distribution 1% quantile
-  (`0.85`), selection falls back exactly to candidate zero.
-- The policy still returns H50 and RoboTwin still executes H15 before replanning.
+- A zero-initialized global causal prompt is placed in the prefix/KV context
+  visible to the action expert. Separately, a phase-conditioned Gaussian prior
+  is added only to the noisy-action embedding. Nothing is added to the final
+  EEF16 output.
+- PI0.5 still returns H50 and RoboTwin still executes H15 before replanning.
 
-Offline expert-MSE is diagnostic only. Although the non-learned medoid improves
-validation MSE by 13.76%, the completed v18 paired closed-loop split was exactly
-Base `43/80` versus ZeVA `43/80` (13 Base-only and 13 ZeVA-only successes).
-Therefore all-task consensus is rejected. v19 freezes the three-task scope once
-from that split and evaluates it on new seeds beginning at 17000; failure to
-reproduce a positive delta rejects v19 without changing seeds. In parallel, a
-grouped representation audit decides whether Stage1 adds predictive information
-beyond native PI features.
-
-That grouped audit is now complete: 11,679 decisions from 4,529 episode groups
-were evaluated with five-fold task/episode grouping and no group overlap.
-Action-only AUC was 0.5563, Stage1-plus-action was 0.5416, PI-VLM-plus-action was
-0.5473, and the joint representation was 0.5375. Every learned selector also
-worsened candidate-zero expert MSE. Stage1 is therefore marked `discard` for
-candidate ranking. The already frozen v19 run is allowed to finish as its
-preregistered test, but no later learned controller may use ZTE unless new
-closed-loop outcome evidence reverses this result. Sections describing v11--v18
-below are retained as historical failure analysis, not active methods.
+Stage 1 is selected by preregistered held-out representation gates rather than
+training loss or epoch count. It must demonstrate non-leaking forward dynamics,
+language-masked task retrieval, phase ordering, causal interventions, batch vs.
+incremental equality, and expert-to-PI-rollout robustness. Stage 2 is forbidden
+until all gates pass. The complete frozen design is in
+`docs/ZTE_V2_SCIENTIFIC_DESIGN_CN.md`; older v11--v19 sections below are retained
+only as failure-analysis history.
 
 ## H100 runtime
 
@@ -146,17 +136,13 @@ manifest.
 
 ## Three-stage training pipeline
 
-Stage 1 learns ZTE and calibrates the exact task/phase retrieval inputs used at
-deployment. Current Stage 2 starts from untouched RoboTwin best-v1 and freezes
-the entire PI0.5 and all Stage 1 artifacts; it performs task-safe native-PI
-candidate selection and does not train or inject an action residual. Stage 3 is
-optional. If the grouped audit shows that Stage1 has no incremental predictive
-value, Stage3 replaces it with a PI-native temporal state and trains only from
-closed-loop outcome supervision; it is not permitted to return to expert-MSE
-checkpoint selection.
-The historical Stage 2a action-expert specialization is not part of the current
-pipeline: it was tested and rejected because it degraded the already-trained
-RoboTwin policy.
+Stage 1 trains ZTE v2 and freezes a causal bank only after all representation
+gates pass. Stage 2 first freezes PI0.5 and trains zero-initialized prompt/prior
+adapters for an attribution smoke test. Only a correct prompt that measurably
+outperforms zero and shuffled controls is allowed to enter joint tuning, where
+ZTE/bank remain frozen, PI0.5 uses LR `5e-6`, new modules use `5e-5`, and global
+batch remains 256. Stage 3 is optional and may only address a diagnosed
+closed-loop deficiency; it is not an automatic extra training stage.
 
 Replacing only the PI base does not automatically invalidate Stage 1. ZTE,
 the bank, and retrieval can be reused when the new base keeps the same model
@@ -178,9 +164,10 @@ and deployment.
 
 | Stage | Frozen | Trainable | Required output |
 |---|---|---|---|
-| 1. ZTE and retrieval calibration | PI0.5 weights | ZTE, then a separate task-language retrieval head | `zte_best.pth`, train95 bank, H15 live-query cache, `task_retrieval.pth` |
-| 2. Task-safe PI consensus (active v19) | complete PI0.5, ZTE/Mamba, bank, retrieval | none; preregistered task router plus K=4 native PI sampling | paired split-k report; exact Base fallback audit outside the three-task scope |
-| 3. Optional outcome-supervised selector | foundation PI0.5 | PI-native temporal selector; Stage1 retained only if grouped audit proves incremental value | grouped representation audit, selector checkpoint, two independent paired closed-loop reports |
+| 1. ZTE v2 representation | PI0.5 weights and EMA visual target | three-stream ZTE v2 | gated `zte_v2_best.pth`, probe report, train95 causal bank |
+| 2A. Injection attribution | PI0.5, ZTE v2, bank | zero-init causal-prompt and Gaussian-prior adapters | Base/global-only/prior-only/both plus correct/zero/shuffled report |
+| 2B. Joint policy tuning | ZTE v2 and bank | PI0.5 plus prompt/PBD adapters at separate LRs | full model, adapters, optimizer/scheduler, paired validation |
+| 3. Optional diagnosed repair | selected modules depend on the observed failure | only the module implicated by Stage2 evidence | two independent positive paired splits before final evaluation |
 
 ### Stage 1: train ZTE and build the training causal bank
 
