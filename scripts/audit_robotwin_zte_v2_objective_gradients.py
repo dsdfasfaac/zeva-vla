@@ -724,7 +724,10 @@ def run_audit(
             "training_step_performed": False,
             "estimate_scope": "selected_real_train95_episodes_only",
             "limitations": [
-                "Two fixed first-epoch paired-sampler batches, not a training-distribution estimate.",
+                (
+                    f"{batches} fixed first-epoch paired-sampler batches of batch_size {batch_size} "
+                    f"({batches * batch_size} episodes), not a training-distribution estimate."
+                ),
                 (
                     "Eval/dropout-off gradients are intentionally not the stochastic train-mode gradient."
                     if diagnostic_mode == "eval"
