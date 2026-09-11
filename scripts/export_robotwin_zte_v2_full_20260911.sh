@@ -100,7 +100,7 @@ if ! command -v nvidia-smi >/dev/null 2>&1; then
   echo "nvidia-smi is required for the pinned GPU export." >&2
   exit 2
 fi
-for gpu in 2 5 6 7; do
+for gpu in "${gpus[@]}"; do
   state=$(nvidia-smi -i "${gpu}" --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits | tr -d ' ')
   echo "gpu${gpu}_before=${state}"
 done
