@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 import dataclasses
+import hashlib
 import inspect
 import math
 from pathlib import Path
@@ -26,6 +27,11 @@ from openpi.zeva.robotwin_contract import ROBOTWIN_ACTION_HORIZON
 from openpi.zeva.robotwin_contract import ROBOTWIN_CAMERA_KEYS
 from openpi.zeva.robotwin_contract import MeanStdActionNormalizer
 from openpi.zeva.robotwin_contract import RobotWinHandoff
+from openpi.zeva.stage1_checkpoint import LEGACY_SCHEMAS
+from openpi.zeva.stage1_checkpoint import V2_SCHEMA
+from openpi.zeva.stage1_checkpoint import load_stage1_encoder
+from openpi.zeva.stage1_checkpoint import stage1_policy_config
+from openpi.zeva.stage1_checkpoint import stage1_transition_horizon
 from openpi.zeva.transition_encoder import CausalTransitionEncoder
 
 
@@ -45,6 +51,62 @@ def robotwin_multiview_image(batch: dict[str, torch.Tensor]) -> torch.Tensor:
     if len(spatial_shapes) != 1:
         raise ValueError(f"RoboTwin camera shapes differ: {sorted(spatial_shapes)!r}.")
     return torch.cat(views, dim=-1)
+
+
+def stage1_artifact_schema(manifest: dict[str, Any]) -> str | None:
+    """Read the encoder schema recorded by a bank/live-query artifact.
+
+    New exporters record the explicit ``stage1_checkpoint_schema`` field.
+    The aliases keep handoff with early v5 artifacts possible, while v2
+    callers can still fail closed when that field is absent.
+    """
+    for key in ("stage1_checkpoint_schema", "zte_checkpoint_schema", "checkpoint_schema"):
+        value = manifest.get(key)
+        if value is not None:
+            return str(value)
+    nested = manifest.get("stage1_manifest")
+    if isinstance(nested, dict):
+        value = nested.get("stage1_checkpoint_schema") or nested.get("checkpoint_schema")
+        if value is not None:
+            return str(value)
+    return None
+
+
+def validate_stage1_v2_artifact_status(
+    payload: dict[str, Any], *, artifact_name: str
+) -> None:
+    """Require an explicitly complete, training-usable v2 bank/live artifact.
+
+    The exporter deliberately writes incomplete smoke artifacts so their
+    shapes can be inspected without pretending they are a train95 bank or a
+    deployment cache.  Keep this check at every Stage 2/3 load boundary;
+    missing metadata is unsafe for v2 and remains allowed only on legacy v5
+    artifacts, whose historical schema predates these flags.
+    """
+    if payload.get("incomplete") is not False:
+        raise ValueError(
+            f"v2 {artifact_name} must explicitly declare incomplete=false."
+        )
+    if payload.get("usable_for_training") is not True:
+        raise ValueError(
+            f"v2 {artifact_name} must explicitly declare usable_for_training=true."
+        )
+    manifest = payload.get("manifest")
+    if isinstance(manifest, dict):
+        for key, expected in (("incomplete", False), ("usable_for_training", True)):
+            value = manifest.get(key)
+            if value is not None and value is not expected:
+                raise ValueError(
+                    f"v2 {artifact_name} manifest {key} disagrees with the artifact status."
+                )
+
+
+def _sha256_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 class RobotWinGaussianActionPrior(NamedTuple):
@@ -328,6 +390,14 @@ class RobotWinZevaPolicy(nn.Module):
         self.foundation.eval()
 
         self.causal_transition_encoder = CausalTransitionEncoder(self.zeva_config)
+        # The legacy encoder remains the construction-time default so callers
+        # that do not provide a Stage 1 checkpoint keep the historical API.
+        # ``load_zte`` replaces it with the schema-declared v2 encoder when
+        # required; the policy below dispatches stateful calls by this flag.
+        self._stage1_schema: str | None = None
+        self._stage1_transition_horizon = 15
+        self._stage1_checkpoint_sha256: str | None = None
+        self._stage1_state: Any | None = None
         self.task_token_projector = nn.Sequential(
             nn.Linear(2048, self.zeva_config.model_dim),
             nn.LayerNorm(self.zeva_config.model_dim),
@@ -428,7 +498,9 @@ class RobotWinZevaPolicy(nn.Module):
         if self._action_expert_finetune:
             self.foundation.model.paligemma_with_expert.paligemma.eval()
         self.causal_transition_encoder.eval()
-        self.causal_transition_encoder.target_vision_encoder.eval()
+        target_vision_encoder = getattr(self.causal_transition_encoder, "target_vision_encoder", None)
+        if target_vision_encoder is not None:
+            target_vision_encoder.eval()
         return self
 
     @classmethod
@@ -626,15 +698,13 @@ class RobotWinZevaPolicy(nn.Module):
         zeva_config = None
         if zte_checkpoint is not None:
             zte_payload = torch.load(zte_checkpoint, map_location="cpu", weights_only=False)
-            if zte_payload.get("schema") not in {
-                "zeva-robotwin-zte-stage1-checkpoint-v4",
-                "zeva-robotwin-zte-stage1-checkpoint-v5",
-            }:
-                raise ValueError("Task-language deployment requires a Stage 1 v4/v5 checkpoint.")
-            zeva_config = ZevaConfig(**zte_payload["zte_config"])
-            # Pretrained weights are already present in the checkpoint; do not
-            # trigger a network/cache lookup while constructing the wrapper.
-            zeva_config = dataclasses.replace(zeva_config, vision_pretrained=False)
+            if zte_payload.get("schema") not in LEGACY_SCHEMAS | {V2_SCHEMA}:
+                raise ValueError("Task-language deployment requires a supported Stage 1 checkpoint.")
+            # The v2 checkpoint has extra encoder-only fields (three views,
+            # H15 and cross-attention settings).  The shared policy config is
+            # deliberately filtered by the schema-aware loader; the full v2
+            # config is reconstructed later by ``load_stage1_encoder``.
+            zeva_config = stage1_policy_config(zte_payload)
         wrapper = cls(
             foundation,
             MeanStdActionNormalizer.from_stats_file(handoff.statistics),
@@ -773,6 +843,7 @@ class RobotWinZevaPolicy(nn.Module):
         self._previous_image: torch.Tensor | None = None
         self._pending_normalized_actions: torch.Tensor | None = None
         self._cte_inference_params = None
+        self._stage1_state = None
         self._retrieved_task_ids: torch.Tensor | None = None
         self._retrieved_task_scores: torch.Tensor | None = None
         self._last_live_phase_token: torch.Tensor | None = None
@@ -788,6 +859,22 @@ class RobotWinZevaPolicy(nn.Module):
             self._memories = [self._new_memory() for _ in range(batch_size)]
         elif len(self._memories) != batch_size:
             raise ValueError("RoboTwin Zeva batch size changed without an episode reset.")
+
+    def _stage1_actions(self, actions: torch.Tensor) -> torch.Tensor:
+        """Keep the v2 encoder on the executed H15 prefix.
+
+        PI0.5 always predicts H50.  Only the first H15 is executed before the
+        next image/effect transition, while the legacy encoder historically
+        accepted a variable prefix.  Truncating only for v2 preserves the old
+        path and prevents a pending H50 chunk from violating v2's exact
+        transition contract.
+        """
+        if self._stage1_schema != V2_SCHEMA or actions.ndim < 3:
+            return actions
+        horizon = self._stage1_transition_horizon
+        if actions.shape[-2] > horizon:
+            return actions[..., :horizon, :]
+        return actions
 
     def _raw_task_embedding(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
         tokens = batch["observation.language.tokens"]
@@ -1381,10 +1468,15 @@ class RobotWinZevaPolicy(nn.Module):
         task_schema = self.task_token_projector(raw_task_embedding.to(projector_dtype))
 
         if self._previous_image is None:
-            phase_token, self._cte_inference_params = self.causal_transition_encoder.initialize_phase_state(
+            phase_token, state = self.causal_transition_encoder.initialize_phase_state(
                 image,
                 raw_goal_embedding,
             )
+            if self._stage1_schema == V2_SCHEMA:
+                self._stage1_state = state
+                self._cte_inference_params = None
+            else:
+                self._cte_inference_params = state
         else:
             if executed_actions is None:
                 if self._pending_normalized_actions is None:
@@ -1403,15 +1495,29 @@ class RobotWinZevaPolicy(nn.Module):
                     if actions_normalized
                     else self.action_normalizer.normalize(executed_actions)
                 )
-            causal, self._cte_inference_params = self.causal_transition_encoder.step(
-                self._previous_image,
-                normalized_actions,
-                image,
-                inference_params=self._cte_inference_params,
-            )
-            phase_token = causal.phase_token
+            normalized_actions = self._stage1_actions(normalized_actions)
+            if self._stage1_schema == V2_SCHEMA:
+                if self._stage1_state is None:
+                    raise RuntimeError("v2 Stage 1 state was not initialized before an H15 transition.")
+                causal, self._stage1_state = self.causal_transition_encoder.forward_step(
+                    self._previous_image,
+                    normalized_actions,
+                    image,
+                    self._stage1_state,
+                )
+                phase_token = causal.phase_token[:, -1]
+                causal_signal = causal.causal_signal[:, -1]
+            else:
+                causal, self._cte_inference_params = self.causal_transition_encoder.step(
+                    self._previous_image,
+                    normalized_actions,
+                    image,
+                    inference_params=self._cte_inference_params,
+                )
+                phase_token = causal.phase_token
+                causal_signal = causal.causal_signal
             for index, memory in enumerate(self._memories):
-                memory.update(phase_token[index], causal.causal_signal[index])
+                memory.update(phase_token[index], causal_signal[index])
 
         offline = self._offline_bank_batch(batch, phase_token)
         self._last_live_phase_token = phase_token.detach().clone()
@@ -1474,7 +1580,8 @@ class RobotWinZevaPolicy(nn.Module):
             finally:
                 self._clear_active_residuals()
         self._previous_image = robotwin_multiview_image(batch).detach().clone()
-        self._pending_normalized_actions = actions.detach().clone()
+        pending = actions.detach().clone()
+        self._pending_normalized_actions = self._stage1_actions(pending)
         return actions
 
     @torch.no_grad()
@@ -1655,7 +1762,7 @@ class RobotWinZevaPolicy(nn.Module):
         raw_goal_embedding = self._raw_goal_embedding(batch)
         causal = self.causal_transition_encoder(
             previous_image,
-            normalized_actions,
+            self._stage1_actions(normalized_actions),
             effect_image,
             raw_goal_embedding,
         )
@@ -1682,19 +1789,38 @@ class RobotWinZevaPolicy(nn.Module):
 
     def load_zte(self, path: str | Path) -> None:
         checkpoint = torch.load(path, map_location="cpu")
-        if checkpoint.get("schema") not in {
-            "zeva-robotwin-zte-stage1-checkpoint-v4",
-            "zeva-robotwin-zte-stage1-checkpoint-v5",
-        }:
-            raise ValueError("Formal Stage 2 requires a task-language Stage 1 v4/v5 ZTE checkpoint.")
-        checkpoint_config = checkpoint.get("zte_config", {})
-        expected_config = vars(self.zeva_config)
-        comparable_checkpoint = {key: value for key, value in checkpoint_config.items() if key != "vision_pretrained"}
-        comparable_expected = {key: value for key, value in expected_config.items() if key != "vision_pretrained"}
-        if comparable_checkpoint != comparable_expected:
-            raise ValueError("Stage 1 ZTE architecture differs from the RoboTwin Zeva policy.")
-        self.causal_transition_encoder.load_state_dict(checkpoint["model_state_dict"], strict=True)
-        self.causal_transition_encoder.requires_grad_(False).eval()
+        schema = checkpoint.get("schema")
+        if schema not in LEGACY_SCHEMAS | {V2_SCHEMA}:
+            raise ValueError("Unsupported RoboTwin Stage 1 ZTE checkpoint schema.")
+        declared = stage1_policy_config(checkpoint)
+        shared_fields = (
+            "action_dim",
+            "action_horizon",
+            "model_dim",
+            "phase_dim",
+            "signal_dim",
+            "task_dim",
+            "goal_dim",
+        )
+        mismatches = {
+            name: (getattr(self.zeva_config, name), getattr(declared, name))
+            for name in shared_fields
+            if getattr(self.zeva_config, name) != getattr(declared, name)
+        }
+        if mismatches:
+            raise ValueError(f"Stage 1 ZTE architecture differs from the RoboTwin policy: {mismatches!r}")
+        horizon = stage1_transition_horizon(checkpoint)
+        if horizon != 15:
+            raise ValueError("RoboTwin Stage 2 integration requires the fixed executed H15 contract.")
+        device = next(self.parameters()).device
+        encoder = load_stage1_encoder(checkpoint, device=device)
+        self.causal_transition_encoder = encoder.requires_grad_(False).eval()
+        self._stage1_schema = schema
+        self._stage1_transition_horizon = horizon
+        self._stage1_checkpoint_sha256 = _sha256_file(path)
+        # A checkpoint swap must not leave a previous episode's image/cache
+        # paired with the newly constructed encoder.
+        self.reset(scope="episode")
 
     def configure_full_finetune_stage2(self) -> list[nn.Parameter]:
         """Freeze ZTE and full-finetune PI0.5 plus Zeva, matching BehaviorVLA."""
@@ -2166,6 +2292,30 @@ class RobotWinZevaPolicy(nn.Module):
         }:
             raise ValueError("Unsupported Zeva RoboTwin Stage 3 checkpoint.")
         bank = RobotWinCausalBank.load(causal_bank, device=next(self.parameters()).device)
+        if self._stage1_schema is not None:
+            bank_payload = torch.load(causal_bank, map_location="cpu", weights_only=False)
+            if self._stage1_schema == V2_SCHEMA:
+                validate_stage1_v2_artifact_status(
+                    bank_payload,
+                    artifact_name="causal bank",
+                )
+            bank_schema = stage1_artifact_schema(bank.manifest)
+            if self._stage1_schema == V2_SCHEMA and bank_schema != V2_SCHEMA:
+                raise ValueError(
+                    "The v2 Stage 1 policy requires a causal bank with explicit "
+                    "stage1_checkpoint_schema=v2."
+                )
+            if bank_schema is not None and bank_schema != self._stage1_schema:
+                raise ValueError(
+                    "The causal bank was exported from a different Stage 1 encoder schema."
+                )
+            if self._stage1_checkpoint_sha256 is not None and bank.manifest.get(
+                "stage1_checkpoint_sha256"
+            ) != self._stage1_checkpoint_sha256:
+                raise ValueError("The causal bank was exported from a different Stage 1 checkpoint.")
+            bank_horizon = bank.manifest.get("causal_transition_horizon")
+            if bank_horizon is not None and int(bank_horizon) != self._stage1_transition_horizon:
+                raise ValueError("The causal bank transition horizon differs from Stage 1.")
         task_names = tuple(checkpoint["task_names"])
         if task_names != bank.task_names:
             raise ValueError("Stage 3 task table differs from the causal bank.")

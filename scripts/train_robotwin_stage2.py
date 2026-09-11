@@ -31,8 +31,13 @@ from openpi.zeva.robotwin_contract import ROBOTWIN_ACTION_HORIZON
 from openpi.zeva.robotwin_contract import ROBOTWIN_CAMERA_KEYS
 from openpi.zeva.robotwin_contract import RobotWinHandoff
 from openpi.zeva.robotwin_contract import prepare_robotwin_pi_image
+from openpi.zeva.stage1_checkpoint import LEGACY_SCHEMAS
+from openpi.zeva.stage1_checkpoint import V2_SCHEMA
+from openpi.zeva.stage1_checkpoint import stage1_transition_horizon
 from openpi.zeva.robotwin_policy import RobotWinZevaPolicy
 from openpi.zeva.robotwin_policy import gaussian_action_prior_nll
+from openpi.zeva.robotwin_policy import stage1_artifact_schema
+from openpi.zeva.robotwin_policy import validate_stage1_v2_artifact_status
 
 try:
     from scripts.train_robotwin_zte import FFmpegRoboTwinDataset
@@ -45,6 +50,11 @@ except ModuleNotFoundError:  # Direct `python scripts/...py` execution.
 UNTOUCHED_BEST_V1_MODEL_SHA256 = (
     "7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe"
 )
+
+LIVE_QUERY_SCHEMAS = frozenset({
+    "zeva-robotwin-live-queries-h15-v1",
+    "zeva-robotwin-live-queries-h15-v2",
+})
 
 
 @dataclasses.dataclass
@@ -269,8 +279,10 @@ class RobotWinStage2Dataset(Dataset):
         selected_task_set = set(self.selected_task_names)
         self.config = config
         cache = torch.load(live_queries, map_location="cpu")
-        if cache.get("schema") != "zeva-robotwin-live-queries-h15-v1":
-            raise ValueError("Stage 2A requires deployment-recurrent H15 live queries.")
+        if cache.get("schema") not in LIVE_QUERY_SCHEMAS:
+            raise ValueError("Stage 2A requires a supported deployment-recurrent H15 live-query cache.")
+        if stage1_artifact_schema(cache) == V2_SCHEMA:
+            validate_stage1_v2_artifact_status(cache, artifact_name="live-query cache")
         if tuple(cache["task_names"]) != self.task_names:
             raise ValueError("Live-query task ordering differs from the Stage 2 dataset.")
         self.live_records = cache["splits"][subset]
@@ -1106,14 +1118,30 @@ def _manifest(
         "output_residual",
     }
     zte_checkpoint = torch.load(args.zte_checkpoint, map_location="cpu")
-    if zte_checkpoint.get("schema") != "zeva-robotwin-zte-stage1-checkpoint-v5":
-        raise ValueError("Aligned Stage 2 requires a Stage 1 v5 checkpoint.")
-    if zte_checkpoint["manifest"].get("causal_transition_horizon") != 15:
-        raise ValueError("Aligned Stage 2 requires a causal transition horizon of 15.")
+    stage1_schema = zte_checkpoint.get("schema")
+    if stage1_schema not in LEGACY_SCHEMAS | {V2_SCHEMA}:
+        raise ValueError("Aligned Stage 2 requires a supported Stage 1 checkpoint.")
+    transition_horizon = stage1_transition_horizon(zte_checkpoint)
+    if transition_horizon != 15:
+        raise ValueError("RoboTwin Stage 2 integration requires the fixed executed H15 contract.")
+    bank_payload = torch.load(args.causal_bank, map_location="cpu", weights_only=False)
+    if stage1_schema == V2_SCHEMA:
+        validate_stage1_v2_artifact_status(bank_payload, artifact_name="causal bank")
     if bank.manifest["stage1_checkpoint_sha256"] != _sha256(args.zte_checkpoint):
         raise ValueError("The causal bank was not exported from the selected Stage 1 checkpoint.")
     if bank.manifest["statistics_sha256"] != _sha256(handoff.statistics):
         raise ValueError("The causal bank does not match the selected PI0.5 normalization.")
+    bank_stage1_schema = stage1_artifact_schema(bank.manifest)
+    if stage1_schema == V2_SCHEMA and bank_stage1_schema != V2_SCHEMA:
+        raise ValueError(
+            "Stage 2 v2 requires a causal bank with explicit "
+            "stage1_checkpoint_schema=v2."
+        )
+    if bank_stage1_schema is not None and bank_stage1_schema != stage1_schema:
+        raise ValueError("The causal bank was exported from a different Stage 1 encoder schema.")
+    bank_horizon = bank.manifest.get("causal_transition_horizon")
+    if bank_horizon is not None and int(bank_horizon) != transition_horizon:
+        raise ValueError("The causal bank transition horizon differs from the Stage 1 checkpoint.")
     return {
         "schema": (
             "zeva-robotwin-stage2-action-expert-control-manifest-v1"
@@ -1144,6 +1172,8 @@ def _manifest(
         "statistics_sha256": _sha256(handoff.statistics),
         "zte_checkpoint": str(Path(args.zte_checkpoint).resolve()),
         "zte_checkpoint_sha256": _sha256(args.zte_checkpoint),
+        "zte_checkpoint_schema": stage1_schema,
+        "causal_transition_horizon": transition_horizon,
         "zte_step": int(zte_checkpoint["step"]),
         "causal_bank": str(Path(args.causal_bank).resolve()),
         "causal_bank_sha256": _sha256(args.causal_bank),
@@ -1899,10 +1929,30 @@ def main(args: Args) -> None:
     config = policy.zeva_config
     adapter_manifest = Path(args.dataset_root) / "adapter.json"
     live_cache = torch.load(args.live_queries, map_location="cpu")
+    zte_for_live = torch.load(args.zte_checkpoint, map_location="cpu")
+    live_stage1_schema = stage1_artifact_schema(live_cache)
+    expected_stage1_schema = zte_for_live.get("schema")
+    if expected_stage1_schema not in LEGACY_SCHEMAS | {V2_SCHEMA}:
+        raise ValueError("Live queries reference an unsupported Stage 1 checkpoint schema.")
+    if expected_stage1_schema == V2_SCHEMA:
+        validate_stage1_v2_artifact_status(live_cache, artifact_name="live-query cache")
+    if expected_stage1_schema == V2_SCHEMA and live_stage1_schema != V2_SCHEMA:
+        raise ValueError(
+            "Stage 2 v2 requires live queries with explicit "
+            "stage1_checkpoint_schema=v2."
+        )
+    if live_stage1_schema is not None and live_stage1_schema != expected_stage1_schema:
+        raise ValueError("Live queries were exported from a different Stage 1 encoder schema.")
     if live_cache.get("zte_checkpoint_sha256") != _sha256(args.zte_checkpoint):
         raise ValueError("Live queries were not exported from the selected ZTE checkpoint.")
     if live_cache.get("statistics_sha256") != _sha256(handoff.statistics):
         raise ValueError("Live queries use different PI0.5 normalization statistics.")
+    live_horizon = live_cache.get("transition_horizon")
+    expected_horizon = stage1_transition_horizon(zte_for_live)
+    if expected_stage1_schema == V2_SCHEMA and live_horizon is None:
+        raise ValueError("Stage 2 v2 requires live queries with an explicit transition horizon.")
+    if live_horizon is not None and int(live_horizon) != expected_horizon:
+        raise ValueError("Live queries use a different Stage 1 transition horizon.")
     retrieval_checkpoint = torch.load(args.task_retrieval, map_location="cpu")
     if retrieval_checkpoint.get("causal_bank_sha256") != _sha256(args.causal_bank):
         raise ValueError("Task retrieval was not trained against the selected causal bank.")
