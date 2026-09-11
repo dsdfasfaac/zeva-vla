@@ -21,6 +21,10 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 
 "$python_bin" -c 'import torch, mamba_ssm, torchcodec; print("ZTE runtime:", torch.__version__, mamba_ssm.__version__, torchcodec.__version__, flush=True)'
+if [[ "${1:-}" == "--test" ]]; then
+  shift
+  exec "$python_bin" -m unittest "$@"
+fi
 if [[ "$processes" -eq 1 ]]; then
   exec "$python_bin" "$zeva_root/scripts/train_robotwin_zte_v2.py" "$@"
 fi

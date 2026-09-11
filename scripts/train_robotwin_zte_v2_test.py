@@ -2,10 +2,8 @@
 
 from types import SimpleNamespace
 
-import pytest
-
-torch = pytest.importorskip("torch")
-pytest.importorskip("accelerate")
+import unittest
+import torch
 
 from scripts.train_robotwin_zte_v2 import Args  # noqa: E402
 from scripts.train_robotwin_zte_v2 import GroupedTaskSampler  # noqa: E402
@@ -106,7 +104,7 @@ def test_action_loss_targets_the_next_h15_and_ignores_padding():
         valid_mask=valid_mask,
     )
     # t=0 predicts target action t=1 exactly; t=1 has no valid successor.
-    assert float(losses["action"]) == pytest.approx(0.0)
+    assert abs(float(losses["action"])) < 1e-8
 
 
 def test_transition_losses_ignore_right_padding():
@@ -142,4 +140,16 @@ def test_transition_losses_ignore_right_padding():
         args,
         valid_mask=torch.tensor([[True, True, False]]),
     )
-    assert float(losses["effect"]) == pytest.approx(0.0)
+    assert abs(float(losses["effect"])) < 1e-8
+
+
+def load_tests(loader, tests, pattern):
+    return unittest.TestSuite(
+        unittest.FunctionTestCase(value)
+        for name, value in globals().items()
+        if name.startswith("test_") and callable(value)
+    )
+
+
+if __name__ == "__main__":
+    unittest.main()

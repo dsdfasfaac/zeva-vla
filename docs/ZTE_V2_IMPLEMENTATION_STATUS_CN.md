@@ -2,6 +2,12 @@
 
 日期：2026-09-11。本文记录已执行的验证；设计文档中的目标不代表已经实现或通过。
 
+## 当前运行
+
+已在 aigc29 启动 `stage1-zte-v2-pilot-20260911d`，launcher PID `466477`，四张 H100（0/1/3/4），每卡 batch 8，global batch 32。固定 256 optimizer steps，warmup 32；在 step128/256 保存并跑完整 validation5。运行目录在下述统一结果根目录内，日志为 `train.log`。PID 仅是定位线索，每次监视必须检查实际进程，不能只相信 pid 文件。
+
+该预算是学习曲线与完整验证的 pilot，最多访问 8192 个 episode 样本，远未等同于 40/80 epochs。其职责是证明训练目标可学、观察 held-out 泛化与塌缩情况；不得因此自动放行 Stage2。Stage1 ZTE 使用原有 50-task 表征数据，后续 Base/ZeVA 的训练和正式比较仍在用户选定的 10 个任务上。
+
 ## 已验证的信息路径
 
 在 aigc29 H100、PyTorch 2.7.1+cu126、真实 Mamba CUDA 路径执行：
@@ -48,7 +54,7 @@ ZEVA_TEST_CUDA=1 python3 -m unittest openpi.zeva.transition_encoder_v2_test -v
 
 - 上述逐步路径仍是前缀重算参考实现，尚非固定计算量的 Mamba cache 部署实现。
 - 多 episode 批处理和跨卡训练已通过 smoke；整份 validation5 的完整覆盖还需全量运行核实。
-- 预训练视觉、TorchCodec 与真实 backward/保存已通过；断点续训的 RNG 和数据位置等价测试进行中。
+- 预训练视觉、TorchCodec 与真实 backward/保存已通过；从 step2 恢复到 step4，与连续训练的 463 个模型张量最大差异为 `1.4901161193847656e-08`，达到数值一致但不是 bitwise 相同。对应目录为 `stage1-zte-v2-resume-control-20260911c` 和 `stage1-zte-v2-resumed-20260911c`。
 - global SupCon、effect-shuffle negatives 与 variance/covariance 已接入；action intervention 和完整 Stage1 对照 probe 尚未完成。effect-shuffle negatives 不能独自证明因果识别。
 - 真实 PI0.5 的零初始化等价、首次可学习梯度及 correct/shuffled 归因尚待验证。
 - 没有新的正式训练完成结果或闭环成功率；v18 的 Base 43/80、ZeVA 43/80 仍是最近已完成的对应实验。
