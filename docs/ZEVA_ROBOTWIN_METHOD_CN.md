@@ -4,7 +4,7 @@
 > 目标：在已经完成 RoboTwin 训练的 PI0.5 上加入 ZeVA 的因果表征、记忆与检索能力，同时保持 PI0.5 的物理输入输出协议和基础能力。
 > 主线定义：旧 v19 已停止。当前主线是三流 ZTE v2 经真实 H15 recurrent state 和 train-only bank 接入现有 action-expert 侧双残差/Gaussian prior，再做匹配的十任务 Base/ZeVA 训练和闭环比较。允许 ZeVA 方法变体；辅助表征指标用于诊断，不再要求全部通过后才接 PI。before-VLM prefix smoke 不是当前选定接入方式。下文历史实验及原研究门槛不覆盖本段最新执行口径。
 
-当前 pipeline：Stage1 训练并选择 v2 checkpoint → 导出同源 bank/live queries、核对权重/协议/zero-init/H15 状态更新 → Stage2 冻结 ZTE/bank 和视觉语言 backbone，训练 action expert（`5e-6`）及 ZeVA 模块（`5e-5`），global batch 256 → 同 seed 配对闭环；只有发现需要针对性处理的缺陷才考虑 Stage3。Base 与 ZeVA 从指定 best-v1 出发，在相同十任务及匹配预算下训练；untouched best-v1 另作 Anchor。最终必须报告正常 Base 与 ZeVA 的真实成功率，不能通过弱化 Base 或挑测试 seed 制造优势。v2 接入仍在实现，不能将 pipeline 计划称为已完成训练。
+当前 pipeline：Stage1 训练并选择 v2 checkpoint → 导出同源 bank/live queries、核对权重/协议/zero-init/H15 状态更新 → Stage2 冻结 ZTE/bank 和视觉语言 backbone，训练 action expert（`5e-6`）及 ZeVA 模块（`5e-5`），global batch 256 → 同 seed 配对闭环；只有发现需要针对性处理的缺陷才考虑 Stage3。Base 与 ZeVA 从指定 best-v1 出发，在相同十任务及匹配预算下训练；untouched best-v1 另作 Anchor。最终必须报告正常 Base 与 ZeVA 的真实成功率，不能通过弱化 Base 或挑测试 seed 制造优势。截至2026-09-11 20:06，v2接入、修复版Stage1和全量产物已完成，匹配Base/ZeVA两个Stage2进程均实际运行；训练及闭环交付尚未完成。
 
 ## 1. 问题定义与设计原则
 

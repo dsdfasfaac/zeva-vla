@@ -6,6 +6,10 @@
 
 ## 当前运行
 
+20:06 更新：Base与ZeVA两个匹配Stage2进程均实际运行。Base PID710436，已保存step2500；ZeVA PID751929，GPU0/1/3/4、port29572，日志到step805，已保存step500。两者均5000steps、global256、AE LR5e-6；ZeVA新增模块LR5e-5、Gaussian NLL与prior residual dropout0.4，视觉语言backbone/ZTE/bank冻结。ZeVA最终产物为 `stage1-zte-v2-artifacts-scheduler-repaired-20260911`，完整26150/1350条、50tasks，retrieval train=98.4206%、validation=98.2963%，SHA连接核验完成。
+
+ZeVA step500 validation flow=0.0192441、retrieval=99.8471%，同一ZeVA模型内部residual-off对照的平均flow改善约2.61e-6；这不是独立训练Base与ZeVA的闭环比较，不能声称成功率提升。Base step2500 validation flow=0.0191362。零注入真实best-v1+选定step4096联合smoke通过，report=`advantage10-zeva-foundation-smoke-step4096-20260911.json`。ZeVA使用独立runtime目录 `/mnt/100T/users/dingxin/VLA/runtime/transformers5-runtime-zeva-20260911`，启动log=`advantage10-ztev2-zeva-launch-20260911-runtimefix2.log`；正在补充它与Base原生runtime的源码一致性核对，不能仅凭版本字符串断言数学实现一致。
+
 19:00 更新：修复后的Stage1已完成step4096，按完整validation loss选择不可变 `zte_v2_step_004096.pth`（SHA=`ce9402981b8e2f1ce597e2cb150b795ae246f84fb81b3bb72fae023a3decf899`）。最终1350条验证：loss=6.190151、task=96.8889%、order=88.6432%、effect cosine=0.375731、language consistency=0.851242。选择记录在修复run的 `checkpoint_selection.json`；不使用闭环结果选这个Stage1 checkpoint。
 
 普通Base已实际开训：`advantage10-ztev2-schedulerfix-pair-20260911/baseline`，launcher710436，GPU2/5/6/7、port29571，global256（16×acc4×4卡），AE LR5e-6，compile/TorchCodec启用。step500已保存8.8GB `model.safetensors` 和2.1GB `training_state.pt`，validation flow=0.0190017；未启用prior/retrieval对应NaN字段表示不适用，不是flow发散。Base manifest明确ZTE仅作历史接口/同源检查、不用于预测或loss，BIT/PIM关闭，仅action expert及其投影可训练。
