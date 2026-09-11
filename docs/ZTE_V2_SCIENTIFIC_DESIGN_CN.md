@@ -93,6 +93,21 @@ L_stage1 =
 - `L_causal_effect`：同一 action-effect 在不同相机增强下为正；打乱 action 或 after-effect 为 hard negative。
 - `L_variance_covariance`：防止 phase/causal token collapse。
 
+### 4.1 预测损失的单位不能只看外部权重
+
+[BehaviorVLA 官方 Stage1 代码](https://github.com/iLearn-Lab/ICML26-BehaviorVLA/blob/main/src/openpi/BehaviorEncoder/train.py) 的预测项为 squared error 沿坐标求和，再对有效时间步平均。历史 v2 pilot d/e/f 却使用所有坐标平均的 SmoothL1；相同 `0.2` 不代表同样强度，256 维效果预测在小误差区间的梯度因此小约 512 倍。
+
+新增显式 `prediction_loss_reduction=vector_mse`：
+
+```text
+L_forward_effect = mean_valid_transition(sum_feature((pred_delta - delta)^2))
+L_next_action    = mean_valid_transition,H15(sum_EEF16((pred_next - next)^2))
+```
+
+H15 是平均而不是求和，因此不会额外放大 15 倍；动作坐标和 handoff mean/std 仍原样保持。外部权重不变，旧 `mean_coordinate_huber` 配置与 checkpoint 保留可复现。该修正对齐损失 reduction，不声称整体方法与 BehaviorVLA 相同；后者预测未来视觉状态，我们预测已执行动作造成的视觉特征差。
+
+预注册下一组学习曲线为相同 phase 路径、paired sampler、seed1000、公共初始化、每卡 batch8×4 卡、4096 steps（约 5.01 epochs）、warmup256、每512步全量验证；只改变上述 reduction。两支都从相同初始化开始，不能把 256-step cosine 已结束的 checkpoint 偷换 schedule 后叫 exact-resume。该中间预算不代替完整 Stage1 gate；依据有效表征指标决定后续是否继续到更长预算。
+
 训练时随机执行 language masking 和 task-language permutation consistency：`e_causal` 对语言置换应近似不变，`z_phase` 对外观增强应稳定，`z_proto` 必须仍能由 sensorimotor 轨迹识别任务。
 
 ## 5. Stage1 准入门槛
@@ -102,7 +117,7 @@ Stage1 不再用总 loss 或固定 epoch 直接判定。必须同时满足：
 1. held-out episode 的 next-action MSE 优于 per-task mean 与旧 ZTE。
 2. held-out forward-effect MSE 优于 action-only predictor 与旧 ZTE。
 3. language-masked task retrieval Recall@1/Recall@5 优于旧 ZTE，且随机语言置换下降不超过 2 个百分点。
-4. phase probe 的 Spearman 相关和 pairwise ordering accuracy 优于旧 ZTE；该 progress 只用于离线 probe，不输入部署模型。
+4. 从实际导出的 phase token 训练同容量 frozen-feature probe，其 Spearman 相关和 pairwise ordering accuracy 优于旧 ZTE；不能拿独立 `progress_head(post_context)` 的输出冒充导出 phase 的质量。该 progress 只用于离线 probe，不输入部署模型。
 5. cross-task effect retrieval 优于 task-only、w/o-effect 和 shuffled-effect 三个对照。
 6. correct-effect、zero-effect、shuffled-effect 的 intervention 必须产生方向一致且显著的 causal-token/预测差异。
 7. batch forward 与 incremental H15 recurrence 在 dropout-off 时最大绝对误差小于 `1e-4`。

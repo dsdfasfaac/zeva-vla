@@ -37,6 +37,7 @@ ZEVA_TEST_CUDA=1 python3 -m unittest openpi.zeva.transition_encoder_v2_test -v
 | 首轮 step128 | 1350 | 7.037% | 53.026% | 0.00877 |
 | 首轮 step256 | 1350 | 7.481% | 53.099% | 0.00838 |
 | task-paired step256 | 1350 | 4.148% | 52.635% | 0.00850 |
+| phase-action f step256 | 1350 | 4.074% | 52.647% | 0.00849 |
 
 两次均未通过 Stage1。首轮仅约 0.31 epoch，不能据此否定表示结构；同时，完整采样审计定位到一个与目标函数直接冲突的问题：
 
@@ -53,8 +54,11 @@ ZEVA_TEST_CUDA=1 python3 -m unittest openpi.zeva.transition_encoder_v2_test -v
 |---|---:|---:|---:|
 | 原采样 d | 30/100 | +2.21% | -4.59% |
 | task-paired e | 39/100 | +1.76% | -6.49% |
+| phase-action f | 39/100 | -3.72% | -6.49% |
 
-原型检索与上表的分类头 task probe 是不同指标。检索点估计改善尚无 episode-group 显著性证据；action/effect 没有同步改善。各模型 EMA target 不同，不能直接用两者 effect 绝对 MSE 比较表征质量。两份 `representation_diagnostic_step256.json` 均为 diagnostic-only，不能放行 Stage2。
+原型检索与上表的分类头 task probe 是不同指标。检索点估计改善尚无 episode-group 显著性证据；action/effect 没有同步改善。各模型 EMA target 不同，不能直接用两者 effect 绝对 MSE 比较表征质量。这些 `representation_diagnostic_step256.json` 均为 diagnostic-only，不能放行 Stage2。
+
+f 也已完成（约 9 分 16 秒），其独立诊断仍为 diagnostic-only。导出 phase 的动作路径接通并未在 0.31 epoch 短预算内改善动作预测；不据此声称新路径更优。以上 order 指标来自独立 `progress_head(post_context)`，不是对导出 phase token 的 frozen linear probe，后者正在单独设计。
 
 ### Next-action 到 phase 的梯度审计
 
@@ -66,13 +70,21 @@ Luna worker 在真实 H100、step128 checkpoint 上仅对 next-action loss 反�
 
 实现 commit `a10b6c9`：真实 H100/Mamba 路径 13/13 tests 通过（3.837 秒），包括同 seed 公共权重逐张量一致、新路径 phase/post 梯度、当前 after 可见与未来不可见、cache 等价。旧 task-paired step256 的 463 个 state keys 以 `strict=True` 加载通过，旧 config 缺省为 `pre`。新实验必须从初始化训练，不能把 pre checkpoint 伪装成 phase resume。
 
-`stage1-zte-v2-pilot-phaseaction-20260911f` 已由 launcher `495287` 在 aigc29 启动，配置为上述唯一监督路径变化。日志/checkpoint/独立诊断与旧 e 对照分目录保存；训练完成后必须复核实际进程及 step256，不依赖 pid 文件判断状态。
+`stage1-zte-v2-pilot-phaseaction-20260911f` 已在 aigc29 完成，launcher `495287` 已退出，step256 checkpoint 与独立诊断均存在。配置为上述唯一监督路径变化，日志/checkpoint/独立诊断与旧 e 对照分目录保存。
 
 f 的原始 manifest 存在文字元数据勘误：旧 `information_flow.jepa_and_action_prediction` 未区分两条 head；其 `zte_config.action_prediction_context=phase` 与实际代码正确。保留原始 manifest 与源文件 hash，不事后改写实验档案。后续 trainer 已改为分别记录 forward-effect 与 next-action 信息边界；这是描述修正，不改变 f 的计算或权重。
 
 该元数据修正与原有 sampler/mask/next-H15 tests 在隔离副本中 6/6 通过（不改写运行中 f 的 source）。GitHub `publish` 可读，但本次 HTTPS push 被 403 拒绝，SSH 也无可用 publickey；本地提交不等于已上传，需恢复仓库写权限后再推送。
 
 恢复兼容补充：trainer 仅为历史 checkpoint 缺少的 `action_prediction_context` 补上已知的 `pre` 默认值，其他缺失设置不继承当前默认值。这样保留旧 pre 配置的语义兼容检查，同时仍拒绝 pre→phase、改变步数/损失/数据顺序的所谓 exact-resume。相关 sampler/targets/manifest/migration 共 7/7 unit tests 在隔离副本通过；这不等于已经执行一次旧长跑 checkpoint 的完整恢复训练。
+
+### 损失梯度与 reduction 的归因
+
+`zte-v2-objective-gradient-audit-pilot-e-step256-gpu2-20260911.json` 对固定 paired sampler 的 4 条真实 train95 episode 做无更新的 eval-mode 梯度审计。pre-fusion 上 action/effect/global/local/causal 的已加权梯度范数均值分别为 0.01334 / 0.002842 / 2.343 / 2.132 / 2.529；不是只比较 loss 数值。该 batch2 没有正常 batch8 的不同任务负样本构成，不能直接泛化，正在扩展正常 batch。
+
+对应的代码级差异已定位：[官方 BehaviorVLA](https://github.com/iLearn-Lab/ICML26-BehaviorVLA/blob/main/src/openpi/BehaviorEncoder/train.py) 对预测坐标先 sum 再平均有效时间；旧 v2 为 coordinate-mean SmoothL1。新 `prediction_loss_reduction=vector_mse` 保留外部权重，MSE sum 最后一维、平均有效 transition 与 H15。单测验证 256 维小误差梯度相对旧值为 512 倍、EEF16 为 32 倍，复制 H15 为 H30 不额外改变 loss，padding 不产生梯度。8/8 trainer tests 已通过。以上倍数是确定性小误差测试结论；真实数据存在 Huber 线性区间，不能机械声称所有实际梯度都精确放大这些倍数。
+
+旧 checkpoint 的 args 缺省补 `mean_coordinate_huber`，明确拒绝将 reduction 改变伪装成 exact-resume。新增控制训练 launcher 预注册 4096 steps（约 5.01 epochs），两支 phase 模型除 prediction reduction 外一致；启动状态以实时进程和独立目录为准，launcher 存在不等于已经开训。
 
 ## 已完成的真实数据 smoke
 

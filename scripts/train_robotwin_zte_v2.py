@@ -75,6 +75,7 @@ class Args:
     executed_action_steps: int = 15
     # Explicit experiment axis; old checkpoints/configurations remain pre.
     action_prediction_context: str = "pre"
+    prediction_loss_reduction: str = "mean_coordinate_huber"
     learning_rate: float = 1e-4
     vision_learning_rate: float = 1e-5
     weight_decay: float = 1e-4
@@ -397,6 +398,21 @@ def _masked_mean(value: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return (value * expanded).sum() / expanded.sum().clamp_min(1.0)
 
 
+def prediction_loss(predicted: torch.Tensor, target: torch.Tensor, mask: torch.Tensor, reduction: str) -> torch.Tensor:
+    """Average valid times, optionally retaining squared-vector error units.
+
+    For H15 actions, vector_mse sums EEF coordinates but averages the 15
+    substeps; changing H must not multiply the prediction objective.
+    """
+    if reduction == "mean_coordinate_huber":
+        error = F.smooth_l1_loss(predicted, target, reduction="none")
+    elif reduction == "vector_mse":
+        error = F.mse_loss(predicted, target, reduction="none").sum(dim=-1)
+    else:
+        raise ValueError(f"Unknown prediction loss reduction: {reduction}")
+    return _masked_mean(error, mask)
+
+
 def temporal_phase_contrastive_loss(
     first: torch.Tensor,
     second: torch.Tensor,
@@ -494,9 +510,8 @@ def compute_v2_losses(
         episode_mask = valid_mask.any(dim=1)
     target_action = outputs.target_action
     predicted_action = outputs.predicted_action[..., : target_action.shape[-2], :]
-    effect = _masked_mean(
-        F.smooth_l1_loss(outputs.predicted_effect, outputs.target_effect, reduction="none"),
-        valid_mask,
+    effect = prediction_loss(
+        outputs.predicted_effect, outputs.target_effect, valid_mask, args.prediction_loss_reduction,
     )
     # ``predicted_action[t]`` is explicitly a next-action auxiliary target:
     # it must be compared with the executed H15 chunk at t+1.  The final
@@ -505,13 +520,10 @@ def compute_v2_losses(
         action = _zero_loss(predicted_action)
     else:
         next_mask = valid_mask[:, :-1] & valid_mask[:, 1:]
-        action = _masked_mean(
-            F.smooth_l1_loss(
-                predicted_action[:, :-1],
-                target_action[:, 1:, : predicted_action.shape[-2], :],
-                reduction="none",
-            ),
-            next_mask,
+        action = prediction_loss(
+            predicted_action[:, :-1],
+            target_action[:, 1:, : predicted_action.shape[-2], :],
+            next_mask, args.prediction_loss_reduction,
         )
     # Task supervision is intentionally taken from the language-masked pass;
     # otherwise a strong PI0.5 goal embedding can solve the probe without a
@@ -807,6 +819,7 @@ def _resume_metadata(checkpoint: dict[str, Any]) -> tuple[dict[str, Any], dict[s
     previous_args = dict(checkpoint["manifest"]["train_args"])
     previous_config.setdefault("action_prediction_context", "pre")
     previous_args.setdefault("action_prediction_context", "pre")
+    previous_args.setdefault("prediction_loss_reduction", "mean_coordinate_huber")
     return previous_config, previous_args
 
 

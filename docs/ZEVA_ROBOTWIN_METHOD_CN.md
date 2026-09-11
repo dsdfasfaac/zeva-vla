@@ -101,6 +101,8 @@ noisy action embedding + prior ──► flow denoising ──► EEF16 [50,16]
 
 2026-09-11 的当前监督路径对照：forward-effect 从执行前 `pre_context` 预测，严格隐藏当前 after-image；新增 `action_prediction_context=phase` 从实际导出的 normalized `z_phase(t)` 预测下一段 H15。后者在当前 H15 已执行完毕后才使用 `s_{t+15}`，不得读取下一动作或未来图像。旧 pilot 使用 `pre`，其 next-action loss 对 phase head 无梯度；新路径尚无能力验收结论。BehaviorVLA 官方代码的 action predictor 读取 shifted-action stream `h_a`，本变体不是其逐行复制。详细已执行证据见 `docs/ZTE_V2_IMPLEMENTATION_STATUS_CN.md`。
 
+同日损失单位审计发现：BehaviorVLA 预测损失是坐标平方误差求和后取有效时间均值，而旧 v2 将所有坐标的 SmoothL1 取均值。新增 `vector_mse` 对照保留外部权重，只修正为沿效果特征/EEF16 坐标求和，沿有效 transition/H15 平均。256 维效果预测的小误差梯度因此恢复到原 reduction 对应的尺度；这不是闭环收益证明。后续以同初始化、同 4096-step 预算的旧 reduction / vector-MSE 学习曲线检验，而不是按测试成功率搜索损失权重。
+
 **以下仅描述已停止的 v18 selector，不属于上图当前方法：** candidate-0 在每次 replan 先消耗正常 Base RNG；保存其后的 RNG 状态，再切到独立 proposal RNG 生成三个额外候选，最后恢复 Base RNG。故选择 candidate-0 时，本次动作与未来 Base 随机流都严格一致。medoid 是四个候选中到其余候选平均 H15 距离最小的实际样本，不做坐标平均。`0.85` 来自 train phase-bank 最大余弦相似度的第 1 百分位，在闭环结果出现前固定。离线指标只决定能否进入闭环，最终唯一判据是相同 seed/instruction/RNG 下的成功率。
 
 旧表示审计已经完成：11,679 个决策样本来自 4,529 个 episode group，使用按 task/episode 分组且无 group overlap 的 5-fold。action-only AUC 为 `0.5563`，旧 Stage1+action 为 `0.5416`，PI-VLM+action 为 `0.5473`，联合表征为 `0.5375`；四种 selector 的 expert-MSE 都劣于 candidate-0。结论是 **discard old Stage1 for candidate ranking**，不是否定 ZTE。这个反例现在成为 ZTE v2 必须超过的 frozen baseline。下文 v11--v19 的训练公式、残差校准和历史目录仅保留作失败分析；凡与新规格冲突者均不是当前方法。

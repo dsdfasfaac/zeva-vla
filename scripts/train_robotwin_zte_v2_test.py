@@ -13,6 +13,7 @@ from scripts.train_robotwin_zte_v2 import collate_robotwin_episodes  # noqa: E40
 from scripts.train_robotwin_zte_v2 import compute_v2_losses  # noqa: E402
 from scripts.train_robotwin_zte_v2 import _manifest
 from scripts.train_robotwin_zte_v2 import _resume_metadata
+from scripts.train_robotwin_zte_v2 import prediction_loss
 from openpi.zeva.transition_encoder_v2 import TransitionEncoderV2Config
 
 
@@ -40,13 +41,36 @@ def test_resume_only_migrates_documented_legacy_pre_context_default():
     legacy = {"zte_config": {"model_dim": 256}, "manifest": {"train_args": {"steps": 256}}}
     config, args = _resume_metadata(legacy)
     assert config == {"model_dim": 256, "action_prediction_context": "pre"}
-    assert args == {"steps": 256, "action_prediction_context": "pre"}
+    assert args == {"steps": 256, "action_prediction_context": "pre", "prediction_loss_reduction": "mean_coordinate_huber"}
     assert "action_prediction_context" not in legacy["zte_config"]
     current = {
         "zte_config": {"action_prediction_context": "phase"},
-        "manifest": {"train_args": {"action_prediction_context": "phase"}},
+        "manifest": {"train_args": {"action_prediction_context": "phase", "prediction_loss_reduction": "vector_mse"}},
     }
     assert _resume_metadata(current) == (current["zte_config"], current["manifest"]["train_args"])
+
+
+def test_vector_prediction_loss_sums_coordinates_but_averages_h15_and_valid_times():
+    mask = torch.tensor([[True, False]])
+    action = torch.full((1, 2, 15, 16), 0.5, requires_grad=True)
+    target = torch.zeros_like(action)
+    vector = prediction_loss(action, target, mask, "vector_mse")
+    huber = prediction_loss(action, target, mask, "mean_coordinate_huber")
+    assert float(vector) == 4.0  # 16 coordinates * 0.5^2; not multiplied by H15.
+    assert float(huber) == 0.125
+    vector_grad = torch.autograd.grad(vector, action)[0]
+    huber_grad = torch.autograd.grad(huber, action)[0]
+    torch.testing.assert_close(vector_grad, 32 * huber_grad)
+    assert torch.count_nonzero(vector_grad[:, 1]) == 0
+    longer = action.detach().repeat_interleave(2, dim=2)
+    longer[:, 1] = 1e6
+    torch.testing.assert_close(prediction_loss(longer, torch.zeros_like(longer), mask, "vector_mse"), vector)
+
+    effect = torch.full((1, 2, 256), 0.5, requires_grad=True)
+    old = prediction_loss(effect, torch.zeros_like(effect), mask, "mean_coordinate_huber")
+    new = prediction_loss(effect, torch.zeros_like(effect), mask, "vector_mse")
+    assert float(new) == 64.0
+    torch.testing.assert_close(torch.autograd.grad(new, effect)[0], 512 * torch.autograd.grad(old, effect)[0])
 
 
 def _episode(length: int, *, valid: bool = True):

@@ -33,5 +33,6 @@ if [[ "$processes" -eq 1 ]]; then
   exec "$python_bin" "$zeva_root/scripts/train_robotwin_zte_v2.py" "$@"
 fi
 exec "$python_bin" -m accelerate.commands.launch --multi_gpu \
+  --main_process_port "${ZEVA_MAIN_PROCESS_PORT:-29500}" \
   --num_machines 1 --num_processes "$processes" --mixed_precision no \
   "$zeva_root/scripts/train_robotwin_zte_v2.py" "$@"

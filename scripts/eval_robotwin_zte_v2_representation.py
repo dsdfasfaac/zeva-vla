@@ -600,6 +600,7 @@ def main(args: Args) -> None:
                 },
             },
             "phase_ordering": {
+                "readout_source": "progress_head(post_context), not an exported-phase frozen probe",
                 "passed": None,
                 "above_chance": phase_pair_total > 0 and phase_pair_correct / phase_pair_total > 0.5,
                 "required_comparison": "old-ZTE phase probe and episode-group confidence intervals",
@@ -631,6 +632,7 @@ def main(args: Args) -> None:
             },
         },
         "mandatory_missing_gates": [
+            "exported_phase_frozen_linear_action_and_progress_probes_not_run",
             "old_zte_comparable_probe_not_run_by_this_report",
             "action_only_forward_effect_predictor_comparison_not_run",
             "cross_task_effect_retrieval_and_ablation_comparisons_not_run",

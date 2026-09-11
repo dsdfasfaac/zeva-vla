@@ -97,6 +97,16 @@ training-mode test. These are correctness tests, not a Stage 1 capability pass.
 The v2 smoke entry point is `scripts/run_robotwin_zte_v2.sh`; the historical
 Stage 1/2 commands below do not launch the redesigned method.
 
+The active loss audit found another non-equivalence with BehaviorVLA: its
+prediction losses sum coordinates before averaging valid times, while earlier
+v2 pilots averaged coordinate-wise SmoothL1. The explicit `vector_mse` control
+now sums feature/EEF coordinates and averages valid transitions (and H15 for
+actions), retaining the same external weights. It is not a capability pass.
+The matched 4096-step (about five-epoch) loss-control launcher is
+`scripts/launch_robotwin_zte_v2_loss_control.sh`; each simultaneous run requires
+its own fresh output directory, four GPUs, and distributed port. Full details
+and mathematical units are recorded in the scientific-design document.
+
 ## H100 runtime
 
 Use the exact LeRobot source and dependency overlays contained in the handoff.
