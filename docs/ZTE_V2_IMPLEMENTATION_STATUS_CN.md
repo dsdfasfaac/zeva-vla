@@ -6,6 +6,8 @@
 
 ## 当前运行
 
+2026-09-12 00:18（北京时间）复核：aigc29、31、32、24、15、01、14、28的全部64张GPU均约72–78GiB占用、利用率100%；不抢占其他作业，恢复尚未启动。Base已完成，ZeVA仍以完整4500为恢复源；正在离线准备严格校验旧manifest与恢复记录的选步兼容逻辑，不能绕过科学配置和来源校验。README和方法纵览已同步中断状态，本轮无正式成功率。
+
 23:30 更新：ZeVA未正常完成5000步。原launcher751929已退出，runtimefix2日志显示23:07:47 rank2收到SIGTERM（exit -15），最后完整checkpoint为4500。信号来源尚未查明，不将其误报为OOM或模型发散。正在检查资源与恢复条件，计划从完整4500保留model/adapter/optimizer/scheduler补齐剩余预算；当前Stage2 checkpoint未保存完整RNG，若恢复须明确为非bit-exact continuation。
 
 自动waiter另有自匹配bug：`ps|awk`把含训练脚本字符串的awk自身当成训练worker，因而无法退出等待。修复9fd3c72限定Python进程并通过回归测试；已仅停止旧waiter823924/823926，原eval目录仅log/state，无选步或rollout结果，完整保留。恢复真实训练进程后需新建waiter，不能把旧等待状态当作评测已运行。aigc29当时显存高占用但compute进程列表为空，未重置GPU或停止其他作业。

@@ -167,9 +167,13 @@ and trains the PI action expert (LR `5e-6`) plus ZeVA modules (LR `5e-5`) with
 global batch 256. Representation and shuffled-input probes are diagnostics,
 not mandatory all-pass prerequisites. Stage 2 must be followed by paired
 closed-loop evaluation. Stage 3 is optional and addresses an observed failure,
-not an automatic extra stage. As of 2026-09-11 20:06, the v2 integration and
-full artifact export have passed their engineering checks and both matched
-Base/ZeVA Stage2 jobs are running. The current entry point is
+not an automatic extra stage. As of 2026-09-12 00:18 (China time), the v2 integration and
+full artifact export have passed their engineering checks. Base has completed
+5,000 steps; ZeVA was interrupted by an unexplained SIGTERM, with its last
+complete checkpoint at step 4,500. No recovery is running: all eight authorized
+hosts are GPU-busy. Recovery must retain model/adapter/optimizer/scheduler state;
+because this Stage2 checkpoint does not save RNG state, it is not bit-exact.
+The fresh-run entry point is
 `scripts/train_robotwin_advantage10_ztev2.sh`; historical commands below are
 not this experiment. Training and closed-loop evaluation are not yet complete.
 
