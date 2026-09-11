@@ -6,6 +6,12 @@
 
 ## 当前运行
 
+18:12 更新：调度修复 `b4fbb0e` 已通过31项测试并实际补训。新目录 `stage1-zte-v2-phase-vector-mse-4096-20260911h-scheduler-repair-20260911i`，launcher `672753`，从旧step1024保留权重/optimizer/RNG，但显式重设 scheduler 到 global step1024；manifest 标记 `non_exact_scheduler_repaired_continuation`，不是 exact resume。step1536 的 scheduler.last_epoch=1536、LR=`[6.913417e-6,6.913417e-5]`，确认恢复了有效学习。最新step2560完整1350条验证：task=**96.1481%**、order=**87.3814%**、effect cosine=**0.350909**、language consistency=**0.848188**，四项均达到配置中的诊断参考；不把这个结果等同闭环成功率。
+
+旧临时候选step2048的全量导出已完成：`stage1-zte-v2-artifacts-step2048-20260911`，26150 train +1350 validation、50tasks、`usable_for_training=true`，checkpoint SHA=`d3d21c0acac9855a0a06311472d9ad773d914b57df311cf2648bafa9bc14bc5d`，task-language retrieval train=97.8891%、validation=97.7037%。为避免用已明显落后的表征启动ZeVA长训，**ZeVA正式训练改用补训完成后选择的不可变checkpoint及重新导出的同源bank/live/retrieval**；旧产物保留作工程验证与Base的无记忆数据接口依赖，不静默替换任何权重。
+
+已安排先在空闲4卡启动普通Base，另4卡完成Stage1补训后用于最终导出；Base与ZeVA保持同best-v1、十任务、5000steps、global256和相同物理协议。Base关闭全部ZeVA注入，其无记忆训练不得依赖所挂载ZTE/bank的内容；该性质需在启动审计确认。此处是启动安排，不代表Base已推进optimizer steps。
+
 17:09 更新：恢复进程已结束并保存 step4096，但 checkpoint 审计发现 **学习率调度计数错误**，不能把这轮称为正常完成5epochs。保存的 `(global step, scheduler.last_epoch, LR)` 为 `(512,2048,[5e-6,5e-5])`、`(1024,4096,[0,0])`、`(2048,8192,[0,0])`、`(4096,16384,[0,0])`。Accelerate 包装导致每个 global step 推进4次，step1024 后无有效参数学习；后续 EMA 收敛使指标几乎不变。正在修复为每个 global step 只推进一次，并从 step1024 做显式 scheduler-repair continuation；这种改变学习率状态的补训不能称为 exact resume。
 
 现有 checkpoint 中 step2048 的完整 validation loss 最低（6.957496039，和末步6.957496073几乎相同），仅选为**已冻结的临时 PI 接入候选**，不是证明它最能提高闭环成功率。其 task probe=90.2222%、order=76.9403%、effect cosine=0.183846。全量 bank/live 导出与同源 task-language retrieval 将使用这个不可变 step 文件；后续修复产生的新 ZTE 不能静默替换对应 bank 或 policy 的权重。
