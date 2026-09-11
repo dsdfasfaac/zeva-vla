@@ -4,8 +4,12 @@ This module deliberately does not modify :mod:`transition_encoder`.  The v2
 encoder is a small, self-contained research implementation with an explicit
 information-flow contract:
 
-* ``pre_context`` and the JEPA/next-action heads see the observation before a
-  transition and its executed H15 action chunk, but never ``images_after``;
+* ``pre_context`` and the JEPA/forward-effect head see the observation before
+  a transition and its executed H15 action chunk, but never ``images_after``;
+  the next-action head defaults to that same pre-transition context.  An
+  opt-in ``action_prediction_context="phase"`` variant instead consumes only
+  the exported, normalized post-transition ``phase_token``; this is for the
+  next replanning boundary and does not change the forward-effect path;
 * ``causal_signal`` is produced after a post-transition effect stream has
   consumed the EMA visual effect ``phi(s_{t+1}) - phi(s_t)``;
 * the H15 action chunk is encoded as an ordered token sequence.  There is no
@@ -22,7 +26,7 @@ PI0.5 adapters do not need to infer which representation they are receiving.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from torch import nn
@@ -69,6 +73,10 @@ class TransitionEncoderV2Config:
     vision_pretrained: bool = True
     ema_decay: float = 0.99
     use_effect_stream: bool = True
+    # ``pre`` preserves the original checkpoint tensor shapes and semantics.
+    # ``phase`` is an explicitly post-H15 replanning objective: its action
+    # head receives only the normalized exported phase token.
+    action_prediction_context: Literal["pre", "phase"] = "pre"
     use_mamba: bool = True
     goal_dropout: float = 0.25
     vision_microbatch_size: int = 16
@@ -233,6 +241,11 @@ class CausalTransitionEncoderV2(nn.Module):
         self.config = config
         if config.action_horizon < config.executed_action_steps:
             raise ValueError("action_horizon must be >= executed_action_steps.")
+        if config.action_prediction_context not in ("pre", "phase"):
+            raise ValueError(
+                "action_prediction_context must be 'pre' or 'phase', "
+                f"got {config.action_prediction_context!r}."
+            )
         if config.num_views != 3:
             raise ValueError("RoboTwin v2 requires the head/left-wrist/right-wrist three-view contract.")
         if config.model_dim % config.cross_attention_heads:
@@ -322,11 +335,19 @@ class CausalTransitionEncoderV2(nn.Module):
             nn.SiLU(),
             nn.Linear(config.model_dim, config.model_dim),
         )
+        # Always initialize the legacy-shaped head first.  This keeps all
+        # subsequent shared parameters bitwise identical between ``pre`` and
+        # ``phase`` models created with the same seed.  The optional phase
+        # input projection is initialized in a forked RNG context so adding
+        # this experiment does not shift global initialization state.
         self.predicted_action_head = nn.Sequential(
             nn.Linear(config.model_dim, config.model_dim),
             nn.SiLU(),
             nn.Linear(config.model_dim, config.executed_action_steps * config.action_dim),
         )
+        if config.action_prediction_context == "phase":
+            with torch.random.fork_rng(devices=[]):
+                self.predicted_action_head[0] = nn.Linear(config.phase_dim, config.model_dim)
         self.phase_head = nn.Sequential(
             nn.Linear(config.model_dim, config.model_dim),
             nn.SiLU(),
@@ -598,7 +619,9 @@ class CausalTransitionEncoderV2(nn.Module):
 
         pre_context = self.pre_fusion(torch.cat([visual_context, action_context], dim=-1))
         # The effect query is post-transition by construction.  It never feeds
-        # ``pre_context`` or either prediction head.
+        # ``pre_context`` or the forward-effect head.  The optional phase
+        # action head receives only the normalized exported phase token below;
+        # it never receives a post-context bypass.
         effect_query = effect_transitions.flatten(0, 1).unsqueeze(1)
         keys = torch.stack([visual_context, action_context], dim=2).flatten(0, 1)
         effect_context, _ = self.effect_to_pre(effect_query, keys, keys)
@@ -606,13 +629,18 @@ class CausalTransitionEncoderV2(nn.Module):
         post_context = self.post_fusion(torch.cat([effect_context, pre_context], dim=-1))
 
         predicted_effect = self.predicted_effect_head(pre_context)
-        predicted_action = self.predicted_action_head(pre_context).view(
+        phase_token = F.normalize(self.phase_head(post_context), dim=-1)
+        action_prediction_input = (
+            pre_context
+            if self.config.action_prediction_context == "pre"
+            else phase_token
+        )
+        predicted_action = self.predicted_action_head(action_prediction_input).view(
             batch_size,
             sequence_length,
             self.config.executed_action_steps,
             self.config.action_dim,
         )
-        phase_token = F.normalize(self.phase_head(post_context), dim=-1)
         causal_signal = F.normalize(self.causal_head(post_context), dim=-1)
         causal_target_signal = F.normalize(self.effect_target_projector(target_effect), dim=-1)
         task_embedding = F.normalize(self.task_head(post_context), dim=-1)
@@ -758,6 +786,10 @@ class CausalTransitionEncoderV2(nn.Module):
         keys = torch.cat([visual_context, action_context], dim=1)
         effect_context, _ = self.effect_to_pre(effect_query, keys, keys)
         post = self.post_fusion(torch.cat([effect_context + effect_query, pre], dim=-1))
+        phase_token = F.normalize(self.phase_head(post), dim=-1)
+        action_prediction_input = (
+            pre if self.config.action_prediction_context == "pre" else phase_token
+        )
         task = F.normalize(self.task_head(post), dim=-1)
         state.task_sum = task[:, 0] if state.task_sum is None else state.task_sum + task[:, 0]
         state.transition_count += 1
@@ -765,13 +797,15 @@ class CausalTransitionEncoderV2(nn.Module):
         output = TransitionEncodingV2(
             global_prompt=pooled,
             global_context=torch.cat([pooled, state.goal_embedding.to(dtype=pooled.dtype)], dim=-1),
-            phase_token=F.normalize(self.phase_head(post), dim=-1),
+            phase_token=phase_token,
             causal_signal=F.normalize(self.causal_head(post), dim=-1),
             phase_progress=self._monotonic_progress(post),
             task_embedding=task,
             predicted_effect=self.predicted_effect_head(pre),
             target_effect=target_effect,
-            predicted_action=self.predicted_action_head(pre).view(batch, 1, self.config.executed_action_steps, self.config.action_dim),
+            predicted_action=self.predicted_action_head(action_prediction_input).view(
+                batch, 1, self.config.executed_action_steps, self.config.action_dim
+            ),
             target_action=actions,
             causal_target_signal=F.normalize(self.effect_target_projector(target_effect), dim=-1),
             pre_context=pre,

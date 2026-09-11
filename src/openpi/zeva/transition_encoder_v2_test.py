@@ -42,6 +42,16 @@ class InformationFlowTest(unittest.TestCase):
             self.goal, **kwargs,
         )
 
+    def make_context_model(self, action_prediction_context):
+        config = TransitionEncoderV2Config(
+            model_dim=16, phase_dim=8, signal_dim=8, task_dim=8, goal_dim=12,
+            num_mamba_layers=1, image_size=8, dropout=0.0,
+            vision_pretrained=False, use_mamba=self.device == "cuda", task_count=3,
+            action_prediction_context=action_prediction_context,
+        )
+        with patch("openpi.zeva.transition_encoder_v2.LightweightVisionEncoder", TinyVision):
+            return CausalTransitionEncoderV2(config).to(self.device).eval()
+
     def test_after_target_cannot_leak_into_forward_prediction(self):
         left = self.run_model()
         right = self.run_model(after=self.after.flip(1))
@@ -63,6 +73,76 @@ class InformationFlowTest(unittest.TestCase):
         left = self.run_model()
         right = self.run_model(actions=self.actions.flip(2))
         self.assertGreater((left.pre_context - right.pre_context).abs().max().item(), 1e-5)
+
+    def test_pre_and_phase_initialization_only_differs_in_phase_input_layer(self):
+        torch.manual_seed(73)
+        pre = self.make_context_model("pre")
+        torch.manual_seed(73)
+        phase = self.make_context_model("phase")
+        for name, value in pre.state_dict().items():
+            if name.startswith("predicted_action_head.0."):
+                continue
+            torch.testing.assert_close(value, phase.state_dict()[name], rtol=0, atol=0)
+        self.assertEqual(pre.predicted_action_head[0].in_features, 16)
+        self.assertEqual(phase.predicted_action_head[0].in_features, 8)
+        torch.testing.assert_close(
+            pre.predicted_action_head[2].weight,
+            phase.predicted_action_head[2].weight,
+            rtol=0,
+            atol=0,
+        )
+
+    def test_phase_action_head_uses_exported_phase_token_and_gets_gradient(self):
+        model = self.make_context_model("phase")
+        captured = {}
+
+        def capture_input(_module, inputs):
+            captured["input"] = inputs[0]
+
+        handle = model.predicted_action_head.register_forward_pre_hook(capture_input)
+        output = model(self.before, self.actions, self.after, self.goal)
+        handle.remove()
+        torch.testing.assert_close(captured["input"], output.phase_token, rtol=0, atol=0)
+
+        output.predicted_action.square().mean().backward()
+        phase_grad = sum(
+            parameter.grad.abs().sum().item()
+            for parameter in model.phase_head.parameters()
+            if parameter.grad is not None
+        )
+        post_grad = sum(
+            parameter.grad.abs().sum().item()
+            for parameter in model.post_fusion.parameters()
+            if parameter.grad is not None
+        )
+        self.assertGreater(phase_grad, 0.0)
+        self.assertGreater(post_grad, 0.0)
+
+    def test_phase_action_changes_with_current_after_but_effect_stays_pre(self):
+        model = self.make_context_model("phase")
+        left = model(self.before, self.actions, self.after, self.goal)
+        changed_after = torch.zeros_like(self.after)
+        right = model(self.before, self.actions, changed_after, self.goal)
+        torch.testing.assert_close(left.predicted_effect, right.predicted_effect, rtol=0, atol=0)
+        self.assertGreater(
+            (left.predicted_action - right.predicted_action).abs().max().item(),
+            1e-5,
+        )
+
+    def test_phase_action_cannot_see_future_transition(self):
+        model = self.make_context_model("phase")
+        left = model(self.before, self.actions, self.after, self.goal)
+        before = self.before.clone()
+        after = self.after.clone()
+        actions = self.actions.clone()
+        before[:, 1:] = 0.2
+        after[:, 1:] = 0.8
+        actions[:, 1:] *= -3
+        right = model(before, actions, after, self.goal)
+        for name in ("phase_token", "predicted_action", "predicted_effect"):
+            torch.testing.assert_close(
+                getattr(left, name)[:, 0], getattr(right, name)[:, 0], rtol=0, atol=1e-5
+            )
 
     def test_action_recurrence_does_not_cross_episode_batch_dimension(self):
         full = self.run_model()
@@ -103,6 +183,20 @@ class InformationFlowTest(unittest.TestCase):
         torch.testing.assert_close(out.global_prompt, full.global_prompt, rtol=0, atol=1e-5)
         if cache_sizes:
             self.assertEqual(len(set(cache_sizes)), 1)
+
+    def test_phase_streaming_reference_matches_batch(self):
+        model = self.make_context_model("phase")
+        full = model(self.before, self.actions, self.after, self.goal)
+        _, state = model.initialize_phase_state(self.before[:, 0], self.goal)
+        for index in range(3):
+            out, state = model.forward_step(
+                self.before[:, index], self.actions[:, index], self.after[:, index], state,
+            )
+            for name in ("phase_token", "predicted_effect", "predicted_action"):
+                torch.testing.assert_close(
+                    getattr(out, name)[:, -1], getattr(full, name)[:, index], rtol=0, atol=1e-5
+                )
+        torch.testing.assert_close(out.global_prompt, full.global_prompt, rtol=0, atol=1e-5)
 
     def test_effect_prediction_has_action_gradient_but_no_after_gradient(self):
         actions = self.actions.clone().requires_grad_()
