@@ -6,7 +6,9 @@
 
 ## 当前运行
 
-当前长预算实验：`stage1-zte-v2-phase-vector-mse-4096-20260911h`，aigc29 原 launcher `513210`，GPU0/1/3/4，DDP port29541，每卡batch8、global32、4096 steps（约5.01epochs）、warmup256、每512步保存并完整验证。step512 已保存，完整验证1350条。原进程在 13:26 因 DDP reduction/未参与梯度参数报错退出，不能称为仍在训练或已正常训完。已交由 Luna worker 定位、回归测试并尝试保留原 schedule/RNG 的恢复，恢复成功以新日志和实际 step 前进为准。
+当前长预算实验：`stage1-zte-v2-phase-vector-mse-4096-20260911h`，aigc29 原 launcher `513210`，GPU0/1/3/4，DDP port29541，每卡batch8、global32、4096 steps（约5.01epochs）、warmup256、每512步保存并完整验证。step512 已保存，完整验证1350条。原进程在 13:26 因 DDP reduction/未参与梯度参数报错退出，不能称为正常训完。
+
+15:16 恢复核验：Luna worker 的修复 `bc5dbc2` 为 all-padding batch 的输出增加零值 autograd 依赖，避免 epoch 尾部被 mask 掉的 action head/task prototype 分支不触发 DDP reduction。新目录 `stage1-zte-v2-phase-vector-mse-4096-20260911h-ddp-recovery` 保留原 step512 权重、optimizer/scheduler 和逐 rank RNG，world4 与4096步计划不变，原目录不覆盖。launcher `574892` 存活，日志实际推进到 **step999**，已越过原报错位置；这证明恢复在推进，不表示4096步已完成。恢复入口为 `scripts/recover_robotwin_zte_v2_ddp.sh`，已有输出目录会拒绝覆盖。
 
 最新 step512：task probe **78.7407%**，phase order **72.1441%**，effect cosine **0.156680**，language consistency **0.980452**。按配置中的诊断参考（50%、80%、0.05），只有 phase order 尚未达到。该 order 来自独立 progress head，不是 exported-phase probe；本 checkpoint 的 next-H15/task-mean 与 effect/zero-effect 独立比较尚未测。`probe_gate_passed=false` 是代码固定写入的 diagnostic-only 标记，不代表所有指标失败；这些参考阈值也不是 BehaviorVLA 论文规定的通过标准。
 
