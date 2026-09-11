@@ -68,6 +68,7 @@ class Args:
     # episodes per device gives the task probe useful negatives while the
     # transition mask keeps short episodes from changing the objective.
     batch_size: int = 8
+    task_paired_batches: bool = True
     num_workers: int = 4
     transition_stride: int = 15
     effect_steps: int = 15
@@ -175,6 +176,46 @@ class GroupedTaskSampler(Sampler[int]):
         schedule = self._global_order()
         schedule.extend([-1] * (self.padded_size - len(schedule)))
         return iter(schedule[self.rank :: self.replicas])
+
+
+class PairedTaskSampler(GroupedTaskSampler):
+    """Keep same-task pairs in each local batch without repeating episodes.
+
+    Global interleaving followed by rank striding usually gives every episode
+    a different task label. Supervised contrastive learning then degenerates
+    to matching only an episode's own augmentation. Pair blocks avoid that
+    failure while preserving complete epoch coverage.
+    """
+
+    def __init__(self, dataset, *, batch_size: int, **kwargs):
+        super().__init__(dataset, **kwargs)
+        if batch_size < 2 or batch_size % 2:
+            raise ValueError("Task-paired batches require an even per-device batch size >=2.")
+        self.batch_size = batch_size
+        global_batch = batch_size * self.replicas
+        self.padded_size = math.ceil(len(dataset) / global_batch) * global_batch
+        self.episodes_per_rank = self.padded_size // self.replicas
+
+    def _global_order(self):
+        generator = torch.Generator().manual_seed(self.seed + 1009 * self.epoch)
+        pairs, leftovers = [], []
+        for group in self._groups:
+            ordered = [group[i] for i in torch.randperm(len(group), generator=generator).tolist()]
+            even_length = len(ordered) - len(ordered) % 2
+            pairs.extend(ordered[i:i + 2] for i in range(0, even_length, 2))
+            leftovers.extend(ordered[even_length:])
+        shuffled = [pairs[i] for i in torch.randperm(len(pairs), generator=generator).tolist()]
+        return [index for pair in shuffled for index in pair] + leftovers
+
+    def __iter__(self):
+        order = self._global_order()
+        order.extend([-1] * (self.padded_size - len(order)))
+        global_batch = self.batch_size * self.replicas
+        rank_order = []
+        for start in range(0, len(order), global_batch):
+            offset = start + self.rank * self.batch_size
+            rank_order.extend(order[offset:offset + self.batch_size])
+        return iter(rank_order)
 
 
 class PaddedEpisodeDataset(Dataset):
@@ -731,7 +772,7 @@ def _manifest(args: Args, handoff: RobotWinHandoff, config: TransitionEncoderV2C
             "batch_size_per_device": args.batch_size,
             "padding": "right",
             "mask_key": "valid_mask",
-            "sampler": "full-episode-permutation-with-rank-padding-slots",
+            "sampler": "same-task-pairs-with-full-coverage" if args.task_paired_batches else "interleaved-task-queues-with-rank-striding",
             "distributed_loader_sharding": "sampler-only",
             "image_decoder": "torchcodec",
         },
@@ -841,12 +882,15 @@ def main(args: Args) -> None:
         best_validation = float(checkpoint.get("best_validation", math.inf))
         resume_rng = checkpoint["rng_by_rank"][accelerator.process_index]
 
-    train_sampler = GroupedTaskSampler(
+    train_sampler_type = PairedTaskSampler if args.task_paired_batches else GroupedTaskSampler
+    sampler_kwargs = {"batch_size": args.batch_size} if args.task_paired_batches else {}
+    train_sampler = train_sampler_type(
         train_dataset,
         seed=args.seed,
         replicas=accelerator.num_processes,
         rank=accelerator.process_index,
         shuffle=True,
+        **sampler_kwargs,
     )
     validation_sampler = GroupedTaskSampler(
         validation_dataset,

@@ -34,8 +34,10 @@ from openpi.zeva.vision import LightweightVisionEncoder
 
 try:  # pragma: no cover - availability depends on the training image.
     from mamba_ssm import Mamba
+    from mamba_ssm.utils.generation import InferenceParams
 except ImportError:  # pragma: no cover - the fallback is used by CPU unit tests.
     Mamba = None
+    InferenceParams = None
 
 
 @dataclass(frozen=True)
@@ -127,12 +129,9 @@ class TransitionEncodingV2:
 class TransitionEncoderV2State:
     """Deployment state for recursive H15 transitions.
 
-    The state stores only observations/actions from the current episode.  It
-    intentionally has no episode index or task-index lookup.  The reference
-    implementation recomputes the causal prefix, which makes the exact
-    information boundary easy to audit and is sufficient for Stage 1 probes;
-    a later runtime can replace the recomputation with Mamba caches without
-    changing the public contract.
+    Production retains three Mamba caches and a running task-token sum; its
+    memory does not grow with episode length. Raw history fields are used only
+    by the CPU-only convolution reference. No episode/task oracle is stored.
     """
 
     goal_embedding: torch.Tensor | None
@@ -140,6 +139,11 @@ class TransitionEncoderV2State:
     after_images: torch.Tensor | None
     actions: torch.Tensor | None
     transition_count: int = 0
+    initial_token: torch.Tensor | None = None
+    task_sum: torch.Tensor | None = None
+    visual_cache: Any = None
+    action_cache: Any = None
+    effect_cache: Any = None
 
 
 class _CausalMambaLayer(nn.Module):
@@ -173,11 +177,11 @@ class _CausalMambaLayer(nn.Module):
             self.in_proj = nn.Linear(config.model_dim, config.model_dim * 2)
             self.out_proj = nn.Linear(config.model_dim, config.model_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, inference_params=None) -> torch.Tensor:
         residual = x
         normalized = self.norm(x)
         if self.mamba is not None:
-            update = self.mamba(normalized)
+            update = self.mamba(normalized, inference_params=inference_params)
         else:
             gate, value = self.in_proj(normalized).chunk(2, dim=-1)
             value = self.conv(
@@ -198,9 +202,9 @@ class _CausalMambaStack(nn.Module):
         )
         self.final_norm = nn.LayerNorm(config.model_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, inference_params=None) -> torch.Tensor:
         for layer in self.layers:
-            x = layer(x)
+            x = layer(x, inference_params=inference_params)
         return self.final_norm(x)
 
 
@@ -663,6 +667,7 @@ class CausalTransitionEncoderV2(nn.Module):
             after_images=None,
             actions=None,
             transition_count=0,
+            initial_token=b0,
         )
 
     @torch.no_grad()
@@ -682,6 +687,10 @@ class CausalTransitionEncoderV2(nn.Module):
         image_after: torch.Tensor,
         state: TransitionEncoderV2State,
     ) -> tuple[TransitionEncodingV2, TransitionEncoderV2State]:
+        if self.training:
+            raise RuntimeError("Stateful deployment requires eval() with dropout disabled.")
+        if self.config.use_mamba:
+            return self._cached_forward_step(image_before, executed_actions, image_after, state)
         # Store raw images. Caching normalized images here and sending them
         # through forward would normalize a second time on every replan.
         before = image_before.unsqueeze(1) if image_before.ndim == 4 else image_before
@@ -703,6 +712,75 @@ class CausalTransitionEncoderV2(nn.Module):
             state.goal_embedding,
         )
         return outputs, state
+
+    @staticmethod
+    def _advance_cache(stream, tokens, cache):
+        if cache is None:
+            cache = InferenceParams(max_seqlen=1_000_000, max_batch_size=tokens.shape[0])
+        if cache.seqlen_offset == 0:
+            result = stream(tokens, inference_params=cache)
+            cache.seqlen_offset += tokens.shape[1]
+        else:
+            # Released Mamba's recurrent kernel accepts one token per call.
+            # H15 is a fixed-size loop, independent of prior episode length.
+            parts = []
+            for token in tokens.split(1, dim=1):
+                parts.append(stream(token, inference_params=cache))
+                cache.seqlen_offset += 1
+            result = torch.cat(parts, dim=1)
+        return result, cache
+
+    def _cached_forward_step(self, image_before, executed_actions, image_after, state):
+        before, target_before, target_after = self._encode_visuals(image_before, image_after)
+        if before.shape[1] != 1 or state.initial_token is None:
+            raise ValueError("A cache update requires one H15 transition and initialize_phase_state().")
+        batch = before.shape[0]
+        actions = self._canonical_actions(executed_actions, sequence_length=1)
+        target_effect = (target_after - target_before).detach()
+        effect = self.effect_encoder(target_effect)
+        if not self.config.use_effect_stream:
+            effect = torch.zeros_like(effect)
+        b0 = state.initial_token
+        visual_input = torch.cat([b0, before], dim=1) if state.transition_count == 0 else before
+        effect_input = torch.cat([torch.zeros_like(b0), effect], dim=1) if state.transition_count == 0 else effect
+        visual, state.visual_cache = self._advance_cache(self.visual_stream, visual_input, state.visual_cache)
+        effect, state.effect_cache = self._advance_cache(self.effect_stream, effect_input, state.effect_cache)
+        action_steps = self.action_step_norm(
+            self.action_step_projector(actions) + self.action_position.to(dtype=actions.dtype)
+        ).flatten(1, 2)
+        ordered, state.action_cache = self._advance_cache(self.action_stream, action_steps, state.action_cache)
+        visual_context, action_context = self._readout_action(
+            visual[:, -1], ordered, self.visual_to_action, self.action_to_visual, self.action_readout,
+        )
+        visual_context, action_context = visual_context[:, None], action_context[:, None]
+        pre = self.pre_fusion(torch.cat([visual_context, action_context], dim=-1))
+        effect_query = effect[:, -1:]
+        keys = torch.cat([visual_context, action_context], dim=1)
+        effect_context, _ = self.effect_to_pre(effect_query, keys, keys)
+        post = self.post_fusion(torch.cat([effect_context + effect_query, pre], dim=-1))
+        task = F.normalize(self.task_head(post), dim=-1)
+        state.task_sum = task[:, 0] if state.task_sum is None else state.task_sum + task[:, 0]
+        state.transition_count += 1
+        pooled = F.normalize(state.task_sum / state.transition_count, dim=-1)
+        output = TransitionEncodingV2(
+            global_prompt=pooled,
+            global_context=torch.cat([pooled, state.goal_embedding.to(dtype=pooled.dtype)], dim=-1),
+            phase_token=F.normalize(self.phase_head(post), dim=-1),
+            causal_signal=F.normalize(self.causal_head(post), dim=-1),
+            phase_progress=self._monotonic_progress(post),
+            task_embedding=task,
+            predicted_effect=self.predicted_effect_head(pre),
+            target_effect=target_effect,
+            predicted_action=self.predicted_action_head(pre).view(batch, 1, self.config.executed_action_steps, self.config.action_dim),
+            target_action=actions,
+            causal_target_signal=F.normalize(self.effect_target_projector(target_effect), dim=-1),
+            pre_context=pre,
+            post_context=post,
+            initial_phase_token=F.normalize(self.phase_head(b0[:, 0]), dim=-1),
+            initial_phase_progress=before.new_zeros(batch),
+            task_prototypes=F.normalize(self.task_prototypes, dim=-1) if self.task_prototypes is not None else None,
+        )
+        return output, state
 
     @torch.no_grad()
     def step(

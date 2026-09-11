@@ -7,6 +7,7 @@ import torch
 
 from scripts.train_robotwin_zte_v2 import Args  # noqa: E402
 from scripts.train_robotwin_zte_v2 import GroupedTaskSampler  # noqa: E402
+from scripts.train_robotwin_zte_v2 import PairedTaskSampler
 from scripts.train_robotwin_zte_v2 import collate_robotwin_episodes  # noqa: E402
 from scripts.train_robotwin_zte_v2 import compute_v2_losses  # noqa: E402
 
@@ -65,6 +66,26 @@ def test_collator_right_pads_and_marks_only_real_transitions():
         [False, False, False, False],
     ]
     assert batch["episode_mask"].tolist() == [True, True, False]
+
+
+def test_paired_sampler_keeps_cross_episode_positives_on_same_rank():
+    class Dataset:
+        indices_by_task = tuple(tuple(range(i * 4, i * 4 + 4)) for i in range(5))
+
+        def __len__(self):
+            return 20
+
+    dataset = Dataset()
+    all_indices = []
+    for rank in range(2):
+        sampler = PairedTaskSampler(dataset, batch_size=4, seed=42, replicas=2, rank=rank)
+        indices = list(sampler)
+        all_indices.extend(i for i in indices if i >= 0)
+        for start in range(0, len(indices), 4):
+            batch = [i for i in indices[start:start + 4] if i >= 0]
+            for episode in batch:
+                assert any(other != episode and other // 4 == episode // 4 for other in batch)
+    assert sorted(all_indices) == list(range(len(dataset)))
 
 
 def test_action_loss_targets_the_next_h15_and_ignores_padding():

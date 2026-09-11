@@ -2,7 +2,7 @@
 set -euo pipefail
 
 zeva_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-run_dir=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-pilot-20260911d
+run_dir=${ZEVA_PILOT_RUN_DIR:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-pilot-20260911d}
 if [[ -e "$run_dir/manifest.json" || -e "$run_dir/launcher.pid" ]]; then
   echo "Pilot already exists; inspect its process/checkpoint before resuming." >&2
   exit 2

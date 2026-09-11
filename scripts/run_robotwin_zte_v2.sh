@@ -25,6 +25,10 @@ if [[ "${1:-}" == "--test" ]]; then
   shift
   exec "$python_bin" -m unittest "$@"
 fi
+if [[ "${1:-}" == "--run" ]]; then
+  shift
+  exec "$python_bin" "$@"
+fi
 if [[ "$processes" -eq 1 ]]; then
   exec "$python_bin" "$zeva_root/scripts/train_robotwin_zte_v2.py" "$@"
 fi

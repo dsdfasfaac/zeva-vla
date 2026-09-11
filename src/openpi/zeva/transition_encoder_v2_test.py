@@ -83,11 +83,26 @@ class InformationFlowTest(unittest.TestCase):
     def test_streaming_reference_matches_batch_without_double_normalization(self):
         full = self.run_model()
         _, state = self.model.initialize_phase_state(self.before[:, 0], self.goal)
+        cache_sizes = []
         for index in range(3):
             out, state = self.model.forward_step(
                 self.before[:, index], self.actions[:, index], self.after[:, index], state,
             )
-            torch.testing.assert_close(out.phase_token[:, -1], full.phase_token[:, index], rtol=0, atol=1e-5)
+            for name in ("phase_token", "causal_signal", "predicted_effect", "predicted_action", "phase_progress"):
+                torch.testing.assert_close(getattr(out, name)[:, -1], getattr(full, name)[:, index], rtol=0, atol=1e-5)
+            if self.device == "cuda":
+                self.assertIsNone(state.before_images)
+                self.assertIsNone(state.after_images)
+                self.assertIsNone(state.actions)
+                cache_sizes.append(sum(
+                    tensor.numel()
+                    for cache in (state.visual_cache, state.action_cache, state.effect_cache)
+                    for values in cache.key_value_memory_dict.values()
+                    for tensor in values
+                ))
+        torch.testing.assert_close(out.global_prompt, full.global_prompt, rtol=0, atol=1e-5)
+        if cache_sizes:
+            self.assertEqual(len(set(cache_sizes)), 1)
 
     def test_effect_prediction_has_action_gradient_but_no_after_gradient(self):
         actions = self.actions.clone().requires_grad_()
