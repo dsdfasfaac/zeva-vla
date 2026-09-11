@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 import sys
@@ -137,6 +138,46 @@ class PairSelectorTest(unittest.TestCase):
                 }
         return states, manifests
 
+    def _make_same_world_resume(self, root: Path, states: dict[str, dict], manifests: dict[str, dict], role="zeva"):
+        """Rewrite one fixture as a validated in-place resume from step 4500."""
+        run = root / role
+        source_manifest = copy.deepcopy(manifests[role])
+        current_manifest = copy.deepcopy(source_manifest)
+        current_manifest.setdefault("train_args", {})["resume_checkpoint"] = str(
+            (run / "004500").resolve()
+        )
+        source_manifest_path = run / "manifest.source_before_resume_4500.json"
+        source_manifest_path.write_text(json.dumps(source_manifest, sort_keys=True))
+        (run / "manifest.json").write_text(json.dumps(current_manifest, sort_keys=True))
+        manifests[role] = current_manifest
+        for state_path, state in states.items():
+            if f"/{role}/" not in state_path:
+                continue
+            step = int(Path(state_path).parent.name)
+            state["manifest"] = source_manifest if step <= 4500 else current_manifest
+
+        source_checkpoint = run / "004500"
+        provenance = {
+            "schema": selector.RESUME_PROVENANCE_SCHEMA,
+            "role": role,
+            "source_step": 4500,
+            "source_checkpoint": str(source_checkpoint.resolve()),
+            "source_manifest": str(source_manifest_path.resolve()),
+            "source_manifest_sha256": selector.sha256_file(source_manifest_path),
+            "source_model": str((source_checkpoint / "model.safetensors").resolve()),
+            "source_model_sha256": selector.sha256_file(source_checkpoint / "model.safetensors"),
+            "source_optimizer_state": str((source_checkpoint / "training_state.pt").resolve()),
+            "source_optimizer_state_sha256": selector.sha256_file(
+                source_checkpoint / "training_state.pt"
+            ),
+            "source_adapter": str((source_checkpoint / "zeva_adapter.pth").resolve()),
+            "source_adapter_sha256": selector.sha256_file(source_checkpoint / "zeva_adapter.pth"),
+        }
+        (run / selector.RESUME_PROVENANCE_FILENAME).write_text(
+            json.dumps(provenance, sort_keys=True)
+        )
+        return source_manifest, current_manifest, provenance
+
     def test_selects_independent_minimum_flow_and_earlier_tie(self):
         with tempfile.TemporaryDirectory() as temporary:
             states, _ = self._fixture(Path(temporary))
@@ -177,6 +218,102 @@ class PairSelectorTest(unittest.TestCase):
                 selector.inspect_run(
                     Path(temporary) / "baseline",
                     "baseline",
+                    state_loader=lambda path: states[str(path)],
+                )
+
+    def test_same_world_resume_bridges_old_source_states_only_with_provenance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            states, manifests = self._fixture(root)
+            _, current_manifest, _ = self._make_same_world_resume(root, states, manifests)
+            audit = selector.inspect_run(
+                root / "zeva",
+                "zeva",
+                state_loader=lambda path: states[str(path)],
+            )
+            self.assertEqual(audit.final_step, selector.FINAL_STEP)
+            self.assertEqual(audit.resume_provenance["source_step"], 4500)
+            self.assertTrue(audit.resume_provenance["same_topology"])
+            self.assertEqual(
+                audit.resume_provenance["allowed_manifest_differences"],
+                ["train_args.resume_checkpoint"],
+            )
+            result = selector.select_pair(
+                root / "baseline",
+                root / "zeva",
+                base_pid=0,
+                zeva_pid=0,
+                state_loader=lambda path: states[str(path)],
+            )
+            self.assertEqual(
+                result["runs"]["zeva"]["resume_provenance"]["source_step"],
+                4500,
+            )
+            self.assertEqual(
+                result["runs"]["zeva"]["manifest_sha256"],
+                selector.sha256_file(root / "zeva" / "manifest.json"),
+            )
+            self.assertEqual(current_manifest["world_size"], 4)
+
+    def test_resume_rejects_scientific_manifest_change(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            states, manifests = self._fixture(root)
+            self._make_same_world_resume(root, states, manifests)
+            current = json.loads((root / "zeva" / "manifest.json").read_text())
+            current["train_args"]["prior_loss_weight"] = 0.02
+            (root / "zeva" / "manifest.json").write_text(json.dumps(current, sort_keys=True))
+            with self.assertRaisesRegex(selector.SelectionError, "outside allowed metadata"):
+                selector.inspect_run(
+                    root / "zeva",
+                    "zeva",
+                    state_loader=lambda path: states[str(path)],
+                )
+
+    def test_resume_rejects_topology_change(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            states, manifests = self._fixture(root)
+            self._make_same_world_resume(root, states, manifests)
+            current = json.loads((root / "zeva" / "manifest.json").read_text())
+            current["world_size"] = 1
+            current["train_args"]["gradient_accumulation_steps"] = 16
+            (root / "zeva" / "manifest.json").write_text(json.dumps(current, sort_keys=True))
+            with self.assertRaisesRegex(selector.SelectionError, "outside allowed metadata"):
+                selector.inspect_run(
+                    root / "zeva",
+                    "zeva",
+                    state_loader=lambda path: states[str(path)],
+                )
+
+    def test_resume_requires_source_hashes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            states, manifests = self._fixture(root)
+            self._make_same_world_resume(root, states, manifests)
+            provenance_path = root / "zeva" / selector.RESUME_PROVENANCE_FILENAME
+            provenance = json.loads(provenance_path.read_text())
+            del provenance["source_optimizer_state_sha256"]
+            provenance_path.write_text(json.dumps(provenance, sort_keys=True))
+            with self.assertRaisesRegex(selector.SelectionError, "source_optimizer_state_sha256"):
+                selector.inspect_run(
+                    root / "zeva",
+                    "zeva",
+                    state_loader=lambda path: states[str(path)],
+                )
+
+    def test_resume_requires_saved_manifest_and_provenance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            states, manifests = self._fixture(root)
+            run = root / "zeva"
+            current = copy.deepcopy(manifests["zeva"])
+            current["train_args"]["resume_checkpoint"] = str((run / "004500").resolve())
+            (run / "manifest.json").write_text(json.dumps(current, sort_keys=True))
+            with self.assertRaisesRegex(selector.SelectionError, "resume_provenance"):
+                selector.inspect_run(
+                    run,
+                    "zeva",
                     state_loader=lambda path: states[str(path)],
                 )
 

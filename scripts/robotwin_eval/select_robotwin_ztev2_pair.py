@@ -39,6 +39,14 @@ EXPECTED_STATE_SCHEMAS = {
     "baseline": "robotwin-pi05-action-expert-baseline-training-state-v1",
     "zeva": "zeva-robotwin-stage2-action-expert-training-state-v8",
 }
+RESUME_PROVENANCE_FILENAME = "resume_provenance.json"
+RESUME_SOURCE_MANIFEST_GLOB = "manifest.source_before_resume_*.json"
+RESUME_PROVENANCE_SCHEMA = "zeva-robotwin-stage2-resume-provenance-v1"
+# The Stage 2 trainer records the resume source in ``train_args``.  This is
+# the only run-manifest field that may differ after an in-place resume.  The
+# checkpoint lineage, topology, objective, and all scientific settings remain
+# part of the immutable source manifest contract.
+RESUME_ALLOWED_MANIFEST_DIFFS = frozenset({"train_args.resume_checkpoint"})
 
 # These fields are deliberately the pair contract, not the complete manifest.
 # Stage 1/bank/live/retrieval lineage is allowed to differ because Base loads
@@ -140,6 +148,7 @@ class RunAudit:
     manifest_sha256: str
     candidates: tuple[Candidate, ...]
     final_step: int | None
+    resume_provenance: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -151,6 +160,7 @@ class RunAudit:
             "training_mode": self.manifest.get("training_mode"),
             "final_step": self.final_step,
             "candidates": [candidate.as_dict() for candidate in self.candidates],
+            "resume_provenance": self.resume_provenance,
         }
 
 
@@ -256,12 +266,220 @@ def _check_manifest_variant(manifest: Mapping[str, Any], role: str) -> None:
             )
 
 
+def _manifest_difference_paths(
+    source: Any,
+    current: Any,
+    path: str = "",
+) -> list[str]:
+    """Return leaf paths whose values differ between two manifests.
+
+    Manifests contain nested dictionaries and a few lists.  Keeping the
+    comparison structural gives resume validation a precise allow-list while
+    avoiding a brittle full-JSON string comparison (formatting/key order are
+    not scientific settings).
+    """
+
+    if isinstance(source, Mapping) and isinstance(current, Mapping):
+        differences: list[str] = []
+        for key in sorted(set(source) | set(current)):
+            child = f"{path}.{key}" if path else str(key)
+            if key not in source or key not in current:
+                differences.append(child)
+            else:
+                differences.extend(_manifest_difference_paths(source[key], current[key], child))
+        return differences
+    if source != current:
+        return [path or "<root>"]
+    return []
+
+
+def _resolve_run_child(root: Path, value: Any, label: str) -> Path:
+    """Resolve a provenance path and require it to stay inside the run."""
+
+    if not isinstance(value, str) or not value:
+        raise SelectionError(f"resume provenance is missing {label}")
+    path = Path(value).expanduser().resolve()
+    try:
+        relative = path.relative_to(root)
+    except ValueError as error:
+        raise SelectionError(
+            f"resume provenance {label} must be inside the run directory: {path}"
+        ) from error
+    if len(relative.parts) < 1:
+        raise SelectionError(f"resume provenance {label} must name a file: {path}")
+    return path
+
+
+def _require_sha256(value: Any, label: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise SelectionError(f"resume provenance {label} must be a lowercase SHA256")
+    return value
+
+
+def _load_resume_context(
+    root: Path,
+    role: str,
+    current_manifest: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Validate an in-place resume and return the allowed old-state context.
+
+    A resumed trainer rewrites ``manifest.json`` before saving step 5000,
+    while steps 500..4500 retain the original manifest embedded in their
+    training states.  The selector may bridge that one metadata transition
+    only when an operator left a signed-by-hash provenance record and an
+    immutable source-manifest copy beside the run.  No model/objective/data
+    field is relaxed here.
+    """
+
+    train_args = current_manifest.get("train_args")
+    resume_value = train_args.get("resume_checkpoint") if isinstance(train_args, Mapping) else None
+    provenance_path = root / RESUME_PROVENANCE_FILENAME
+    source_backups = {path.resolve() for path in root.glob(RESUME_SOURCE_MANIFEST_GLOB)}
+    if not provenance_path.exists() and not source_backups and resume_value in (None, ""):
+        return None
+    if not provenance_path.is_file():
+        raise SelectionError(
+            f"{role} has resume metadata but no {RESUME_PROVENANCE_FILENAME}; "
+            "refusing to relax state-manifest validation"
+        )
+    provenance = _read_json(provenance_path, f"{role} resume provenance")
+    if provenance.get("schema") != RESUME_PROVENANCE_SCHEMA:
+        raise SelectionError(
+            f"{role} resume provenance schema must be {RESUME_PROVENANCE_SCHEMA!r}"
+        )
+    if provenance.get("role") != role:
+        raise SelectionError(
+            f"{role} resume provenance role must be {role!r}, got {provenance.get('role')!r}"
+        )
+    try:
+        source_step = int(provenance.get("source_step"))
+    except (TypeError, ValueError) as error:
+        raise SelectionError(f"{role} resume provenance source_step is invalid") from error
+    if source_step != FINAL_STEP - SAVE_FREQ:
+        raise SelectionError(
+            f"{role} resume provenance must identify source step {FINAL_STEP - SAVE_FREQ}, "
+            f"got {source_step}"
+        )
+
+    source_checkpoint = _resolve_run_child(root, provenance.get("source_checkpoint"), "source_checkpoint")
+    expected_checkpoint = root / f"{source_step:06d}"
+    if source_checkpoint != expected_checkpoint:
+        raise SelectionError(
+            f"{role} resume source checkpoint must be {expected_checkpoint}, got {source_checkpoint}"
+        )
+    source_manifest_path = _resolve_run_child(root, provenance.get("source_manifest"), "source_manifest")
+    expected_manifest_name = f"manifest.source_before_resume_{source_step}.json"
+    if source_manifest_path.name != expected_manifest_name:
+        raise SelectionError(
+            f"{role} resume source manifest must be named {expected_manifest_name!r}"
+        )
+    if not source_manifest_path.is_file():
+        raise SelectionError(f"{role} resume source manifest is missing: {source_manifest_path}")
+    if source_manifest_path not in source_backups:
+        raise SelectionError(
+            f"{role} resume source manifest is not the saved run-local backup: {source_manifest_path}"
+        )
+    source_manifest_sha256 = _require_sha256(
+        provenance.get("source_manifest_sha256"), "source_manifest_sha256"
+    )
+    actual_source_manifest_sha256 = sha256_file(source_manifest_path)
+    if actual_source_manifest_sha256 != source_manifest_sha256:
+        raise SelectionError(
+            f"{role} resume source manifest SHA256 does not match provenance"
+        )
+    source_manifest = _read_json(source_manifest_path, f"{role} resume source manifest")
+    _check_manifest_variant(source_manifest, role)
+
+    differences = _manifest_difference_paths(source_manifest, current_manifest)
+    unexpected = [path for path in differences if path not in RESUME_ALLOWED_MANIFEST_DIFFS]
+    if unexpected:
+        raise SelectionError(
+            f"{role} resume manifest differs outside allowed metadata: {', '.join(unexpected)}"
+        )
+    source_args = source_manifest.get("train_args")
+    current_args = current_manifest.get("train_args")
+    if not isinstance(source_args, Mapping) or not isinstance(current_args, Mapping):
+        raise SelectionError(f"{role} resume manifests must contain train_args mappings")
+    if source_args.get("resume_checkpoint") not in (None, ""):
+        raise SelectionError(
+            f"{role} saved source manifest already contains resume_checkpoint; refusing chained resume"
+        )
+    current_resume = current_args.get("resume_checkpoint")
+    if not isinstance(current_resume, str) or Path(current_resume).expanduser().resolve() != source_checkpoint:
+        raise SelectionError(
+            f"{role} current manifest resume_checkpoint does not identify source checkpoint"
+        )
+    for field in ("world_size", "effective_global_batch_size"):
+        if source_manifest.get(field) != current_manifest.get(field):
+            raise SelectionError(
+                f"{role} resume changed topology field {field!r}; only same-world resume is allowed"
+            )
+    for field in ("batch_size", "gradient_accumulation_steps"):
+        if source_args.get(field) != current_args.get(field):
+            raise SelectionError(
+                f"{role} resume changed train_args.{field}; only same-topology resume is allowed"
+            )
+
+    source_model = _resolve_run_child(root, provenance.get("source_model"), "source_model")
+    source_optimizer = _resolve_run_child(
+        root, provenance.get("source_optimizer_state"), "source_optimizer_state"
+    )
+    expected_model = source_checkpoint / "model.safetensors"
+    expected_optimizer = source_checkpoint / "training_state.pt"
+    if source_model != expected_model:
+        raise SelectionError(f"{role} resume source_model does not identify 4500 model.safetensors")
+    if source_optimizer != expected_optimizer:
+        raise SelectionError(f"{role} resume source_optimizer_state does not identify 4500 training_state.pt")
+    _require_file(source_model, f"{role} resume source model")
+    _require_file(source_optimizer, f"{role} resume source optimizer state")
+    model_sha256 = _require_sha256(provenance.get("source_model_sha256"), "source_model_sha256")
+    optimizer_sha256 = _require_sha256(
+        provenance.get("source_optimizer_state_sha256"), "source_optimizer_state_sha256"
+    )
+    if sha256_file(source_model) != model_sha256:
+        raise SelectionError(f"{role} source model SHA256 does not match resume provenance")
+    if sha256_file(source_optimizer) != optimizer_sha256:
+        raise SelectionError(f"{role} source optimizer-state SHA256 does not match resume provenance")
+
+    source_adapter = provenance.get("source_adapter")
+    source_adapter_sha256 = provenance.get("source_adapter_sha256")
+    if role == "zeva":
+        source_adapter_path = _resolve_run_child(root, source_adapter, "source_adapter")
+        expected_adapter = source_checkpoint / "zeva_adapter.pth"
+        if source_adapter_path != expected_adapter:
+            raise SelectionError(f"{role} resume source_adapter does not identify 4500 zeva_adapter.pth")
+        _require_file(source_adapter_path, f"{role} resume source adapter")
+        source_adapter_sha256 = _require_sha256(source_adapter_sha256, "source_adapter_sha256")
+        if sha256_file(source_adapter_path) != source_adapter_sha256:
+            raise SelectionError(f"{role} source adapter SHA256 does not match resume provenance")
+    elif source_adapter not in (None, "") or source_adapter_sha256 not in (None, ""):
+        raise SelectionError("baseline resume provenance must not declare an adapter source")
+
+    return {
+        "schema": provenance["schema"],
+        "path": str(provenance_path),
+        "source_manifest": str(source_manifest_path),
+        "source_manifest_sha256": source_manifest_sha256,
+        "source_checkpoint": str(source_checkpoint),
+        "source_step": source_step,
+        "source_model_sha256": model_sha256,
+        "source_optimizer_state_sha256": optimizer_sha256,
+        "source_adapter_sha256": source_adapter_sha256,
+        "allowed_manifest_differences": sorted(differences),
+        "same_topology": True,
+        "rng_state_saved": False,
+        "continuation": "non_bit_exact_resume_without_saved_rng_state",
+        "source_manifest_payload": source_manifest,
+    }
+
+
 def _inspect_candidate(
     root: Path,
     role: str,
     manifest: dict[str, Any],
     step: int,
     *,
+    resume_context: Mapping[str, Any] | None = None,
     state_loader: Callable[[Path], dict[str, Any]] = _torch_load_training_state,
 ) -> Candidate:
     checkpoint = root / f"{step:06d}"
@@ -288,7 +506,13 @@ def _inspect_candidate(
             f"{role} step {step} training state declares step {state.get('step')!r}"
         )
     state_manifest = state.get("manifest")
-    if state_manifest != manifest:
+    state_manifest_matches = state_manifest == manifest
+    if not state_manifest_matches and resume_context is not None:
+        source_step = int(resume_context["source_step"])
+        state_manifest_matches = (
+            step <= source_step and state_manifest == resume_context["source_manifest_payload"]
+        )
+    if not state_manifest_matches:
         raise SelectionError(
             f"{role} step {step} training-state manifest differs from manifest.json"
         )
@@ -327,6 +551,7 @@ def inspect_run(
     _require_file(manifest_path, f"{role} manifest.json")
     manifest = _read_json(manifest_path, f"{role} manifest")
     _check_manifest_variant(manifest, role)
+    resume_context = _load_resume_context(root, role, manifest)
 
     available = _candidate_steps(root)
     if not available:
@@ -342,7 +567,14 @@ def inspect_run(
         selected_steps = [step for step in available if step <= FINAL_STEP]
 
     candidates = tuple(
-        _inspect_candidate(root, role, manifest, step, state_loader=state_loader)
+        _inspect_candidate(
+            root,
+            role,
+            manifest,
+            step,
+            resume_context=resume_context,
+            state_loader=state_loader,
+        )
         for step in selected_steps
     )
     final_step = FINAL_STEP if FINAL_STEP in selected_steps else (selected_steps[-1] if selected_steps else None)
@@ -354,6 +586,15 @@ def inspect_run(
         manifest_sha256=sha256_file(manifest_path),
         candidates=candidates,
         final_step=final_step,
+        resume_provenance=(
+            {
+                key: value
+                for key, value in resume_context.items()
+                if key != "source_manifest_payload"
+            }
+            if resume_context is not None
+            else None
+        ),
     )
 
 
