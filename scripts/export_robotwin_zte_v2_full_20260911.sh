@@ -176,7 +176,7 @@ if bank.get("incomplete") or not bank.get("usable_for_training"):
     raise SystemExit("merged bank is marked incomplete/unusable")
 if live.get("incomplete") or not live.get("usable_for_training"):
     raise SystemExit("merged live cache is marked incomplete/unusable")
-if bank.get("manifest", {}).get("checkpoint_sha256") != expected_ckpt:
+if bank.get("manifest", {}).get("stage1_checkpoint_sha256") != expected_ckpt:
     raise SystemExit("bank checkpoint provenance mismatch")
 if live.get("zte_checkpoint_sha256") != expected_ckpt:
     raise SystemExit("live checkpoint provenance mismatch")
