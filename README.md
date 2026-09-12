@@ -167,19 +167,18 @@ and trains the PI action expert (LR `5e-6`) plus ZeVA modules (LR `5e-5`) with
 global batch 256. Representation and shuffled-input probes are diagnostics,
 not mandatory all-pass prerequisites. Stage 2 must be followed by paired
 closed-loop evaluation. Stage 3 is optional and addresses an observed failure,
-not an automatic extra stage. As of 2026-09-12 13:30 (China time), the v2 integration and
-full artifact export have passed their engineering checks. Base has completed
-5,000 steps; ZeVA was interrupted by an unexplained SIGTERM, with its last
-complete checkpoint at step 4,500. Recovery has been launched on the now-idle
-aigc24 (PID 4082455), retaining model/adapter/optimizer/scheduler and the original
-four-rank/global-256 settings. Complete dataset component hashes match the
-aigc29 source; the relocated dataset paths are explicitly recorded. The core
-Torch/Transformers/Accelerate runtime matches, but auxiliary libraries differ
-and this Stage2 checkpoint does not save RNG state: recovery is not bit-exact.
-At this timestamp the process is loading, not yet verified to advance steps.
+not an automatic extra stage. As of 2026-09-12 14:04 (China time), both matched
+Stage2 runs have completed 5,000 steps with full checkpoints. ZeVA's interrupted
+last 500 steps were recovered on aigc24 with the original four-rank/global-256
+settings and verified identical dataset contents. This recovery is not bit-exact
+(RNG was not saved and auxiliary library versions differ); provenance is retained.
+Independent held-out flow selection chose Base step 4,500 (`0.01872689`) and
+ZeVA step 5,000 (`0.01828257`). These are offline losses, not success rates.
+The selected pair is now entering explicit evaluation preflight; formal rollout
+results are not yet available.
 The fresh-run entry point is
 `scripts/train_robotwin_advantage10_ztev2.sh`; historical commands below are
-not this experiment. Training and closed-loop evaluation are not yet complete.
+not this experiment. Training is complete; closed-loop delivery is not.
 
 The final requested comparison trains both ordinary Base and ZeVA from the
 specified best-v1 on the same selected ten tasks with matched PI optimization

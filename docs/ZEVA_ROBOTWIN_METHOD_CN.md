@@ -1,10 +1,12 @@
 # ZeVA–RoboTwin：基于已训练 PI0.5 的因果记忆增强方法
 
-> 文档状态：ZTE v2 实用接入主线与历史实验证据（2026-09-11，按用户最新要求修订）
+> 文档状态：ZTE v2 实用接入主线与历史实验证据（2026-09-12，按用户最新要求修订）
 > 目标：在已经完成 RoboTwin 训练的 PI0.5 上加入 ZeVA 的因果表征、记忆与检索能力，同时保持 PI0.5 的物理输入输出协议和基础能力。
 > 主线定义：旧 v19 已停止。当前主线是三流 ZTE v2 经真实 H15 recurrent state 和 train-only bank 接入现有 action-expert 侧双残差/Gaussian prior，再做匹配的十任务 Base/ZeVA 训练和闭环比较。允许 ZeVA 方法变体；辅助表征指标用于诊断，不再要求全部通过后才接 PI。before-VLM prefix smoke 不是当前选定接入方式。下文历史实验及原研究门槛不覆盖本段最新执行口径。
 
 当前 pipeline：Stage1 训练并选择 v2 checkpoint → 导出同源 bank/live queries、核对权重/协议/zero-init/H15 状态更新 → Stage2 冻结 ZTE/bank 和视觉语言 backbone，训练 action expert（`5e-6`）及 ZeVA 模块（`5e-5`），global batch 256 → 同 seed 配对闭环；只有发现需要针对性处理的缺陷才考虑 Stage3。Base 与 ZeVA 从指定 best-v1 出发，在相同十任务及匹配预算下训练；untouched best-v1 另作 Anchor。最终必须报告正常 Base 与 ZeVA 的真实成功率，不能通过弱化 Base 或挑测试 seed 制造优势。截至2026-09-12 13:30（北京时间），v2接入、修复版Stage1和全量产物已完成，Base完成5000步；ZeVA从SIGTERM前最后完整4500在空闲aigc24启动恢复（PID4082455），此刻仍在加载，尚未确认新step。恢复保留model/adapter/optimizer/scheduler、四卡及global256；数据副本全量哈希一致，路径迁移有显式证明，核心Torch/Transformers/Accelerate版本一致。Stage2未保存RNG且辅助库版本仍有差异，不能称为bit-exact续训；本轮训练及闭环交付尚未完成。
+
+最新执行状态（2026-09-12 14:04，北京时间）：两支Stage2均已完成5000步，ZeVA在aigc24的恢复正常结束，完整模型/adapter/optimizer已保存。按预定held-out flow选择Base004500（0.01872689）与ZeVA005000（0.01828257），进入正式十任务×20同seed评测的preflight。以上覆盖前段13:30的加载状态；offline flow不能替代闭环成功率，本轮暂未产生正式成功率。
 
 ## 1. 问题定义与设计原则
 

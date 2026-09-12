@@ -6,6 +6,8 @@
 
 ## 当前运行
 
+2026-09-12 14:04（北京时间）核验：ZeVA正常完成5000步，PID4082455已退出，完整 `005000/model.safetensors`、`zeva_adapter.pth`、`training_state.pt` 及latest.json已保存；aigc24八卡释放。Base与ZeVA两支5000预算均完成。按预定独立held-out flow选步，Base004500=0.01872689090669155，ZeVA005000=0.01828256994485855；选择记录 `advantage10-ztev2-schedulerfix-pair-20260911/checkpoint_selection_final_20260912.json`。Base模型SHA=`2f106633403e5f2146bf7cd4f56858cbfdb856e9b2966d1c724a79ac4948c84f`，ZeVA模型SHA=`4ea8f6ca9a806b297e4881197041b222dedf29e25680aea44d2d5c465162611b`，adapter SHA=`967b78f509e4ba8e74f40967496f740c81149526ff2b46c913bcc81552f51e02`。进入正式10×20同seed评测preflight；offline flow不等于成功率提升。
+
 恢复启动后核验：四个rank均输出 `All keys loaded successfully`，训练循环显示4500/5000，当前开始首步编译。实际新manifest与原备份的完整递归diff严格只有 `dataset_adapter`、`train_args.dataset_root`、`train_args.resume_checkpoint`；runtime版本、world4、global256、LR/损失/冻结、task samples及全部模型来源字段一致。尚未把起始计数4500当作已产生新optimizer step。
 
 2026-09-12 13:30（北京时间）恢复已启动，仍在加载：aigc24 PID4082455，GPU0/1/3/4，从完整4500补齐5000预算，保留四卡×16×acc4=global256、LR5e-6/5e-5、所有冻结和损失设置。入口 `scripts/resume_robotwin_stage2_verified.py` 核对原trainer/policy SHA、源state/manifest、scheduler.last_epoch=4500及optimizer LR；`resume_provenance.json` 保存源model/adapter/training_state和manifest SHA，旧checkpoint不改写。未声称已经推进新step或开展正式评测。
