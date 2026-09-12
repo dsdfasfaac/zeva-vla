@@ -47,6 +47,12 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 ## Zeva architecture
 
+Post-evaluation status (2026-09-12): the four measured Stage1 diagnostics clear
+their configured reference lines; ZTE utility for PI is not yet established by
+those scores. The current work adds opt-in, validation-only H15 and injection
+diagnostics; no new training has started. See the
+[evidence and next-step boundaries](docs/ZTEV2_POST_EVAL_DIAGNOSIS_20260912.md).
+
 The selected PI0.5 has already been trained on the same RoboTwin distribution.
 The active work is a practical ZTE v2 → PI action-expert integration, followed
 by matched ten-task Base/ZeVA training and closed-loop evaluation. Auxiliary
