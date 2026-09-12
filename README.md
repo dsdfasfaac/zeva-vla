@@ -49,8 +49,10 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 Post-evaluation status (2026-09-12): the four measured Stage1 diagnostics clear
 their configured reference lines; ZTE utility for PI is not yet established by
-those scores. The current work adds opt-in, validation-only H15 and injection
-diagnostics; no new training has started. See the
+those scores. The read-only diagnostic smoke now reproduces the original H50
+flow exactly on two real validation decisions; a full 5,874-decision H15 and
+fixed-Base comparison is loading on aigc24 (2026-09-13 01:32 China time).
+This is validation, not new training. See the
 [evidence and next-step boundaries](docs/ZTEV2_POST_EVAL_DIAGNOSIS_20260912.md).
 
 The selected PI0.5 has already been trained on the same RoboTwin distribution.

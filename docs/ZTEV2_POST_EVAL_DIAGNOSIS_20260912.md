@@ -4,6 +4,12 @@
 
 ## 2026-09-13 验证进度
 
+01:32 更新：真实 ZeVA005000 的单批 smoke 已完成，模型/adapter/ZTE/bank/retrieval SHA 与正式选定产物完全匹配。两条真实验证决策上，原 H50 flow 与 raw replay 均为 `0.0061195502`，差值为零；H15 residual-on=`0.0051624347`，current residual-off=`0.0053198677`。同批 H50 略差而 H15 略好，仅说明两种观测不能互相替代，**不能从两条样本外推总体增益**。H15 context/prior 相对范数的重建均值分别约 `0.002976` / `0.00001348`，不是直接捕获的 BF16 累加后差值。完整 smoke JSON 已[归档](results/robotwin-ztev2-20260912/step5000-diagnostics-smoke-b2x1.json)。
+
+独立只读 CLI 与加载器已完成，相关远程测试累计 **16 passed in 15.34s**。首次固定 Base 对照加载被原 `load_foundation_anchor` 的起点一致性保护拒绝，未进行验证：该方法要求先在 teacher 权重上建立 anchor。修复为先逐张量确认两模型的冻结路径相同，再加载 Base004500、建立 anchor、恢复 ZeVA005000；未修改 policy 或训练权重。失败日志保留在原隔离目录，不伪装成成功。
+
+完整 **5874 个 validation5 决策**的只读测量已在 aigc24 GPU6 启动，batch8、单进程、不 compile、无 optimizer；同时分别比较 current residual-off 与固定 Base004500。新隔离目录为 `/mnt/100T/users/dingxin/VLA/diagnostics-ztev2-fixedteacher-20260913-a5evvD`，日志 `step5000-full-base4500-b8.log`，完成后独占写入同名前缀 JSON。此时仍在加载，尚未声称完整测量已完成。正式测试成功标签不输入此工作流，未启动新训练。
+
 - 默认关闭的诊断实现已完成初版；远程 aigc24 隔离目录 `diagnostics-ztev2-20260913-lubDbq` 中，5 项新诊断测试与 5 项既有 Stage2 v2 测试实际通过（13.13 秒），不是本地缺 PyTorch 导致的 skip。生产源码与已有 checkpoint 未覆盖。
 - 代码审查发现可选 raw-forward 的失败可能因 rank 而异，而其 gather 是条件调用；已限定诊断为单进程，避免多卡条件 collective 挂起。普通训练默认路径不受影响。
 - 加入单进程保护回归测试后，远程复测为 **11 passed in 9.30s**。
