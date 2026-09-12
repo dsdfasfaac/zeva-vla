@@ -19,9 +19,11 @@ usage: wait_and_launch_robotwin_ztev2_formal.sh \
   [--render-runtime PATH] [--render-vulkan-icd PATH] [--base-port PORT] \
   [--poll-seconds N] [--foundation-model-sha256 SHA256] [--dry-run]
 
-All checkpoint/artifact paths and both launcher PIDs are required. --dry-run
-only prints the planned handoff and performs no wait, write, SSH, selector, or
-evaluation action.
+All checkpoint/artifact paths and both launcher PID arguments are required.
+Pass PID 0 only after independently verifying that that launcher is stopped;
+PID 0 disables the launcher-specific process probe. --dry-run only prints the
+planned handoff and performs no wait, write, SSH, selector, or evaluation
+action.
 EOF
   exit 2
 }
@@ -84,8 +86,14 @@ required_args=(
 for name in "${required_args[@]}"; do
   [[ -n "${!name}" ]] || { echo "missing required --${name//_/-}" >&2; usage; }
 done
-[[ "$base_pid" =~ ^[1-9][0-9]*$ ]] || { echo "--base-pid must be a positive PID" >&2; exit 2; }
-[[ "$zeva_pid" =~ ^[1-9][0-9]*$ ]] || { echo "--zeva-pid must be a positive PID" >&2; exit 2; }
+[[ "$base_pid" == 0 || "$base_pid" =~ ^[1-9][0-9]*$ ]] || {
+  echo "--base-pid must be 0 or a positive PID" >&2
+  exit 2
+}
+[[ "$zeva_pid" == 0 || "$zeva_pid" =~ ^[1-9][0-9]*$ ]] || {
+  echo "--zeva-pid must be 0 or a positive PID" >&2
+  exit 2
+}
 [[ "$base_port" =~ ^[0-9]+$ ]] || { echo "--base-port must be an integer" >&2; exit 2; }
 [[ "$poll_seconds" =~ ^[1-9][0-9]*$ ]] || { echo "--poll-seconds must be positive" >&2; exit 2; }
 [[ "$foundation_model_sha256" =~ ^[0-9a-f]{64}$ ]] || {
@@ -151,6 +159,9 @@ trap 'rc=$?; if (( rc != 0 )); then write_state failed "exit_code_${rc}" || true
 
 pid_running() {
   local pid=$1
+  # An explicit zero is the selector-compatible assertion that the caller
+  # already verified this launcher is stopped.  Never probe /proc/0.
+  [[ "$pid" != 0 ]] || return 1
   local stat_path="/proc/$pid/stat"
   [[ -r "$stat_path" ]] || return 1
   local process_state
@@ -161,6 +172,9 @@ pid_running() {
 check_pid_identity() {
   local pid=$1
   local label=$2
+  # PID zero is an explicit, non-probing stopped sentinel.  A positive PID
+  # retains the strict command-line and train-root identity checks below.
+  [[ "$pid" != 0 ]] || return 0
   if ! pid_running "$pid"; then
     return 0
   fi
