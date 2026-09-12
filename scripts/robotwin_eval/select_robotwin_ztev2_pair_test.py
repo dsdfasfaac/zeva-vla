@@ -178,6 +178,76 @@ class PairSelectorTest(unittest.TestCase):
         )
         return source_manifest, current_manifest, provenance
 
+    def _add_dataset_relocation(
+        self,
+        root: Path,
+        states: dict[str, dict],
+        manifests: dict[str, dict],
+        *,
+        role: str = "zeva",
+    ):
+        source_manifest, current_manifest, provenance = self._make_same_world_resume(
+            root, states, manifests, role=role
+        )
+        source_dataset = Path(source_manifest["train_args"]["dataset_root"])
+        destination_dataset = (root / "relocated-dataset").resolve()
+        current_manifest["train_args"]["dataset_root"] = str(destination_dataset)
+        current_manifest["dataset_adapter"] = str(destination_dataset / "adapter.json")
+        (root / role / "manifest.json").write_text(
+            json.dumps(current_manifest, sort_keys=True)
+        )
+        manifests[role] = current_manifest
+        for state_path, state in states.items():
+            if f"/{role}/" in state_path and int(Path(state_path).parent.name) > 4500:
+                state["manifest"] = current_manifest
+
+        components = {
+            "source": {"sha256": "a" * 64, "files": 3, "bytes": 30},
+            "eef-index": {"sha256": "b" * 64, "files": 2, "bytes": 20},
+            "joint14-index": {"sha256": "c" * 64, "files": 2, "bytes": 20},
+            "stats": {"sha256": "d" * 64, "files": 1, "bytes": 10},
+        }
+        semantic_adapter = {
+            "action_horizon": 50,
+            "dataset_root": "@source",
+            "eef_cache_root": "@eef-index",
+            "image_shape": [480, 640, 3],
+            "joint_cache_root": "@joint14-index",
+            "return_uint8": False,
+            "schema": "egoscale-robotwin-lerobot-relative-eef16-v1",
+            "split_seed": 1000,
+            "splits": ["Clean", "Randomized"],
+            "stats_path": "@stats",
+            "tasks": None,
+            "validation_fraction": 0.05,
+            "video_backend": "torchcodec",
+        }
+        reports = {}
+        for side, dataset_root, adapter_sha in (
+            ("source", source_dataset, "e" * 64),
+            ("destination", destination_dataset, "f" * 64),
+        ):
+            report = {
+                "schema": selector.DATASET_IDENTITY_SCHEMA,
+                "dataset_root": str(dataset_root),
+                "adapter_sha256": adapter_sha,
+                "semantic_adapter": semantic_adapter,
+                "components": components,
+            }
+            report_path = root / f"{side}-dataset-identity.json"
+            report_path.write_text(json.dumps(report, sort_keys=True))
+            reports[side] = report_path
+        provenance["dataset_relocation"] = {
+            "source_report": str(reports["source"].resolve()),
+            "source_report_sha256": selector.sha256_file(reports["source"]),
+            "destination_report": str(reports["destination"].resolve()),
+            "destination_report_sha256": selector.sha256_file(reports["destination"]),
+        }
+        (root / role / selector.RESUME_PROVENANCE_FILENAME).write_text(
+            json.dumps(provenance, sort_keys=True)
+        )
+        return source_manifest, current_manifest, provenance, reports
+
     def test_selects_independent_minimum_flow_and_earlier_tie(self):
         with tempfile.TemporaryDirectory() as temporary:
             states, _ = self._fixture(Path(temporary))
@@ -254,6 +324,90 @@ class PairSelectorTest(unittest.TestCase):
                 selector.sha256_file(root / "zeva" / "manifest.json"),
             )
             self.assertEqual(current_manifest["world_size"], 4)
+
+    def test_dataset_relocation_requires_full_identity_and_canonicalizes_pair_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            states, manifests = self._fixture(root)
+            _, current_manifest, provenance, _ = self._add_dataset_relocation(
+                root, states, manifests
+            )
+            audit = selector.inspect_run(
+                root / "zeva",
+                "zeva",
+                state_loader=lambda path: states[str(path)],
+            )
+            self.assertEqual(
+                audit.resume_provenance["allowed_manifest_differences"],
+                ["dataset_adapter", "train_args.dataset_root", "train_args.resume_checkpoint"],
+            )
+            self.assertEqual(
+                audit.resume_provenance["dataset_relocation"]["schema"],
+                selector.DATASET_IDENTITY_SCHEMA,
+            )
+            result = selector.select_pair(
+                root / "baseline",
+                root / "zeva",
+                base_pid=0,
+                zeva_pid=0,
+                state_loader=lambda path: states[str(path)],
+            )
+            self.assertTrue(result["pair_checks"]["matching_manifest.dataset_adapter"])
+            self.assertTrue(result["pair_checks"]["matching_train_args.dataset_root"])
+            self.assertEqual(
+                result["runs"]["zeva"]["resume_provenance"]["dataset_relocation"][
+                    "destination_dataset_root"
+                ],
+                current_manifest["train_args"]["dataset_root"],
+            )
+            self.assertEqual(
+                provenance["dataset_relocation"]["source_report_sha256"],
+                selector.sha256_file(root / "source-dataset-identity.json"),
+            )
+
+    def test_dataset_relocation_rejects_changed_component_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            states, manifests = self._fixture(root)
+            self._add_dataset_relocation(root, states, manifests)
+            destination_report = root / "destination-dataset-identity.json"
+            report = json.loads(destination_report.read_text())
+            report["components"]["source"]["sha256"] = "0" * 64
+            destination_report.write_text(json.dumps(report, sort_keys=True))
+            provenance_path = root / "zeva" / selector.RESUME_PROVENANCE_FILENAME
+            provenance = json.loads(provenance_path.read_text())
+            provenance["dataset_relocation"]["destination_report_sha256"] = selector.sha256_file(
+                destination_report
+            )
+            provenance_path.write_text(json.dumps(provenance, sort_keys=True))
+            with self.assertRaisesRegex(selector.SelectionError, "component content identities differ"):
+                selector.inspect_run(
+                    root / "zeva",
+                    "zeva",
+                    state_loader=lambda path: states[str(path)],
+                )
+
+    def test_dataset_relocation_rejects_report_path_not_matching_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            states, manifests = self._fixture(root)
+            self._add_dataset_relocation(root, states, manifests)
+            provenance_path = root / "zeva" / selector.RESUME_PROVENANCE_FILENAME
+            provenance = json.loads(provenance_path.read_text())
+            destination_report_path = root / "destination-dataset-identity.json"
+            destination_report = json.loads(destination_report_path.read_text())
+            destination_report["dataset_root"] = str((root / "wrong-dataset").resolve())
+            destination_report_path.write_text(json.dumps(destination_report, sort_keys=True))
+            provenance["dataset_relocation"]["destination_report_sha256"] = selector.sha256_file(
+                destination_report_path
+            )
+            provenance_path.write_text(json.dumps(provenance, sort_keys=True))
+            with self.assertRaisesRegex(selector.SelectionError, "does not match the corresponding manifest"):
+                selector.inspect_run(
+                    root / "zeva",
+                    "zeva",
+                    state_loader=lambda path: states[str(path)],
+                )
 
     def test_resume_rejects_old_and_new_manifest_swap(self):
         for step in (500, 4500, 5000):

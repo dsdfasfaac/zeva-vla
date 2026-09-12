@@ -42,11 +42,32 @@ EXPECTED_STATE_SCHEMAS = {
 RESUME_PROVENANCE_FILENAME = "resume_provenance.json"
 RESUME_SOURCE_MANIFEST_GLOB = "manifest.source_before_resume_*.json"
 RESUME_PROVENANCE_SCHEMA = "zeva-robotwin-stage2-resume-provenance-v1"
+DATASET_IDENTITY_SCHEMA = "robotwin-dataset-content-identity-v1"
 # The Stage 2 trainer records the resume source in ``train_args``.  This is
-# the only run-manifest field that may differ after an in-place resume.  The
+# the only run-manifest field that may differ after an in-place resume unless
+# a separately hash-verified dataset relocation proof is present.  The
 # checkpoint lineage, topology, objective, and all scientific settings remain
 # part of the immutable source manifest contract.
 RESUME_ALLOWED_MANIFEST_DIFFS = frozenset({"train_args.resume_checkpoint"})
+RESUME_DATASET_RELOCATION_ALLOWED_MANIFEST_DIFFS = frozenset(
+    {
+        "train_args.resume_checkpoint",
+        "train_args.dataset_root",
+        "dataset_adapter",
+    }
+)
+DATASET_RELOCATION_FIELDS = frozenset(
+    {"source_report", "source_report_sha256", "destination_report", "destination_report_sha256"}
+)
+DATASET_COMPONENT_NAMES = ("source", "eef-index", "joint14-index", "stats")
+DATASET_SEMANTIC_COMPONENT_FIELDS = {
+    "dataset_root": "@source",
+    "eef_cache_root": "@eef-index",
+    "joint_cache_root": "@joint14-index",
+    "stats_path": "@stats",
+}
+DATASET_PAIR_MANIFEST_FIELDS = frozenset({"dataset_adapter"})
+DATASET_PAIR_TRAIN_ARGS = frozenset({"dataset_root"})
 
 # These fields are deliberately the pair contract, not the complete manifest.
 # Stage 1/bank/live/retrieval lineage is allowed to differ because Base loads
@@ -151,6 +172,15 @@ class RunAudit:
     resume_provenance: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
+        resume_provenance = None
+        if self.resume_provenance is not None:
+            # The source manifest is retained in-memory for the pair contract,
+            # but is deliberately not duplicated into the selection report.
+            resume_provenance = {
+                key: value
+                for key, value in self.resume_provenance.items()
+                if key != "source_manifest_payload"
+            }
         return {
             "role": self.role,
             "run_dir": str(self.root),
@@ -160,7 +190,7 @@ class RunAudit:
             "training_mode": self.manifest.get("training_mode"),
             "final_step": self.final_step,
             "candidates": [candidate.as_dict() for candidate in self.candidates],
-            "resume_provenance": self.resume_provenance,
+            "resume_provenance": resume_provenance,
         }
 
 
@@ -316,6 +346,177 @@ def _require_sha256(value: Any, label: str) -> str:
     return value
 
 
+def _resolve_absolute_path(value: Any, label: str) -> Path:
+    """Resolve a recorded path while retaining a precise validation error."""
+
+    if not isinstance(value, str) or not value:
+        raise SelectionError(f"dataset identity {label} must be a non-empty path")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise SelectionError(f"dataset identity {label} must be absolute: {value!r}")
+    return path.resolve()
+
+
+def _validate_dataset_identity_report(path: Path, label: str) -> dict[str, Any]:
+    """Validate one complete, externally generated dataset identity report.
+
+    The selector cannot assume that both copies of a dataset are mounted on
+    the host doing checkpoint selection.  The report SHA therefore authenticates
+    the report itself, while the strict schema/content checks below ensure that
+    the two independently produced reports describe the same complete set of
+    component digests.  The audit helper is the producer for this schema.
+    """
+
+    report = _read_json(path, label)
+    if report.get("schema") != DATASET_IDENTITY_SCHEMA:
+        raise SelectionError(
+            f"{label} schema must be {DATASET_IDENTITY_SCHEMA!r}, "
+            f"got {report.get('schema')!r}"
+        )
+    _resolve_absolute_path(report.get("dataset_root"), f"{label}.dataset_root")
+    _require_sha256(report.get("adapter_sha256"), f"{label}.adapter_sha256")
+
+    semantic = report.get("semantic_adapter")
+    if not isinstance(semantic, Mapping):
+        raise SelectionError(f"{label}.semantic_adapter must be a JSON object")
+    for field, marker in DATASET_SEMANTIC_COMPONENT_FIELDS.items():
+        if semantic.get(field) != marker:
+            raise SelectionError(
+                f"{label}.semantic_adapter.{field} must be normalized to {marker!r}"
+            )
+
+    components = report.get("components")
+    if not isinstance(components, Mapping):
+        raise SelectionError(f"{label}.components must be a JSON object")
+    if set(components) != set(DATASET_COMPONENT_NAMES):
+        raise SelectionError(
+            f"{label}.components must contain exactly {list(DATASET_COMPONENT_NAMES)!r}"
+        )
+    for component_name in DATASET_COMPONENT_NAMES:
+        entry = components[component_name]
+        if not isinstance(entry, Mapping):
+            raise SelectionError(f"{label}.components.{component_name} must be a JSON object")
+        if set(entry) != {"sha256", "files", "bytes"}:
+            raise SelectionError(
+                f"{label}.components.{component_name} must contain sha256/files/bytes"
+            )
+        _require_sha256(
+            entry.get("sha256"), f"{label}.components.{component_name}.sha256"
+        )
+        files = entry.get("files")
+        bytes_count = entry.get("bytes")
+        if isinstance(files, bool) or not isinstance(files, int) or files <= 0:
+            raise SelectionError(
+                f"{label}.components.{component_name}.files must be a positive integer"
+            )
+        if isinstance(bytes_count, bool) or not isinstance(bytes_count, int) or bytes_count <= 0:
+            raise SelectionError(
+                f"{label}.components.{component_name}.bytes must be a positive integer"
+            )
+        if component_name == "stats" and files != 1:
+            raise SelectionError(f"{label}.components.stats.files must be exactly 1")
+    return report
+
+
+def _validate_dataset_relocation(
+    relocation: Any,
+    source_manifest: Mapping[str, Any],
+    current_manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate a full-content proof for a source/destination dataset move."""
+
+    if not isinstance(relocation, Mapping):
+        raise SelectionError("dataset_relocation provenance must be a JSON object")
+    missing = sorted(DATASET_RELOCATION_FIELDS - set(relocation))
+    if missing:
+        raise SelectionError(
+            "dataset_relocation provenance is missing: " + ", ".join(missing)
+        )
+    unexpected = sorted(set(relocation) - DATASET_RELOCATION_FIELDS)
+    if unexpected:
+        raise SelectionError(
+            "dataset_relocation provenance has unsupported fields: " + ", ".join(unexpected)
+        )
+
+    report_paths: dict[str, Path] = {}
+    reports: dict[str, dict[str, Any]] = {}
+    for side in ("source", "destination"):
+        path_field = f"{side}_report"
+        sha_field = f"{path_field}_sha256"
+        path_value = relocation.get(path_field)
+        if not isinstance(path_value, str) or not path_value:
+            raise SelectionError(f"dataset_relocation {path_field} is missing")
+        path = Path(path_value).expanduser().resolve()
+        _require_file(path, f"dataset_relocation {path_field}")
+        expected_sha = _require_sha256(
+            relocation.get(sha_field), f"dataset_relocation.{sha_field}"
+        )
+        actual_sha = sha256_file(path)
+        if actual_sha != expected_sha:
+            raise SelectionError(
+                f"dataset_relocation {path_field} SHA256 does not match provenance"
+            )
+        report_paths[side] = path
+        reports[side] = _validate_dataset_identity_report(path, f"{side} dataset identity report")
+
+    source_components = reports["source"]["components"]
+    destination_components = reports["destination"]["components"]
+    if source_components != destination_components:
+        raise SelectionError(
+            "dataset_relocation source/destination component content identities differ"
+        )
+    if reports["source"]["semantic_adapter"] != reports["destination"]["semantic_adapter"]:
+        raise SelectionError(
+            "dataset_relocation source/destination semantic adapter identities differ"
+        )
+
+    def manifest_dataset_root(manifest: Mapping[str, Any], label: str) -> Path:
+        args = manifest.get("train_args")
+        if not isinstance(args, Mapping):
+            raise SelectionError(f"{label} manifest has no train_args mapping")
+        return _resolve_absolute_path(args.get("dataset_root"), f"{label}.train_args.dataset_root")
+
+    source_dataset_root = manifest_dataset_root(source_manifest, "resume source")
+    current_dataset_root = manifest_dataset_root(current_manifest, "current")
+    for side, expected_root in (
+        ("source", source_dataset_root),
+        ("destination", current_dataset_root),
+    ):
+        report_root = _resolve_absolute_path(
+            reports[side].get("dataset_root"), f"{side} dataset identity report.dataset_root"
+        )
+        if report_root != expected_root:
+            raise SelectionError(
+                f"dataset_relocation {side} report dataset_root does not match "
+                f"the corresponding manifest: {report_root} != {expected_root}"
+            )
+        adapter_value = source_manifest.get("dataset_adapter") if side == "source" else current_manifest.get("dataset_adapter")
+        adapter_path = _resolve_absolute_path(adapter_value, f"{side}.dataset_adapter")
+        expected_adapter = report_root / "adapter.json"
+        if adapter_path != expected_adapter:
+            raise SelectionError(
+                f"dataset_relocation {side} report does not match the corresponding "
+                f"dataset_adapter path: {adapter_path} != {expected_adapter}"
+            )
+
+    if source_dataset_root == current_dataset_root:
+        raise SelectionError(
+            "dataset_relocation proof is present but source/current dataset_root paths are identical"
+        )
+
+    return {
+        "schema": DATASET_IDENTITY_SCHEMA,
+        "source_report": str(report_paths["source"]),
+        "source_report_sha256": relocation["source_report_sha256"],
+        "destination_report": str(report_paths["destination"]),
+        "destination_report_sha256": relocation["destination_report_sha256"],
+        "source_dataset_root": str(source_dataset_root),
+        "destination_dataset_root": str(current_dataset_root),
+        "semantic_adapter": reports["source"]["semantic_adapter"],
+        "components": source_components,
+    }
+
+
 def _load_resume_context(
     root: Path,
     role: str,
@@ -391,7 +592,14 @@ def _load_resume_context(
     _check_manifest_variant(source_manifest, role)
 
     differences = _manifest_difference_paths(source_manifest, current_manifest)
-    unexpected = [path for path in differences if path not in RESUME_ALLOWED_MANIFEST_DIFFS]
+    dataset_relocation = None
+    allowed_manifest_differences = RESUME_ALLOWED_MANIFEST_DIFFS
+    if "dataset_relocation" in provenance:
+        dataset_relocation = _validate_dataset_relocation(
+            provenance["dataset_relocation"], source_manifest, current_manifest
+        )
+        allowed_manifest_differences = RESUME_DATASET_RELOCATION_ALLOWED_MANIFEST_DIFFS
+    unexpected = [path for path in differences if path not in allowed_manifest_differences]
     if unexpected:
         raise SelectionError(
             f"{role} resume manifest differs outside allowed metadata: {', '.join(unexpected)}"
@@ -466,6 +674,7 @@ def _load_resume_context(
         "source_optimizer_state_sha256": optimizer_sha256,
         "source_adapter_sha256": source_adapter_sha256,
         "allowed_manifest_differences": sorted(differences),
+        "dataset_relocation": dataset_relocation,
         "same_topology": True,
         "rng_state_saved": False,
         "continuation": "non_bit_exact_resume_without_saved_rng_state",
@@ -583,15 +792,9 @@ def inspect_run(
         manifest_sha256=sha256_file(manifest_path),
         candidates=candidates,
         final_step=final_step,
-        resume_provenance=(
-            {
-                key: value
-                for key, value in resume_context.items()
-                if key != "source_manifest_payload"
-            }
-            if resume_context is not None
-            else None
-        ),
+        # Keep the verified source manifest available for pair comparison.
+        # RunAudit.as_dict() removes this in-memory-only payload from reports.
+        resume_provenance=resume_context,
     )
 
 
@@ -602,16 +805,58 @@ def _train_args_signature(manifest: Mapping[str, Any]) -> dict[str, Any]:
     return {field: train_args.get(field) for field in PAIR_TRAIN_ARGS}
 
 
+def _pair_manifest_value(audit: RunAudit, field: str) -> Any:
+    """Return a field for pair checking, with only verified data paths restored.
+
+    A resumed run may have been launched on a host with a relocated dataset.
+    The source manifest remains the scientific record for those two path-only
+    fields; every other pair field is read from the current manifest and is
+    therefore still required to match exactly.
+    """
+
+    if field in DATASET_PAIR_MANIFEST_FIELDS and audit.resume_provenance is not None:
+        relocation = audit.resume_provenance.get("dataset_relocation")
+        source_manifest = audit.resume_provenance.get("source_manifest_payload")
+        if relocation is not None:
+            if not isinstance(source_manifest, Mapping):
+                raise SelectionError(
+                    f"{audit.role} verified dataset relocation has no source manifest payload"
+                )
+            return source_manifest.get(field)
+    return audit.manifest.get(field)
+
+
+def _pair_train_arg_value(audit: RunAudit, field: str) -> Any:
+    if field in DATASET_PAIR_TRAIN_ARGS and audit.resume_provenance is not None:
+        relocation = audit.resume_provenance.get("dataset_relocation")
+        source_manifest = audit.resume_provenance.get("source_manifest_payload")
+        if relocation is not None:
+            if not isinstance(source_manifest, Mapping):
+                raise SelectionError(
+                    f"{audit.role} verified dataset relocation has no source manifest payload"
+                )
+            source_args = source_manifest.get("train_args")
+            if not isinstance(source_args, Mapping):
+                raise SelectionError(
+                    f"{audit.role} verified dataset relocation source has no train_args mapping"
+                )
+            return source_args.get(field)
+    train_args = audit.manifest.get("train_args")
+    return train_args.get(field) if isinstance(train_args, Mapping) else None
+
+
 def _pair_checks(base: RunAudit, zeva: RunAudit) -> dict[str, bool]:
     base_manifest = base.manifest
     zeva_manifest = zeva.manifest
     checks: dict[str, bool] = {}
     for field in PAIR_MANIFEST_FIELDS:
-        checks[f"matching_manifest.{field}"] = base_manifest.get(field) == zeva_manifest.get(field)
-    base_args = _train_args_signature(base_manifest)
-    zeva_args = _train_args_signature(zeva_manifest)
+        checks[f"matching_manifest.{field}"] = _pair_manifest_value(base, field) == _pair_manifest_value(
+            zeva, field
+        )
     for field in PAIR_TRAIN_ARGS:
-        checks[f"matching_train_args.{field}"] = base_args[field] == zeva_args[field]
+        checks[f"matching_train_args.{field}"] = _pair_train_arg_value(base, field) == _pair_train_arg_value(
+            zeva, field
+        )
     checks["base_variant_exact"] = base_manifest.get("training_variant") == "baseline"
     checks["zeva_variant_exact"] = zeva_manifest.get("training_variant") == "zeva"
     checks["base_h15_transition"] = base_manifest.get("causal_transition_horizon") == 15
