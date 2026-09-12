@@ -180,6 +180,12 @@ loading, and no completed rollout results are available yet. The dedicated
 serving-script release is `eval-release-ztev2-20260912`; all conditions share
 H50/H15, Large_D435, seen randomized scenes, and the same 20 expert-valid
 seeds/instructions per task starting from seed 1000.
+
+At 16:27, Base is complete: **109/200 (54.5%)**, with all 200 videos and
+seed/instruction entries audited. This is below the predeclared 57% reference
+floor, so normality has not passed. Anchor is running on the identical cases;
+ZeVA follows automatically. Do not treat this partial comparison as a final
+result or replace the selected checkpoints/seeds in response to test outcomes.
 The fresh-run entry point is
 `scripts/train_robotwin_advantage10_ztev2.sh`; historical commands below are
 not this experiment. Training is complete; closed-loop delivery is not.
