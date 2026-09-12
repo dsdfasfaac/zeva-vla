@@ -1,0 +1,230 @@
+{
+  "version": 1,
+  "identity": {
+    "task_name": "put_bottles_dustbin",
+    "task_config": "zeva_randomized",
+    "checkpoint": "untouched-best-v1-anchor",
+    "use_ema": true,
+    "instruction_type": "seen",
+    "execute_horizon": 15,
+    "num_steps": 30,
+    "seed": 0,
+    "absolute_start_seed": 1000,
+    "fixed_seed_sequence": true,
+    "fixed_seed_values": [
+      1003,
+      1004,
+      1005,
+      1007,
+      1008,
+      1009,
+      1011,
+      1013,
+      1018,
+      1024,
+      1025,
+      1026,
+      1027,
+      1028,
+      1029,
+      1032,
+      1033,
+      1035,
+      1039,
+      1042
+    ],
+    "fixed_instructions": [
+      "Using arms, pick up the bottle with green cap, the transparent bottle, and the drink bottle with slim neck, dropping each into the trash bin.",
+      "Put the smooth yellow bottle with ridged cap into the smooth black dustbin, followed by the medium-sized water bottle and the rounded bottle with a white neck.",
+      "Use arms to move the bottle made of smooth plastic, the water bottle with textured body, and the bottle with curved body shape into the black bin with white liner.",
+      "Put the bottle made of smooth plastic into the rectangular black trash holder, followed by the bottle with narrow neck and the black soda bottle with white top.",
+      "Move the bottle with green cap, the transparent bottle, and the red-labeled soda bottle into the dustbin with white inner bag one by one.",
+      "Use arms to pick the medium yellow cylindrical bottle, drop it in the smooth black dustbin, repeat for the medium-sized water bottle and the drink bottle with slim neck.",
+      "Carry the bottle with small ridged green cap first, drop it into the black bin with white liner, repeat with the medium-sized water bottle and the black bottle with red label.",
+      "Transfer the bottle with green cap, the medium-sized water bottle, and the drink bottle with slim neck into the black dustbin using your arms, one by one.",
+      "Use the arms to move the bottle made of smooth plastic into the black garbage bin, then repeat for the cylindrical bottle and the drink bottle with slim neck.",
+      "Using arms, grab the medium yellow cylindrical bottle and put it in the plastic dustbin, repeat for the water bottle with textured body and the smooth plastic bottle.",
+      "Place the yellow liquid container with green top, the bottle with turquoise cap, and the drink bottle with slim neck in the black garbage bin using the arms.",
+      "Use arms to pick the medium plastic bottle with tapered neck, drop it in the rectangular black trash holder, repeat for the bottle with narrow neck and the hand-sized drinking bottle.",
+      "Grab the bottle with small ridged green cap, put it in the dustbin with white inner bag, follow by moving the blue-accented cylindrical bottle and the smooth plastic bottle there too.",
+      "Move the cylindrical yellow bottle for holding liquids to the dustbin with lid and bag, then the blue-accented cylindrical bottle, and finally the bottle with curved body shape.",
+      "Use arms to pick the medium plastic bottle with tapered neck, the smooth transparent plastic bottle, and the red bottle, dropping them into the trash bin.",
+      "Use arms to pick the smooth yellow bottle with ridged cap, the bottle with narrow neck, the red-labeled soda bottle, and place them one by one in the black and white trash holder.",
+      "Carefully grab the yellow liquid container with green top, the medium-sized water bottle, and the red and black beverage bottle and position them in the black dustbin.",
+      "Take the smooth yellow bottle with ridged cap, drop it in the plastic dustbin, then move the transparent bottle and the red and black beverage bottle to the plastic dustbin.",
+      "Using arms, grab the medium yellow cylindrical bottle and put it in the medium black garbage container, repeat for the bottle for holding liquids and the red bottle.",
+      "Use arms to move the bottle made of smooth plastic, the clear bottle with blue sections, and the plastic bottle with red cap into the medium black garbage container."
+    ],
+    "model_seed_policy": "continuous",
+    "target_episodes": 20
+  },
+  "complete": true,
+  "next_seed": 1043,
+  "completed_episodes": 20,
+  "successes": 4,
+  "episode_results": [
+    {
+      "episode_index": 0,
+      "seed": 1003,
+      "success": true,
+      "steps": 400,
+      "step_limit": 1700,
+      "instruction": "Using arms, pick up the bottle with green cap, the transparent bottle, and the drink bottle with slim neck, dropping each into the trash bin."
+    },
+    {
+      "episode_index": 1,
+      "seed": 1004,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Put the smooth yellow bottle with ridged cap into the smooth black dustbin, followed by the medium-sized water bottle and the rounded bottle with a white neck."
+    },
+    {
+      "episode_index": 2,
+      "seed": 1005,
+      "success": true,
+      "steps": 586,
+      "step_limit": 1700,
+      "instruction": "Use arms to move the bottle made of smooth plastic, the water bottle with textured body, and the bottle with curved body shape into the black bin with white liner."
+    },
+    {
+      "episode_index": 3,
+      "seed": 1007,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Put the bottle made of smooth plastic into the rectangular black trash holder, followed by the bottle with narrow neck and the black soda bottle with white top."
+    },
+    {
+      "episode_index": 4,
+      "seed": 1008,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Move the bottle with green cap, the transparent bottle, and the red-labeled soda bottle into the dustbin with white inner bag one by one."
+    },
+    {
+      "episode_index": 5,
+      "seed": 1009,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Use arms to pick the medium yellow cylindrical bottle, drop it in the smooth black dustbin, repeat for the medium-sized water bottle and the drink bottle with slim neck."
+    },
+    {
+      "episode_index": 6,
+      "seed": 1011,
+      "success": true,
+      "steps": 554,
+      "step_limit": 1700,
+      "instruction": "Carry the bottle with small ridged green cap first, drop it into the black bin with white liner, repeat with the medium-sized water bottle and the black bottle with red label."
+    },
+    {
+      "episode_index": 7,
+      "seed": 1013,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Transfer the bottle with green cap, the medium-sized water bottle, and the drink bottle with slim neck into the black dustbin using your arms, one by one."
+    },
+    {
+      "episode_index": 8,
+      "seed": 1018,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Use the arms to move the bottle made of smooth plastic into the black garbage bin, then repeat for the cylindrical bottle and the drink bottle with slim neck."
+    },
+    {
+      "episode_index": 9,
+      "seed": 1024,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Using arms, grab the medium yellow cylindrical bottle and put it in the plastic dustbin, repeat for the water bottle with textured body and the smooth plastic bottle."
+    },
+    {
+      "episode_index": 10,
+      "seed": 1025,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Place the yellow liquid container with green top, the bottle with turquoise cap, and the drink bottle with slim neck in the black garbage bin using the arms."
+    },
+    {
+      "episode_index": 11,
+      "seed": 1026,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Use arms to pick the medium plastic bottle with tapered neck, drop it in the rectangular black trash holder, repeat for the bottle with narrow neck and the hand-sized drinking bottle."
+    },
+    {
+      "episode_index": 12,
+      "seed": 1027,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Grab the bottle with small ridged green cap, put it in the dustbin with white inner bag, follow by moving the blue-accented cylindrical bottle and the smooth plastic bottle there too."
+    },
+    {
+      "episode_index": 13,
+      "seed": 1028,
+      "success": true,
+      "steps": 657,
+      "step_limit": 1700,
+      "instruction": "Move the cylindrical yellow bottle for holding liquids to the dustbin with lid and bag, then the blue-accented cylindrical bottle, and finally the bottle with curved body shape."
+    },
+    {
+      "episode_index": 14,
+      "seed": 1029,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Use arms to pick the medium plastic bottle with tapered neck, the smooth transparent plastic bottle, and the red bottle, dropping them into the trash bin."
+    },
+    {
+      "episode_index": 15,
+      "seed": 1032,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Use arms to pick the smooth yellow bottle with ridged cap, the bottle with narrow neck, the red-labeled soda bottle, and place them one by one in the black and white trash holder."
+    },
+    {
+      "episode_index": 16,
+      "seed": 1033,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Carefully grab the yellow liquid container with green top, the medium-sized water bottle, and the red and black beverage bottle and position them in the black dustbin."
+    },
+    {
+      "episode_index": 17,
+      "seed": 1035,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Take the smooth yellow bottle with ridged cap, drop it in the plastic dustbin, then move the transparent bottle and the red and black beverage bottle to the plastic dustbin."
+    },
+    {
+      "episode_index": 18,
+      "seed": 1039,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Using arms, grab the medium yellow cylindrical bottle and put it in the medium black garbage container, repeat for the bottle for holding liquids and the red bottle."
+    },
+    {
+      "episode_index": 19,
+      "seed": 1042,
+      "success": false,
+      "steps": 1700,
+      "step_limit": 1700,
+      "instruction": "Use arms to move the bottle made of smooth plastic, the clear bottle with blue sections, and the plastic bottle with red cap into the medium black garbage container."
+    }
+  ],
+  "created_at": "2026-09-12T16:19:21",
+  "updated_at": "2026-09-12T18:39:58",
+  "summary_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-ztev2-selected-pair-20260912/anchor/results/put_bottles_dustbin/summary.json"
+}

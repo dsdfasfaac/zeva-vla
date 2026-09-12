@@ -1,0 +1,525 @@
+{
+  "allowed_lineage_differences": {
+    "causal_bank": {
+      "baseline": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-step2048-20260911/train_causal_bank.pt",
+      "zeva": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/train_causal_bank.pt"
+    },
+    "causal_bank_manifest": {
+      "baseline": {
+        "causal_transition_horizon": 15,
+        "dataset_adapter_sha256": "8ac54abcec7704b0111b7c28be3fb3a18e27e0ebe8e3dcf8ddff948b36100f8f",
+        "episode_index_oracle": false,
+        "episodes": 26150,
+        "export_args": {
+          "batch_size": 2,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-ddp-recovery/zte_v2_step_002048.pth",
+          "dataset_root": "/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data",
+          "device": "cpu",
+          "goal_embeddings": "/data1/dingxin/zeva-runs/robotwin-v5-h15-tasklang/pi05_task_embeddings.pt",
+          "handoff_root": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1",
+          "log_every": 100,
+          "max_episodes": null,
+          "merge_shards": true,
+          "num_workers": 2,
+          "output_dir": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-step2048-20260911",
+          "phase_bins": 32,
+          "rank": 0,
+          "samples_per_episode": 4,
+          "seed": 1000,
+          "world_size": 4
+        },
+        "goal_conditioning": "phase_and_causal_goal_conditioned; global_prompt_from_separate_goal_masked_forward",
+        "goal_embeddings_sha256": "0db70e000d14d2208325ec32e0dd7a1293075cc2c650f08bcbf085371671849f",
+        "incomplete": false,
+        "recurrent_history": "complete-consecutive-H15-rollout-from-B0",
+        "schema": "zeva-robotwin-zte-stage1-v2-checkpoint",
+        "source_episodes": 26150,
+        "source_files": {
+          "exporter": "366f3fe28136958d6c53f82ec01a1578be9b35a2ca33832967f9250a95f65282",
+          "transition_encoder": "a36722c5a77849423a343dd5aa97a9efbaf18aa9f8a790a2d0180173940d6fd2"
+        },
+        "split": "train95",
+        "stage1_checkpoint_schema": "zeva-robotwin-zte-stage1-v2-checkpoint",
+        "stage1_checkpoint_sha256": "d3d21c0acac9855a0a06311472d9ad773d914b57df311cf2648bafa9bc14bc5d",
+        "stage1_step": 2048,
+        "statistics_sha256": "9747c46391f6ac2e868b6c4bab62a3be6028aca4995dea48790bee275e16b7d1",
+        "usable_for_training": true
+      },
+      "zeva": {
+        "causal_transition_horizon": 15,
+        "dataset_adapter_sha256": "8ac54abcec7704b0111b7c28be3fb3a18e27e0ebe8e3dcf8ddff948b36100f8f",
+        "episode_index_oracle": false,
+        "episodes": 26150,
+        "export_args": {
+          "batch_size": 2,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-scheduler-repair-20260911i/zte_v2_step_004096.pth",
+          "dataset_root": "/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data",
+          "device": "cpu",
+          "goal_embeddings": "/data1/dingxin/zeva-runs/robotwin-v5-h15-tasklang/pi05_task_embeddings.pt",
+          "handoff_root": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1",
+          "log_every": 100,
+          "max_episodes": null,
+          "merge_shards": true,
+          "num_workers": 2,
+          "output_dir": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911",
+          "phase_bins": 32,
+          "rank": 0,
+          "samples_per_episode": 4,
+          "seed": 1000,
+          "world_size": 4
+        },
+        "goal_conditioning": "phase_and_causal_goal_conditioned; global_prompt_from_separate_goal_masked_forward",
+        "goal_embeddings_sha256": "0db70e000d14d2208325ec32e0dd7a1293075cc2c650f08bcbf085371671849f",
+        "incomplete": false,
+        "recurrent_history": "complete-consecutive-H15-rollout-from-B0",
+        "schema": "zeva-robotwin-zte-stage1-v2-checkpoint",
+        "source_episodes": 26150,
+        "source_files": {
+          "exporter": "366f3fe28136958d6c53f82ec01a1578be9b35a2ca33832967f9250a95f65282",
+          "transition_encoder": "a36722c5a77849423a343dd5aa97a9efbaf18aa9f8a790a2d0180173940d6fd2"
+        },
+        "split": "train95",
+        "stage1_checkpoint_schema": "zeva-robotwin-zte-stage1-v2-checkpoint",
+        "stage1_checkpoint_sha256": "ce9402981b8e2f1ce597e2cb150b795ae246f84fb81b3bb72fae023a3decf899",
+        "stage1_step": 4096,
+        "statistics_sha256": "9747c46391f6ac2e868b6c4bab62a3be6028aca4995dea48790bee275e16b7d1",
+        "usable_for_training": true
+      }
+    },
+    "causal_bank_sha256": {
+      "baseline": "e6a361945f9068c4c18e70d7a8f82c231e4ffc2e67514c1777fae67e625e00d8",
+      "zeva": "33b11b41992d07890a798602cb8cadebc0f798b8959adfc3b8cf5b660bf14ad9"
+    },
+    "live_queries": {
+      "baseline": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-step2048-20260911/live_queries_h15.pt",
+      "zeva": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/live_queries_h15.pt"
+    },
+    "live_queries_sha256": {
+      "baseline": "fd8906603dc792107ad4b5be787c095ae38aca48be11072bb46e7b9c1039857b",
+      "zeva": "c39e3c6565c438b9496133833a7288a08a81a7985fc1723bf8a39d6ad2d47de6"
+    },
+    "stage1_usage": {
+      "baseline": {
+        "base_contract": "ordinary_untouched_best_v1_action_expert_flow; H50 flow with H15 decision sampling",
+        "checkpoint_and_artifacts_loaded_for_lineage_validation": true,
+        "memory_streams": {
+          "brief": false,
+          "persistent": false
+        },
+        "task_language_retrieval_used": false,
+        "used_for_predictions": false,
+        "used_for_training": false
+      },
+      "zeva": {
+        "base_contract": null,
+        "checkpoint_and_artifacts_loaded_for_lineage_validation": true,
+        "memory_streams": {
+          "brief": true,
+          "persistent": true
+        },
+        "task_language_retrieval_used": true,
+        "used_for_predictions": true,
+        "used_for_training": true
+      }
+    },
+    "task_retrieval": {
+      "baseline": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-step2048-20260911/task_retrieval.pth",
+      "zeva": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/task_retrieval.pth"
+    },
+    "task_retrieval_sha256": {
+      "baseline": "6399205d29b94a387ee5b902144ab93dea765f6222bf0b5ffc7d519503e9ec09",
+      "zeva": "c54b3275af4b15999a5d849f476c19ff3d01c76150a487679e9bbe61928798b7"
+    },
+    "zte_checkpoint": {
+      "baseline": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-ddp-recovery/zte_v2_step_002048.pth",
+      "zeva": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-scheduler-repair-20260911i/zte_v2_step_004096.pth"
+    },
+    "zte_checkpoint_sha256": {
+      "baseline": "d3d21c0acac9855a0a06311472d9ad773d914b57df311cf2648bafa9bc14bc5d",
+      "zeva": "ce9402981b8e2f1ce597e2cb150b795ae246f84fb81b3bb72fae023a3decf899"
+    },
+    "zte_step": {
+      "baseline": 2048,
+      "zeva": 4096
+    }
+  },
+  "final_step_required": 5000,
+  "pair_checks": {
+    "base_action_expert_lr": true,
+    "base_final_candidate": true,
+    "base_h15_transition": true,
+    "base_h50_broadcast": true,
+    "base_variant_exact": true,
+    "matching_manifest.dataset_adapter": true,
+    "matching_manifest.effective_global_batch_size": true,
+    "matching_manifest.foundation_checkpoint": true,
+    "matching_manifest.foundation_forward": true,
+    "matching_manifest.foundation_identity": true,
+    "matching_manifest.goal_embedding_identity": true,
+    "matching_manifest.handoff_root": true,
+    "matching_manifest.pi_image_contract": true,
+    "matching_manifest.runtime_versions": true,
+    "matching_manifest.task_scope": true,
+    "matching_manifest.train_split": true,
+    "matching_manifest.validation_split": true,
+    "matching_manifest.video_decode": true,
+    "matching_manifest.world_size": true,
+    "matching_train_args.action_expert_learning_rate": true,
+    "matching_train_args.adam_beta2": true,
+    "matching_train_args.baseline_preserve_interval": true,
+    "matching_train_args.batch_size": true,
+    "matching_train_args.compile_mode": true,
+    "matching_train_args.compile_model": true,
+    "matching_train_args.dataset_root": true,
+    "matching_train_args.decoder_threads": true,
+    "matching_train_args.eval_batches": true,
+    "matching_train_args.gate_regularization_weight": true,
+    "matching_train_args.gradient_accumulation_steps": true,
+    "matching_train_args.initial_residual_gate_probability": true,
+    "matching_train_args.learning_rate": true,
+    "matching_train_args.log_freq": true,
+    "matching_train_args.memory_dropout": true,
+    "matching_train_args.num_workers": true,
+    "matching_train_args.paired_improvement_margin": true,
+    "matching_train_args.phase_noise_std": true,
+    "matching_train_args.preserve_loss_weight": true,
+    "matching_train_args.prior_loss_weight": true,
+    "matching_train_args.prior_residual_dropout_probability": true,
+    "matching_train_args.save_checkpoints": true,
+    "matching_train_args.save_freq": true,
+    "matching_train_args.seed": true,
+    "matching_train_args.steps": true,
+    "matching_train_args.task_subset": true,
+    "matching_train_args.video_backend": true,
+    "matching_train_args.warmup_steps": true,
+    "matching_train_args.weight_decay": true,
+    "zeva_action_expert_lr": true,
+    "zeva_final_candidate": true,
+    "zeva_h15_transition": true,
+    "zeva_h50_broadcast": true,
+    "zeva_variant_exact": true
+  },
+  "pid_checks": {
+    "base": {
+      "check": "explicit_zero_no_process",
+      "pid": 0,
+      "running": false
+    },
+    "zeva": {
+      "check": "explicit_zero_no_process",
+      "pid": 0,
+      "running": false
+    }
+  },
+  "runs": {
+    "baseline": {
+      "candidates": [
+        {
+          "adapter": null,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/000500",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/000500/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 500,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/000500/training_state.pt",
+          "validation_flow": 0.0190016757696867
+        },
+        {
+          "adapter": null,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/001000",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/001000/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 1000,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/001000/training_state.pt",
+          "validation_flow": 0.01967822015285492
+        },
+        {
+          "adapter": null,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/001500",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/001500/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 1500,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/001500/training_state.pt",
+          "validation_flow": 0.01968582719564438
+        },
+        {
+          "adapter": null,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/002000",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/002000/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 2000,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/002000/training_state.pt",
+          "validation_flow": 0.01885949820280075
+        },
+        {
+          "adapter": null,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/002500",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/002500/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 2500,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/002500/training_state.pt",
+          "validation_flow": 0.019136186689138412
+        },
+        {
+          "adapter": null,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/003000",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/003000/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 3000,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/003000/training_state.pt",
+          "validation_flow": 0.019713349640369415
+        },
+        {
+          "adapter": null,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/003500",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/003500/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 3500,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/003500/training_state.pt",
+          "validation_flow": 0.01929512247443199
+        },
+        {
+          "adapter": null,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004000",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004000/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 4000,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004000/training_state.pt",
+          "validation_flow": 0.01910281926393509
+        },
+        {
+          "adapter": null,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500/model.safetensors",
+          "selection_reason": "selected: minimum finite held-out validation.flow; exact ties choose earlier step",
+          "step": 4500,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500/training_state.pt",
+          "validation_flow": 0.01872689090669155
+        },
+        {
+          "adapter": null,
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/005000",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/005000/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 5000,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/005000/training_state.pt",
+          "validation_flow": 0.019207952544093132
+        }
+      ],
+      "final_step": 5000,
+      "manifest": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/manifest.json",
+      "manifest_sha256": "b768c6ff917c94491970caae8a9f814f139b53a66cf7dc0fb9393a3333473750",
+      "resume_provenance": null,
+      "role": "baseline",
+      "run_dir": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline",
+      "selected": {
+        "adapter": null,
+        "adapter_sha256": null,
+        "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500",
+        "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500/model.safetensors",
+        "model_sha256": "2f106633403e5f2146bf7cd4f56858cbfdb856e9b2966d1c724a79ac4948c84f",
+        "step": 4500,
+        "validation_flow": 0.01872689090669155
+      },
+      "training_mode": "frozen_paligemma_action_expert_only_matched_baseline_v1",
+      "training_variant": "baseline"
+    },
+    "zeva": {
+      "candidates": [
+        {
+          "adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/000500/zeva_adapter.pth",
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/000500",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/000500/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 500,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/000500/training_state.pt",
+          "validation_flow": 0.01924411579966545
+        },
+        {
+          "adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/001000/zeva_adapter.pth",
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/001000",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/001000/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 1000,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/001000/training_state.pt",
+          "validation_flow": 0.019003920257091522
+        },
+        {
+          "adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/001500/zeva_adapter.pth",
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/001500",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/001500/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 1500,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/001500/training_state.pt",
+          "validation_flow": 0.019279837608337402
+        },
+        {
+          "adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/002000/zeva_adapter.pth",
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/002000",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/002000/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 2000,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/002000/training_state.pt",
+          "validation_flow": 0.01926044374704361
+        },
+        {
+          "adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/002500/zeva_adapter.pth",
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/002500",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/002500/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 2500,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/002500/training_state.pt",
+          "validation_flow": 0.018957726657390594
+        },
+        {
+          "adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/003000/zeva_adapter.pth",
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/003000",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/003000/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 3000,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/003000/training_state.pt",
+          "validation_flow": 0.0200578011572361
+        },
+        {
+          "adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/003500/zeva_adapter.pth",
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/003500",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/003500/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 3500,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/003500/training_state.pt",
+          "validation_flow": 0.019527653232216835
+        },
+        {
+          "adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/004000/zeva_adapter.pth",
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/004000",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/004000/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 4000,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/004000/training_state.pt",
+          "validation_flow": 0.01894565485417843
+        },
+        {
+          "adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/004500/zeva_adapter.pth",
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/004500",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/004500/model.safetensors",
+          "selection_reason": "rejected: higher held-out validation.flow than selected candidate",
+          "step": 4500,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/004500/training_state.pt",
+          "validation_flow": 0.018960807472467422
+        },
+        {
+          "adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000/zeva_adapter.pth",
+          "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000",
+          "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000/model.safetensors",
+          "selection_reason": "selected: minimum finite held-out validation.flow; exact ties choose earlier step",
+          "step": 5000,
+          "training_state": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000/training_state.pt",
+          "validation_flow": 0.01828256994485855
+        }
+      ],
+      "final_step": 5000,
+      "manifest": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/manifest.json",
+      "manifest_sha256": "11a6f16e549065ad7d6890f2792682ec163dde090723fc0d35469b096ac2be32",
+      "resume_provenance": {
+        "allowed_manifest_differences": [
+          "dataset_adapter",
+          "train_args.dataset_root",
+          "train_args.resume_checkpoint"
+        ],
+        "continuation": "non_bit_exact_resume_without_saved_rng_state",
+        "dataset_relocation": {
+          "components": {
+            "eef-index": {
+              "bytes": 779356201,
+              "files": 606,
+              "sha256": "4b0dcfd45f3838a5343902df6861a5a82590ee39e77f858b7682359d0ec03552"
+            },
+            "joint14-index": {
+              "bytes": 343687605,
+              "files": 503,
+              "sha256": "44cccf656dbd2ae07231f9baf6f263f5fbf258e7d984d139c489cdc7821389f8"
+            },
+            "source": {
+              "bytes": 79613724418,
+              "files": 110702,
+              "sha256": "162f0116ec4f897e838c61f384d1205a006fdd20c27a88fba2c994a38215cd87"
+            },
+            "stats": {
+              "bytes": 3565,
+              "files": 1,
+              "sha256": "9747c46391f6ac2e868b6c4bab62a3be6028aca4995dea48790bee275e16b7d1"
+            }
+          },
+          "destination_dataset_root": "/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/data",
+          "destination_report": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/dataset-identity-aigc24-stage2-resume-20260912.json",
+          "destination_report_sha256": "73060be4ce82244631def725e8a05a1216aafd52550fa295221f79bc61f511d5",
+          "schema": "robotwin-dataset-content-identity-v1",
+          "semantic_adapter": {
+            "action_horizon": 50,
+            "dataset_root": "@source",
+            "eef_cache_root": "@eef-index",
+            "image_shape": [
+              480,
+              640,
+              3
+            ],
+            "joint_cache_root": "@joint14-index",
+            "return_uint8": false,
+            "schema": "egoscale-robotwin-lerobot-relative-eef16-v1",
+            "split_seed": 1000,
+            "splits": [
+              "Clean",
+              "Randomized"
+            ],
+            "stats_path": "@stats",
+            "tasks": null,
+            "validation_fraction": 0.05,
+            "video_backend": "torchcodec"
+          },
+          "source_dataset_root": "/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data",
+          "source_report": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/dataset-identity-aigc29-stage2-resume-20260912.json",
+          "source_report_sha256": "3ba76d89295564cabb735aecc47ddb55cb039fe21f4072138a14d1f02fb20666"
+        },
+        "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/resume_provenance.json",
+        "rng_state_saved": false,
+        "same_topology": true,
+        "schema": "zeva-robotwin-stage2-resume-provenance-v1",
+        "source_adapter_sha256": "2c20b4d49100f66a7b7d4e948134e1b1cdec1fd4eafed4297ad7cacba95bce93",
+        "source_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/004500",
+        "source_manifest": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/manifest.source_before_resume_4500.json",
+        "source_manifest_sha256": "65bcb5354a8ef729ebf248520edb5cab9b43f8e8013a47762e992a97b58693ce",
+        "source_model_sha256": "a4c625b741932050783d503712a45ea1318858cd0d7c051a2d85616c042a7a26",
+        "source_optimizer_state_sha256": "1b4a294441ad42c8c5eebc95925eefafd30b405a8a6f9a8d353917b9d9b17242",
+        "source_step": 4500
+      },
+      "role": "zeva",
+      "run_dir": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva",
+      "selected": {
+        "adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000/zeva_adapter.pth",
+        "adapter_sha256": "967b78f509e4ba8e74f40967496f740c81149526ff2b46c913bcc81552f51e02",
+        "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000",
+        "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000/model.safetensors",
+        "model_sha256": "4ea8f6ca9a806b297e4881197041b222dedf29e25680aea44d2d5c465162611b",
+        "step": 5000,
+        "validation_flow": 0.01828256994485855
+      },
+      "training_mode": "frozen_paligemma_action_expert_dual_residual_accelerated_v8",
+      "training_variant": "zeva"
+    }
+  },
+  "schema": "zeva-robotwin-ztev2-pair-selection-v1",
+  "selected_immutable_paths": {
+    "baseline_model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500/model.safetensors",
+    "zeva_adapter": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000/zeva_adapter.pth",
+    "zeva_model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000/model.safetensors"
+  },
+  "selection_policy": {
+    "excluded_metrics": [
+      "validation.total for ZeVA (includes Gaussian NLL)",
+      "residual-off paired proxy",
+      "closed-loop success"
+    ],
+    "independent_per_run": true,
+    "metric": "held-out validation.flow",
+    "tie_break": "earlier optimizer step"
+  }
+}

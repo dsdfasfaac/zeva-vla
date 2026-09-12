@@ -160,6 +160,15 @@ manifest.
 
 ## Three-stage training pipeline
 
+Latest completed paired evaluation (2026-09-12): **Base 54.5% (109/200),
+ZeVA 55.0% (110/200), Anchor 50.5% (101/200)**. All 600 videos and exact
+seed/instruction pairs were audited. The +0.5 pp ZeVA delta is not evidence of
+a stable advantage (paired 95% CI -7.5 to +8.5 pp); the predeclared 57% Base
+floor also failed, so delivery acceptance is false. Training and evaluation
+are complete; evidence-based diagnosis continues, with no new training started.
+See the [full ten-task result and limitations](docs/ROBOTWIN_ZTEV2_PAIRED_RESULTS_20260912.md).
+The timestamped progress notes below are historical.
+
 Stage 1 trains ZTE v2; a selected checkpoint exports a train-only bank and
 matching recurrent live queries. After real checkpoint loading, zero-init and
 H15-state smoke tests, Stage 2 freezes ZTE/bank and the vision-language backbone,
