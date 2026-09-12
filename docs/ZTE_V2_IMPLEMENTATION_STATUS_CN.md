@@ -6,6 +6,12 @@
 
 ## 当前运行
 
+2026-09-12 13:30（北京时间）恢复已启动，仍在加载：aigc24 PID4082455，GPU0/1/3/4，从完整4500补齐5000预算，保留四卡×16×acc4=global256、LR5e-6/5e-5、所有冻结和损失设置。入口 `scripts/resume_robotwin_stage2_verified.py` 核对原trainer/policy SHA、源state/manifest、scheduler.last_epoch=4500及optimizer LR；`resume_provenance.json` 保存源model/adapter/training_state和manifest SHA，旧checkpoint不改写。未声称已经推进新step或开展正式评测。
+
+跨主机数据证明：`dataset-identity-aigc{29,24}-stage2-resume-20260912.json` 各完整读取source110702、eef606、joint503及stats1个文件；四组件content SHA、文件数/字节数、去绝对路径后的adapter语义完全一致。训练入口由 `/data1/huangbingjia/.../data` 显式迁移到aigc24的 `/data1/dingxin/.../data`。选择器只在两份hash报告核验通过后允许dataset_root/dataset_adapter路径变化，仍拒绝其它科学配置改变；旧≤4500与新5000 checkpoint分别严格匹配各自manifest。selector16项、迁移helper2项单测通过。
+
+环境：aigc24原Accelerate1.11与原训练1.13不一致，已将aigc29的1.13包复制到隔离 `/mnt/100T/users/dingxin/VLA/runtime/zeva-stage2-resume-aigc24-20260912`，未修改公共库。实际Torch2.7.1+cu126、TF5.5.4、Accelerate1.13、tokenizers dist0.22.2/module0.21.4、TorchCodec0.5+cu128对齐。辅助库仍有差异：aigc29/aigc24为NumPy2.2.6/1.26.4、Pillow12.0/11.1、tyro1.0.13/0.9.35、psutil5.9.6/7.0、PyYAML5.4.1/6.0.2；不声称完整环境字节一致，加上RNG未保存，明确为non-bit-exact continuation。
+
 2026-09-12 00:18（北京时间）复核：aigc29、31、32、24、15、01、14、28的全部64张GPU均约72–78GiB占用、利用率100%；不抢占其他作业，恢复尚未启动。Base已完成，ZeVA仍以完整4500为恢复源；正在离线准备严格校验旧manifest与恢复记录的选步兼容逻辑，不能绕过科学配置和来源校验。README和方法纵览已同步中断状态，本轮无正式成功率。
 
 23:30 更新：ZeVA未正常完成5000步。原launcher751929已退出，runtimefix2日志显示23:07:47 rank2收到SIGTERM（exit -15），最后完整checkpoint为4500。信号来源尚未查明，不将其误报为OOM或模型发散。正在检查资源与恢复条件，计划从完整4500保留model/adapter/optimizer/scheduler补齐剩余预算；当前Stage2 checkpoint未保存完整RNG，若恢复须明确为非bit-exact continuation。

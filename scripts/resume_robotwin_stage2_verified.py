@@ -98,12 +98,21 @@ def main():
                         ("destination_report", args.destination_data_report)):
         provenance["dataset_relocation"][label] = str(path.resolve())
         provenance["dataset_relocation"][label + "_sha256"] = selector.sha256_file(path)
+    source_data = json.loads(args.source_data_report.read_text())
+    destination_data = json.loads(args.destination_data_report.read_text())
+    if source_data["adapter_sha256"] != old["causal_bank_manifest"]["dataset_adapter_sha256"]:
+        raise ValueError("Source dataset report differs from frozen bank adapter lineage")
+    if destination_data["adapter_sha256"] != selector.sha256_file(args.dataset_root / "adapter.json"):
+        raise ValueError("Destination adapter changed after content audit")
+    if source_data["components"]["stats"]["sha256"] != old["statistics_sha256"]:
+        raise ValueError("Dataset statistics differ from original training")
+    selector._validate_dataset_relocation(provenance["dataset_relocation"], old, current)
     command = ["bash", str(source / "scripts/train_robotwin_stage2_8gpu.sh"), *cli_args(train_args)]
     env = os.environ.copy()
     env.update({"CUDA_VISIBLE_DEVICES": args.gpus, "ZEVA_PROCESSES": "4",
                 "ZEVA_MAIN_PROCESS_PORT": str(args.port), "ROBOTWIN_HANDOFF": old["handoff_root"],
                 "ROBOTWIN_RUNTIME": old["handoff_root"] + "/runtime", "PI05_PYTHON": "/usr/bin/python3",
-                "NATIVE_TRANSFORMERS_RUNTIME": "/mnt/100T/users/dingxin/VLA/runtime/transformers5-runtime-zeva-20260911",
+                "NATIVE_TRANSFORMERS_RUNTIME": "/mnt/100T/users/dingxin/VLA/runtime/zeva-stage2-resume-aigc24-20260912",
                 "ZEVA_RUNTIME_DEPS": "/mnt/100T/users/dingxin/VLA/runtime/zeva-eval-deps-py310-v1"})
     gpu_ids = [int(value) for value in args.gpus.split(",")]
     if len(set(gpu_ids)) != 4:
@@ -129,6 +138,8 @@ def main():
                                    stderr=subprocess.STDOUT, start_new_session=True)
     write_new(record, {"pid": process.pid, "host": socket.gethostname(), "command": command,
                        "cuda_visible_devices": args.gpus, "log": str(log),
+                       "native_transformers_runtime": env["NATIVE_TRANSFORMERS_RUNTIME"],
+                       "zeva_runtime_deps": env["ZEVA_RUNTIME_DEPS"],
                        "continuation": provenance["continuation"], "dataset_relocation": provenance["dataset_relocation"]})
     print(json.dumps({"pid": process.pid, "log": str(log), "record": str(record)}))
 
