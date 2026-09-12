@@ -6,6 +6,8 @@
 
 ## 当前运行
 
+恢复启动后核验：四个rank均输出 `All keys loaded successfully`，训练循环显示4500/5000，当前开始首步编译。实际新manifest与原备份的完整递归diff严格只有 `dataset_adapter`、`train_args.dataset_root`、`train_args.resume_checkpoint`；runtime版本、world4、global256、LR/损失/冻结、task samples及全部模型来源字段一致。尚未把起始计数4500当作已产生新optimizer step。
+
 2026-09-12 13:30（北京时间）恢复已启动，仍在加载：aigc24 PID4082455，GPU0/1/3/4，从完整4500补齐5000预算，保留四卡×16×acc4=global256、LR5e-6/5e-5、所有冻结和损失设置。入口 `scripts/resume_robotwin_stage2_verified.py` 核对原trainer/policy SHA、源state/manifest、scheduler.last_epoch=4500及optimizer LR；`resume_provenance.json` 保存源model/adapter/training_state和manifest SHA，旧checkpoint不改写。未声称已经推进新step或开展正式评测。
 
 跨主机数据证明：`dataset-identity-aigc{29,24}-stage2-resume-20260912.json` 各完整读取source110702、eef606、joint503及stats1个文件；四组件content SHA、文件数/字节数、去绝对路径后的adapter语义完全一致。训练入口由 `/data1/huangbingjia/.../data` 显式迁移到aigc24的 `/data1/dingxin/.../data`。选择器只在两份hash报告核验通过后允许dataset_root/dataset_adapter路径变化，仍拒绝其它科学配置改变；旧≤4500与新5000 checkpoint分别严格匹配各自manifest。selector16项、迁移helper2项单测通过。
