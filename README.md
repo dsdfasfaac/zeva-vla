@@ -186,6 +186,12 @@ seed/instruction entries audited. This is below the predeclared 57% reference
 floor, so normality has not passed. Anchor is running on the identical cases;
 ZeVA follows automatically. Do not treat this partial comparison as a final
 result or replace the selected checkpoints/seeds in response to test outcomes.
+
+At 19:02, Anchor is also complete: **101/200 (50.5%)**, with video and exact
+seed/instruction checks passed. Base is 4 percentage points higher on these
+paired cases, but remains below the historical 57% floor. ZeVA evaluation is
+running. Historical-reference comparability is being audited without changing
+the gate or using test outcomes to reselect weights.
 The fresh-run entry point is
 `scripts/train_robotwin_advantage10_ztev2.sh`; historical commands below are
 not this experiment. Training is complete; closed-loop delivery is not.

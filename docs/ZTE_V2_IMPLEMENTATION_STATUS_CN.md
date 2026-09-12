@@ -6,6 +6,8 @@
 
 ## 当前运行
 
+2026-09-12 19:02（北京时间）Anchor完成：101/200=50.5%，200个视频齐全、成功标签与progress一致、全部seed/指令与Base冻结manifest逐条相同。Base109/200=54.5%，本轮同seed高4个百分点（Base-only成功35，Anchor-only成功27；这是样本内差异，不据此宣称统计显著）。Base仍低于预设57%历史参考线，正常性门槛未改。正在只读核查历史114/200所用样本和协议是否与本轮完全一致，不能擅自放宽标准。ZeVA已于18:40:03自动进入评测，当前正常推进、无失败退出，完整成功率尚未产生。
+
 2026-09-12 16:27（北京时间）Base正式评测完成：109/200=54.5%。十任务均20episodes、return_code=0；200个视频齐全，视频成功标签合计109且逐任务与progress一致，seed_manifest中的seed和实际指令逐条一致。低于预先设定57%参考线，因此正常性尚未过关；不能以较弱Base宣称ZeVA达标。Anchor已于16:15:14开始相同seed/指令重放，ZeVA随后自动运行。保留完整结果及选定checkpoint，不按正式测试结果回头挑选权重或种子；同seed Anchor尚未完成，暂不能归因于真实能力下降或评测波动。
 
 2026-09-12 14:13（北京时间）正式pipeline已启动，模型server仍在加载：aigc24 launcher4129168（外层shell4129167），输出 `eval/formal-ztev2-selected-pair-20260912`。使用独立 `eval-release-ztev2-20260912/scripts/robotwin_eval` 快照，保留远端原评测脚本不覆盖，src/configs指向已核验源码。model/render均aigc24，显式MODEL_IP=172.16.80.158，8 slots；按Base→Anchor→ZeVA运行。各200episodes，Base先从1000筛首20 expert-valid seeds并保存实际指令，后两支精确重放，视频启用。Large_D435640×480、seen、demo_randomized相同随机化（配置名zeva_randomized仅改相机）、H50/H15等协议固定。正常性报告门槛保留Base≥max(同seed Anchor,57%)且ZeVA>Base，不按结果回头换checkpoint。此时无已完成episode或成功率。
