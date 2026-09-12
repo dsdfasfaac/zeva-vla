@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from contextlib import nullcontext
 import dataclasses
 import hashlib
@@ -50,6 +51,11 @@ except ModuleNotFoundError:  # Direct `python scripts/...py` execution.
 UNTOUCHED_BEST_V1_MODEL_SHA256 = (
     "7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe"
 )
+
+# RoboTwin emits PI0.5 chunks of H50 and executes only the first H15 before
+# the recurrent replan.  Keep this diagnostic constant local to Stage 2: it
+# is deliberately not used by the training loss or any model configuration.
+ROBOTWIN_EXECUTED_HORIZON = 15
 
 LIVE_QUERY_SCHEMAS = frozenset({
     "zeva-robotwin-live-queries-h15-v1",
@@ -155,6 +161,10 @@ class Args:
     save_freq: int = 500
     save_checkpoints: bool = True
     eval_batches: int = 32
+    # Optional read-only validation telemetry.  It is intentionally excluded
+    # from the normal path so existing validation numbers and checkpoints are
+    # bit-for-bit unaffected unless a caller explicitly opts in.
+    validation_diagnostics: bool = False
     log_freq: int = 10
     compile_model: bool = True
     compile_mode: str = "default"
@@ -393,6 +403,880 @@ def _foundation_loss(output: Any, *, reduction: str = "mean") -> torch.Tensor:
     raise ValueError(f"Unsupported foundation loss reduction: {reduction!r}.")
 
 
+def _diagnostic_rng_state(
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Capture the rank-local RNG streams without requiring CUDA in tests."""
+    cuda_state = torch.cuda.get_rng_state(device) if device.type == "cuda" else None
+    return torch.random.get_rng_state(), cuda_state
+
+
+def _restore_diagnostic_rng_state(
+    state: tuple[torch.Tensor, torch.Tensor | None], device: torch.device
+) -> None:
+    torch.random.set_rng_state(state[0])
+    if state[1] is not None:
+        torch.cuda.set_rng_state(state[1], device)
+
+
+def _diagnostic_action_valid_mask(
+    processed: dict[str, torch.Tensor],
+    *,
+    batch_size: int,
+    horizon: int,
+    device: torch.device,
+) -> tuple[torch.Tensor, str]:
+    """Return the action-step validity mask used by an opt-in H15 report.
+
+    The normal PI0.5 forward path owns image/action preprocessing.  This
+    helper only interprets an explicitly supplied action padding/mask field;
+    when no such field exists, all fixed H50 action slots are valid exactly as
+    in the existing flow loss.  It never treats zero-valued actions as
+    padding, which would silently change the training contract.
+    """
+    padding_keys = (
+        "action_is_pad",
+        "action.is_pad",
+        "observation.action_is_pad",
+    )
+    valid_keys = (
+        "action_mask",
+        "action.mask",
+        "observation.action_mask",
+    )
+    source = "implicit_all_action_steps_valid"
+    value: torch.Tensor | None = None
+    is_padding = False
+    for key in padding_keys:
+        if key in processed:
+            value = processed[key]
+            is_padding = True
+            source = key
+            break
+    if value is None:
+        for key in valid_keys:
+            if key in processed:
+                value = processed[key]
+                source = key
+                break
+
+    if value is None:
+        return torch.ones((batch_size, horizon), dtype=torch.bool, device=device), source
+
+    mask = torch.as_tensor(value, device=device).bool()
+    if mask.ndim == 1:
+        if batch_size != 1:
+            raise ValueError(
+                f"Action validity mask {source!r} must have a batch dimension, got {tuple(mask.shape)}."
+            )
+        mask = mask.unsqueeze(0)
+    if mask.ndim == 3:
+        # LeRobot's action padding is normally repeated over dimensions.  A
+        # step is valid if at least one action dimension is not padded; for an
+        # ordinary validity mask, any valid dimension keeps the step valid.
+        mask = mask.all(dim=-1) if is_padding else mask.any(dim=-1)
+    if mask.ndim != 2 or mask.shape[0] != batch_size:
+        raise ValueError(
+            f"Action validity mask {source!r} must be [B,H] or [B,H,D], got {tuple(mask.shape)}."
+        )
+    result = torch.zeros((batch_size, horizon), dtype=torch.bool, device=device)
+    width = min(horizon, mask.shape[1])
+    if width:
+        result[:, :width] = ~mask[:, :width] if is_padding else mask[:, :width]
+    return result, source
+
+
+def _masked_action_flow_per_sample(
+    action_losses: torch.Tensor,
+    *,
+    horizon: int,
+    valid_mask: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Reduce raw PI0.5 per-action flow errors over a valid H-prefix.
+
+    ``action_losses`` is expected to be the unreduced ``[B,H,D]`` tensor from
+    ``PI05Pytorch.forward``.  A ``[B,H]`` tensor is accepted for small test
+    doubles.  The returned pair is ``(per_sample_mean, valid_step_count)``;
+    samples with no valid action slots receive NaN and are excluded by report
+    aggregation.  No action values are inspected to infer padding.
+    """
+    if action_losses.ndim == 2:
+        action_losses = action_losses.unsqueeze(-1)
+    if action_losses.ndim != 3:
+        raise ValueError(
+            "H-prefix flow diagnostics require unreduced [B,H,D] losses, got "
+            f"{tuple(action_losses.shape)}."
+        )
+    if horizon <= 0:
+        raise ValueError(f"Diagnostic horizon must be positive, got {horizon}.")
+    batch_size, available_horizon, action_dim = action_losses.shape
+    width = min(horizon, available_horizon)
+    values = action_losses[:, :width].float()
+    if valid_mask is None:
+        valid = torch.ones(
+            (batch_size, width), dtype=torch.bool, device=action_losses.device
+        )
+    else:
+        valid = torch.as_tensor(valid_mask, device=action_losses.device).bool()
+        if valid.shape != (batch_size, horizon):
+            raise ValueError(
+                "Diagnostic validity mask must match [B, requested_horizon], got "
+                f"{tuple(valid.shape)} versus {(batch_size, horizon)}."
+            )
+        valid = valid[:, :width]
+    valid_steps = valid.sum(dim=1)
+    denominator = valid_steps * action_dim
+    weighted = values * valid.unsqueeze(-1).to(values.dtype)
+    per_sample = weighted.sum(dim=(1, 2)) / denominator.clamp_min(1).to(values.dtype)
+    per_sample = per_sample.masked_fill(valid_steps == 0, float("nan"))
+    return per_sample, valid_steps
+
+
+def _diagnostic_value_summary(
+    values: torch.Tensor,
+    *,
+    valid_steps: torch.Tensor | None = None,
+) -> dict[str, Any]:
+    """Summarize finite per-sample diagnostics without weighting padding."""
+    values = torch.as_tensor(values, dtype=torch.float32).reshape(-1).cpu()
+    finite = torch.isfinite(values)
+    result: dict[str, Any] = {
+        "available": bool(finite.any()),
+        "valid_examples": int(finite.sum()),
+    }
+    if finite.any():
+        selected = values[finite]
+        result.update(
+            {
+                "mean": float(selected.mean()),
+                "min": float(selected.min()),
+                "max": float(selected.max()),
+            }
+        )
+    else:
+        result["reason"] = "no finite examples"
+    if valid_steps is not None:
+        steps = torch.as_tensor(valid_steps, dtype=torch.float32).reshape(-1).cpu()
+        if steps.numel() == values.numel():
+            result["valid_steps"] = int(steps[finite].sum()) if finite.any() else 0
+    return result
+
+
+def _diagnostic_pair_summary(
+    student: torch.Tensor,
+    teacher: torch.Tensor,
+    *,
+    valid_steps: torch.Tensor | None = None,
+) -> dict[str, Any]:
+    """Summarize a paired H15 comparison with an explicit teacher label."""
+    student = torch.as_tensor(student, dtype=torch.float32).reshape(-1).cpu()
+    teacher = torch.as_tensor(teacher, dtype=torch.float32).reshape(-1).cpu()
+    finite = torch.isfinite(student) & torch.isfinite(teacher)
+    if not bool(finite.any()):
+        result = {"available": False, "valid_examples": 0, "reason": "no finite pairs"}
+    else:
+        delta = teacher[finite] - student[finite]
+        result = {
+            "available": True,
+            "valid_examples": int(finite.sum()),
+            "student_flow": float(student[finite].mean()),
+            "teacher_flow": float(teacher[finite].mean()),
+            "improvement": float(delta.mean()),
+            "degradation": float(torch.relu(-delta).mean()),
+            "win_fraction": float((delta > 0).float().mean()),
+        }
+    if valid_steps is not None:
+        steps = torch.as_tensor(valid_steps, dtype=torch.float32).reshape(-1).cpu()
+        if steps.numel() == student.numel():
+            result["valid_steps"] = int(steps[finite].sum()) if finite.any() else 0
+    return result
+
+
+_DIAGNOSTIC_ACTIVE_FIELDS = (
+    "_active_causal_context",
+    "_active_action_prior",
+    "_active_injection_confidence",
+    "_active_prior_residual_mask",
+    "_active_context_gate",
+    "_active_prior_gate",
+)
+
+
+def _snapshot_active_injection(policy: nn.Module) -> dict[str, Any]:
+    return {name: getattr(policy, name, None) for name in _DIAGNOSTIC_ACTIVE_FIELDS}
+
+
+def _restore_active_injection(policy: nn.Module, snapshot: dict[str, Any]) -> None:
+    for name, value in snapshot.items():
+        setattr(policy, name, value)
+
+
+@contextmanager
+def _diagnostic_active_injection(
+    policy: nn.Module,
+    *,
+    context: torch.Tensor | None,
+    prior_mean: torch.Tensor | None,
+    confidence: torch.Tensor | None,
+    task_schema: torch.Tensor | None,
+    phase_token: torch.Tensor | None,
+) -> Any:
+    """Temporarily expose the same residual inputs used by policy.forward."""
+    snapshot = _snapshot_active_injection(policy)
+    try:
+        policy._clear_active_residuals()  # noqa: SLF001 - existing policy API
+        if context is not None and prior_mean is not None:
+            if task_schema is None or phase_token is None:
+                raise ValueError("Residual diagnostics require task schema and phase token.")
+            policy._active_causal_context = context  # noqa: SLF001
+            policy._active_action_prior = prior_mean  # noqa: SLF001
+            policy._activate_residual_gates(task_schema, phase_token)  # noqa: SLF001
+            policy._active_injection_confidence = confidence  # noqa: SLF001
+        yield
+    finally:
+        _restore_active_injection(policy, snapshot)
+
+
+@contextmanager
+def _diagnostic_foundation_anchor(policy: nn.Module) -> Any:
+    """Temporarily swap the existing immutable action-path anchor, if loaded."""
+    anchors = getattr(policy, "_foundation_anchor_parameters", {})
+    if not anchors:
+        yield False
+        return
+    named = dict(policy.foundation.named_parameters())
+    original: dict[str, torch.Tensor] = {}
+    try:
+        with torch.no_grad():
+            for name, anchor in anchors.items():
+                parameter = named[name]
+                original[name] = parameter.data
+                parameter.data = anchor
+        yield True
+    finally:
+        with torch.no_grad():
+            for name, value in original.items():
+                named[name].data = value
+
+
+def _foundation_raw_flow_and_embedding(
+    policy: nn.Module,
+    processed: dict[str, torch.Tensor],
+    *,
+    rng_state: tuple[torch.Tensor, torch.Tensor | None],
+    capture_embedding: bool,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Read raw PI0.5 flow errors and pre-injection action embeddings.
+
+    ``PI05Policy.forward(reduction='none')`` intentionally returns only a
+    per-example reduction.  The opt-in diagnostic therefore calls its already
+    public core ``PI05Pytorch.forward`` with the exact same preprocessor,
+    noise, and time samplers.  It is under ``no_grad`` and restores RNG state;
+    normal validation and training never enter this function.
+    """
+    foundation = policy.foundation
+    model = foundation.model
+    required = (
+        getattr(foundation, "_preprocess_images", None),
+        getattr(foundation, "_prepare_memory_states", None),
+        getattr(foundation, "prepare_action", None),
+        getattr(model, "sample_noise", None),
+        getattr(model, "sample_time", None),
+        getattr(model, "embed_suffix", None),
+        getattr(model, "forward", None),
+    )
+    if any(value is None for value in required):
+        raise RuntimeError("PI0.5 core does not expose the raw diagnostic forward API.")
+
+    device = processed["action"].device
+    saved_rng = _diagnostic_rng_state(device)
+    try:
+        _restore_diagnostic_rng_state(rng_state, device)
+        images, image_masks = foundation._preprocess_images(processed)  # noqa: SLF001
+        states, state_masks = foundation._prepare_memory_states(processed)  # noqa: SLF001
+        tokens = processed["observation.language.tokens"]
+        masks = processed["observation.language.attention_mask"]
+        actions = foundation.prepare_action(processed)
+        noise = model.sample_noise(actions.shape, actions.device)
+        time = model.sample_time(actions.shape[0], actions.device)
+        time_expanded = time[:, None, None]
+        noisy_actions = time_expanded * noise + (1 - time_expanded) * actions
+
+        noisy_embedding = None
+        if capture_embedding:
+            active_snapshot = _snapshot_active_injection(policy)
+            try:
+                policy._clear_active_residuals()  # noqa: SLF001
+                # The pinned RoboTwin handoff exposes ``embed_suffix`` as
+                # ``(noisy_actions, timestep)``.  A few older PI0.5 runtime
+                # builds kept the non-PI05 state argument; retain a narrow
+                # compatibility fallback for diagnostics only.  The normal
+                # policy path is never routed through this branch.
+                try:
+                    suffix = model.embed_suffix(noisy_actions, time)
+                except TypeError as first_error:
+                    try:
+                        suffix = model.embed_suffix(states, noisy_actions, time)
+                    except TypeError:
+                        raise first_error from None
+                if not isinstance(suffix, tuple) or not suffix:
+                    raise RuntimeError("PI0.5 embed_suffix returned no action embeddings.")
+                noisy_embedding = suffix[0].detach()
+            finally:
+                _restore_active_injection(policy, active_snapshot)
+
+        raw = model.forward(
+            images,
+            image_masks,
+            tokens,
+            masks,
+            actions,
+            noise,
+            time,
+            states=states,
+            state_masks=state_masks,
+        )
+        raw = raw[0] if isinstance(raw, tuple) else raw
+        if not torch.is_tensor(raw) or raw.ndim != 3:
+            raise RuntimeError(
+                "PI0.5 core did not return unreduced [B,H,D] flow errors; "
+                f"got {type(raw)!r} with shape {getattr(raw, 'shape', None)}."
+            )
+        original_dim = int(foundation.config.output_features["action"].shape[0])
+        return raw[:, :, :original_dim].detach(), noisy_embedding
+    finally:
+        _restore_diagnostic_rng_state(saved_rng, device)
+
+
+def _diagnostic_residual_tensors(
+    policy: nn.Module,
+    *,
+    task_schema: torch.Tensor,
+    phase_token: torch.Tensor,
+    context: torch.Tensor,
+    prior_mean: torch.Tensor,
+    confidence: torch.Tensor | None,
+    action_embedding_dtype: torch.dtype | None = None,
+    effective_gates: tuple[torch.Tensor, torch.Tensor] | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute the exact gated residual tensors used by the installed hook."""
+    projector_dtype = next(policy.causal_action_projector.parameters()).dtype
+    target_dtype = action_embedding_dtype or projector_dtype
+    confidence_value = (
+        context.new_ones(context.shape[0]) if confidence is None else confidence
+    )
+    if effective_gates is None:
+        context_gate, prior_gate = policy.residual_injection_gates(task_schema, phase_token)
+    else:
+        context_gate, prior_gate = effective_gates
+    context_gate = context_gate.to(context.dtype) * confidence_value.to(context.dtype)
+    prior_gate = prior_gate.to(prior_mean.dtype) * confidence_value.to(prior_mean.dtype)
+
+    if policy._direct_context_injection_enabled:  # noqa: SLF001
+        # The installed hook broadcasts one projected context vector over
+        # every action token.  Keep the singleton horizon here so the
+        # measurement can expand it explicitly, rather than accidentally
+        # relying on PyTorch's batch broadcasting rules.
+        context_delta = policy.causal_action_projector(context).to(target_dtype)
+        if context_delta.ndim != 2:
+            raise ValueError(
+                "The installed context hook expects a single [B,E] context projection, "
+                f"got {tuple(context_delta.shape)}."
+            )
+        context_delta = context_delta[:, None, :]
+        context_delta = context_delta * context_gate[:, None, None]
+    else:
+        context_delta = context.new_zeros(
+            (context.shape[0], 1, policy.causal_action_projector.out_features),
+            dtype=target_dtype,
+        )
+    prior_delta = policy.prior_action_projector(prior_mean).to(target_dtype)
+    if prior_delta.ndim == 2:
+        prior_delta = prior_delta[:, None, :]
+    prior_delta = prior_delta * prior_gate[:, None, None]
+    prior_horizon = min(
+        int(getattr(policy, "_prior_injection_horizon", ROBOTWIN_ACTION_HORIZON)),
+        prior_delta.shape[1],
+    )
+    if prior_horizon < prior_delta.shape[1]:
+        prior_delta = prior_delta.clone()
+        prior_delta[:, prior_horizon:] = 0
+    return context_delta, prior_delta
+
+
+def _expand_diagnostic_residual(
+    value: torch.Tensor,
+    *,
+    batch_size: int,
+    width: int,
+    name: str,
+) -> torch.Tensor:
+    """Normalize a residual tensor to ``[B, H, E]`` for norm accounting."""
+    value = torch.as_tensor(value)
+    if value.ndim == 2:
+        value = value[:, None, :]
+    if value.ndim != 3 or value.shape[0] != batch_size:
+        raise ValueError(
+            f"{name} must be [B,H,E] (or [B,E]), got {tuple(value.shape)}."
+        )
+    if value.shape[1] == 1 and width > 1:
+        value = value.expand(-1, width, -1)
+    if value.shape[1] < width:
+        raise ValueError(
+            f"{name} has only {value.shape[1]} steps but {width} are required."
+        )
+    return value[:, :width]
+
+
+def _relative_residual_values(
+    reference: torch.Tensor,
+    context_delta: torch.Tensor,
+    prior_delta: torch.Tensor,
+    *,
+    valid_mask: torch.Tensor,
+    horizon: int,
+) -> dict[str, torch.Tensor]:
+    """Return measured residual/reference norms, never gate-only estimates.
+
+    This function deliberately returns per-example tensors.  The evaluator
+    gathers those tensors across ranks before reducing them, so a large batch
+    or a padded batch cannot change the metric through rank-local averaging.
+    """
+    if reference.ndim != 3:
+        raise ValueError(
+            "The pre-injection action embedding must be [B,H,E], got "
+            f"{tuple(reference.shape)}."
+        )
+    width = min(horizon, reference.shape[1])
+    if width <= 0:
+        raise ValueError("The pre-injection action embedding has an empty horizon.")
+    batch_size = reference.shape[0]
+    context = _expand_diagnostic_residual(
+        context_delta,
+        batch_size=batch_size,
+        width=width,
+        name="context_delta",
+    )
+    prior = _expand_diagnostic_residual(
+        prior_delta,
+        batch_size=batch_size,
+        width=width,
+        name="prior_delta",
+    )
+    valid_mask = torch.as_tensor(valid_mask, device=reference.device).bool()
+    if valid_mask.ndim != 2 or valid_mask.shape[0] != batch_size:
+        raise ValueError(
+            "Residual diagnostic validity mask must be [B,H], got "
+            f"{tuple(valid_mask.shape)}."
+        )
+    valid = valid_mask[:, :width]
+    ref = reference[:, :width].float()
+    context = context.float()
+    prior = prior.float()
+    mask = valid.unsqueeze(-1).to(ref.dtype)
+    ref_norm = torch.linalg.vector_norm((ref * mask).reshape(ref.shape[0], -1), dim=1)
+    context_norm = torch.linalg.vector_norm(
+        (context * mask).reshape(context.shape[0], -1), dim=1
+    )
+    prior_norm = torch.linalg.vector_norm(
+        (prior * mask).reshape(prior.shape[0], -1), dim=1
+    )
+    total_norm = torch.linalg.vector_norm(
+        ((context + prior) * mask).reshape(ref.shape[0], -1), dim=1
+    )
+    valid_steps = valid.sum(dim=1)
+    denominator = ref_norm.clamp_min(torch.finfo(ref_norm.dtype).eps)
+    finite = valid_steps > 0
+    finite &= torch.isfinite(ref_norm)
+    finite &= torch.isfinite(context_norm)
+    finite &= torch.isfinite(prior_norm)
+    finite &= torch.isfinite(total_norm)
+    values: dict[str, torch.Tensor] = {
+        "reference_norm": ref_norm,
+        "context_delta_norm": context_norm,
+        "prior_delta_norm": prior_norm,
+        "total_delta_norm": total_norm,
+        "context_relative_norm": context_norm / denominator,
+        "prior_relative_norm": prior_norm / denominator,
+        "total_relative_norm": total_norm / denominator,
+        "valid_steps": valid_steps,
+        "finite": finite,
+    }
+    for name, value in tuple(values.items()):
+        if name not in {"valid_steps", "finite"}:
+            values[name] = value.masked_fill(~finite, float("nan"))
+    return values
+
+
+def _collect_validation_diagnostics(
+    policy: nn.Module,
+    processed: dict[str, torch.Tensor],
+    losses: dict[str, torch.Tensor],
+    *,
+    foundation_rng_state: tuple[torch.Tensor, torch.Tensor] | None,
+    injection_confidence: torch.Tensor | None,
+    phase_token: torch.Tensor | None,
+    training_variant: str,
+) -> dict[str, Any]:
+    """Collect one opt-in, read-only PI0.5/ZeVA validation observation.
+
+    The normal policy forward has already run before this helper is called.
+    Every additional forward below runs under ``no_grad`` with RNG replay and
+    restores the policy's transient injection fields, so enabling the report
+    cannot mutate model state or alter the ordinary validation numbers.  The
+    raw PI0.5 core is intentionally optional: unsupported runtime versions
+    produce an explicit unavailable report instead of approximating H15 from a
+    scalar H50 loss.
+    """
+    unavailable: dict[str, Any] = {
+        "available": False,
+        "mask_source": None,
+        "reason": None,
+        "_student_h50": None,
+        "_student_h15": None,
+        "_current_h50": None,
+        "_current_h15": None,
+        "_fixed_h50": None,
+        "_fixed_h15": None,
+        "_valid_steps_h50": None,
+        "_valid_steps_h15": None,
+        "_residual_h50": None,
+        "_residual_h15": None,
+    }
+    if training_variant not in {
+        "zeva",
+        "adapter",
+        "prior_adapter",
+        "prior_zeva",
+        "action_expert_control",
+    }:
+        unavailable["reason"] = (
+            "raw residual diagnostics are defined for the PI0.5 noisy-action "
+            f"path, not training_variant={training_variant!r}"
+        )
+        return unavailable
+    if foundation_rng_state is None:
+        unavailable["reason"] = "matched foundation RNG state was not captured"
+        return unavailable
+
+    unwrapped = policy.module if hasattr(policy, "module") else policy
+    context = losses.get("_diagnostic_context")
+    prior_mean = losses.get("_diagnostic_action_prior_mean")
+    task_schema = losses.get("_diagnostic_task_schema")
+
+    try:
+        # First replay the exact current student weights with both residual
+        # inputs disabled.  This is the separately labeled *current* teacher;
+        # it is not silently called a fixed teacher because its action expert
+        # may continue to drift during a run.
+        with _diagnostic_active_injection(
+            unwrapped,
+            context=None,
+            prior_mean=None,
+            confidence=None,
+            task_schema=None,
+            phase_token=None,
+        ):
+            current_h50_raw, _ = _foundation_raw_flow_and_embedding(
+                unwrapped,
+                processed,
+                rng_state=foundation_rng_state,
+                capture_embedding=False,
+            )
+
+        student_h50_raw = None
+        noisy_embedding = None
+        residual_tensors = None
+        if all(
+            value is not None
+            for value in (context, prior_mean, task_schema, phase_token)
+        ):
+            with _diagnostic_active_injection(
+                unwrapped,
+                context=context,
+                prior_mean=prior_mean,
+                confidence=injection_confidence,
+                task_schema=task_schema,
+                phase_token=phase_token,
+            ):
+                student_h50_raw, noisy_embedding = _foundation_raw_flow_and_embedding(
+                    unwrapped,
+                    processed,
+                    rng_state=foundation_rng_state,
+                    capture_embedding=True,
+                )
+                residual_tensors = _diagnostic_residual_tensors(
+                    unwrapped,
+                    task_schema=task_schema,
+                    phase_token=phase_token,
+                    context=context,
+                    prior_mean=prior_mean,
+                    confidence=injection_confidence,
+                    action_embedding_dtype=noisy_embedding.dtype,
+                    effective_gates=(
+                        unwrapped._active_context_gate,  # noqa: SLF001
+                        unwrapped._active_prior_gate,  # noqa: SLF001
+                    ),
+                )
+
+        fixed_h50_raw = None
+        if getattr(unwrapped, "_foundation_anchor_parameters", {}):
+            # The immutable anchor, when explicitly loaded, is a different
+            # scientific comparison from the current residual-off student.
+            with _diagnostic_foundation_anchor(unwrapped) as loaded:
+                if loaded:
+                    with _diagnostic_active_injection(
+                        unwrapped,
+                        context=None,
+                        prior_mean=None,
+                        confidence=None,
+                        task_schema=None,
+                        phase_token=None,
+                    ):
+                        fixed_h50_raw, _ = _foundation_raw_flow_and_embedding(
+                            unwrapped,
+                            processed,
+                            rng_state=foundation_rng_state,
+                            capture_embedding=False,
+                        )
+
+        batch_size = current_h50_raw.shape[0]
+        valid_mask, mask_source = _diagnostic_action_valid_mask(
+            processed,
+            batch_size=batch_size,
+            horizon=ROBOTWIN_ACTION_HORIZON,
+            device=current_h50_raw.device,
+        )
+        current_h50, valid_steps_h50 = _masked_action_flow_per_sample(
+            current_h50_raw,
+            horizon=ROBOTWIN_ACTION_HORIZON,
+            valid_mask=valid_mask,
+        )
+        current_h15, valid_steps_h15 = _masked_action_flow_per_sample(
+            current_h50_raw,
+            horizon=ROBOTWIN_EXECUTED_HORIZON,
+            valid_mask=valid_mask[:, :ROBOTWIN_EXECUTED_HORIZON],
+        )
+        student_h50 = student_h15 = None
+        if student_h50_raw is not None:
+            student_h50, student_steps_h50 = _masked_action_flow_per_sample(
+                student_h50_raw,
+                horizon=ROBOTWIN_ACTION_HORIZON,
+                valid_mask=valid_mask,
+            )
+            student_h15, student_steps_h15 = _masked_action_flow_per_sample(
+                student_h50_raw,
+                horizon=ROBOTWIN_EXECUTED_HORIZON,
+                valid_mask=valid_mask[:, :ROBOTWIN_EXECUTED_HORIZON],
+            )
+            if not torch.equal(student_steps_h50, valid_steps_h50) or not torch.equal(
+                student_steps_h15, valid_steps_h15
+            ):
+                raise RuntimeError("Student and current H-prefix masks diverged.")
+        fixed_h50 = fixed_h15 = None
+        if fixed_h50_raw is not None:
+            fixed_h50, fixed_steps_h50 = _masked_action_flow_per_sample(
+                fixed_h50_raw,
+                horizon=ROBOTWIN_ACTION_HORIZON,
+                valid_mask=valid_mask,
+            )
+            fixed_h15, fixed_steps_h15 = _masked_action_flow_per_sample(
+                fixed_h50_raw,
+                horizon=ROBOTWIN_EXECUTED_HORIZON,
+                valid_mask=valid_mask[:, :ROBOTWIN_EXECUTED_HORIZON],
+            )
+            if not torch.equal(fixed_steps_h50, valid_steps_h50) or not torch.equal(
+                fixed_steps_h15, valid_steps_h15
+            ):
+                raise RuntimeError("Fixed-teacher and current H-prefix masks diverged.")
+
+        residual_h50 = residual_h15 = None
+        residual_reason = None
+        if noisy_embedding is not None and residual_tensors is not None:
+            context_delta, prior_delta = residual_tensors
+            residual_h50 = _relative_residual_values(
+                noisy_embedding,
+                context_delta,
+                prior_delta,
+                valid_mask=valid_mask,
+                horizon=ROBOTWIN_ACTION_HORIZON,
+            )
+            residual_h15 = _relative_residual_values(
+                noisy_embedding,
+                context_delta,
+                prior_delta,
+                valid_mask=valid_mask[:, :ROBOTWIN_EXECUTED_HORIZON],
+                horizon=ROBOTWIN_EXECUTED_HORIZON,
+            )
+        else:
+            residual_reason = (
+                "injection tensors or pre-injection action embedding were not "
+                "exposed by this validation path; no gate-only estimate was used"
+            )
+
+        unavailable.update(
+            {
+                "available": True,
+                "mask_source": mask_source,
+                "reason": residual_reason,
+                "_student_h50": student_h50,
+                "_student_h15": student_h15,
+                "_current_h50": current_h50,
+                "_current_h15": current_h15,
+                "_fixed_h50": fixed_h50,
+                "_fixed_h15": fixed_h15,
+                "_valid_steps_h50": valid_steps_h50,
+                "_valid_steps_h15": valid_steps_h15,
+                "_residual_h50": residual_h50,
+                "_residual_h15": residual_h15,
+            }
+        )
+    except (TypeError, ValueError, RuntimeError, KeyError, AttributeError) as error:
+        unavailable["reason"] = f"{type(error).__name__}: {error}"
+    return unavailable
+
+
+def _finalize_validation_diagnostics(
+    values: dict[str, list[torch.Tensor]],
+    *,
+    reasons: list[str],
+    mask_sources: list[str],
+) -> dict[str, Any]:
+    """Reduce gathered diagnostic vectors into a stable JSON-safe report."""
+    def concat(name: str) -> torch.Tensor | None:
+        chunks = values.get(name, [])
+        return torch.cat(chunks) if chunks else None
+
+    student_h50 = concat("student_h50")
+    student_h15 = concat("student_h15")
+    current_h50 = concat("current_h50")
+    current_h15 = concat("current_h15")
+    fixed_h15 = concat("fixed_h15")
+    steps_h50 = concat("valid_steps_h50")
+    steps_h15 = concat("valid_steps_h15")
+
+    def unavailable_pair(label: str, reason: str) -> dict[str, Any]:
+        return {"available": False, "label": label, "reason": reason}
+
+    paired_current = (
+        _diagnostic_pair_summary(student_h15, current_h15, valid_steps=steps_h15)
+        if student_h15 is not None and current_h15 is not None
+        else unavailable_pair(
+            "current_residual_off",
+            "student residual-on H15 flow was unavailable",
+        )
+    )
+    paired_current["label"] = "current_residual_off"
+    paired_fixed = (
+        _diagnostic_pair_summary(student_h15, fixed_h15, valid_steps=steps_h15)
+        if student_h15 is not None and fixed_h15 is not None
+        else unavailable_pair(
+            "fixed_teacher",
+            "an explicit immutable foundation anchor was not available",
+        )
+    )
+    paired_fixed["label"] = "fixed_teacher"
+
+    residual = {
+        "available": False,
+        "measurement": (
+            "projected gated context/prior tensors divided by the measured "
+            "pre-injection noisy action-embedding norm"
+        ),
+    }
+    for horizon_name, suffix, steps_name in (
+        ("h50", "h50", "residual_h50_valid_steps"),
+        ("h15", "h15", "residual_h15_valid_steps"),
+    ):
+        prefix = f"residual_{suffix}_"
+        if not any(values.get(prefix + metric, []) for metric in (
+            "reference_norm",
+            "context_delta_norm",
+            "prior_delta_norm",
+            "total_delta_norm",
+            "context_relative_norm",
+            "prior_relative_norm",
+            "total_relative_norm",
+        )):
+            continue
+        horizon_steps = concat(steps_name)
+        report: dict[str, Any] = {
+            "available": True,
+            "horizon": ROBOTWIN_ACTION_HORIZON
+            if horizon_name == "h50"
+            else ROBOTWIN_EXECUTED_HORIZON,
+            "reference": "pre_injection_noisy_action_embedding",
+        }
+        for metric in (
+            "reference_norm",
+            "context_delta_norm",
+            "prior_delta_norm",
+            "total_delta_norm",
+            "context_relative_norm",
+            "prior_relative_norm",
+            "total_relative_norm",
+        ):
+            metric_values = concat(prefix + metric)
+            if metric_values is not None:
+                report[metric] = _diagnostic_value_summary(
+                    metric_values,
+                    valid_steps=horizon_steps,
+                )
+        residual[horizon_name] = report
+        residual["available"] = True
+    if not residual["available"]:
+        residual["reason"] = (
+            "measured residual tensors were unavailable; no scalar gate was "
+            "used as an amplitude proxy"
+        )
+
+    report: dict[str, Any] = {
+        "enabled": True,
+        "available": any(
+            value is not None
+            for value in (student_h15, current_h15, fixed_h15)
+        ),
+        "policy_horizon": ROBOTWIN_ACTION_HORIZON,
+        "executed_horizon": ROBOTWIN_EXECUTED_HORIZON,
+        "raw_flow_source": "PI05Pytorch.forward unreduced [B,H,D] flow errors",
+        "preprocessing_contract": (
+            "same processed batch, PI0.5 image preprocessing, action preparation, "
+            "and normalization path as the ordinary H50 validation"
+        ),
+        "mask_source": sorted(set(mask_sources)) if mask_sources else None,
+        "flow": {
+            "zeva_residual_on_h50": (
+                _diagnostic_value_summary(student_h50, valid_steps=steps_h50)
+                if student_h50 is not None
+                else {"available": False, "reason": "student raw flow unavailable"}
+            ),
+            "current_residual_off_h50": (
+                _diagnostic_value_summary(current_h50, valid_steps=steps_h50)
+                if current_h50 is not None
+                else {"available": False, "reason": "current raw flow unavailable"}
+            ),
+            "zeva_residual_on_executed_h15": (
+                _diagnostic_value_summary(student_h15, valid_steps=steps_h15)
+                if student_h15 is not None
+                else {"available": False, "reason": "student raw flow unavailable"}
+            ),
+            "current_residual_off_executed_h15": (
+                _diagnostic_value_summary(current_h15, valid_steps=steps_h15)
+                if current_h15 is not None
+                else {"available": False, "reason": "current raw flow unavailable"}
+            ),
+        },
+        "paired": {
+            "current_residual_off": paired_current,
+            "fixed_teacher": paired_fixed,
+        },
+        "injected_residual_norms": residual,
+    }
+    if reasons:
+        report["unavailable_batches"] = sorted(set(reasons))
+    return report
+
+
 def _preprocess_with_task_only_goal(
     policy: nn.Module,
     preprocessor,
@@ -440,6 +1324,7 @@ def _losses(
     prior_supervision_horizon: int = ROBOTWIN_ACTION_HORIZON,
     *,
     training: bool,
+    return_diagnostics: bool = False,
 ) -> dict[str, torch.Tensor]:
     unwrapped = policy.module if hasattr(policy, "module") else policy
     if foundation_rng_state is not None:
@@ -514,7 +1399,7 @@ def _losses(
         else F.relu(flow_per_sample - baseline_per_sample).mean()
     )
     total = flow + prior_weight * prior + preserve_weight * preserve + gate_regularization_weight * gate
-    return {
+    result = {
         "total": total,
         "flow": flow,
         "prior": prior,
@@ -534,6 +1419,27 @@ def _losses(
             else prior_residual_mask.detach().mean()
         ),
     }
+    if return_diagnostics:
+        # ``policy.forward`` already built the exact context and Gaussian
+        # prior used by the residual hook.  Expose detached copies only to the
+        # opt-in validation telemetry; the ordinary validation/training
+        # result remains byte-for-byte the historical dictionary above.
+        causal_context = unwrapped.memory_context_encoder(
+            task_schema,
+            bank_batch.phase_token,
+            bank_batch.brief_signals,
+            bank_batch.retrieved_signals,
+            bank_batch.brief_mask,
+            bank_batch.retrieved_mask,
+        )
+        result.update(
+            {
+                "_diagnostic_context": causal_context.detach(),
+                "_diagnostic_action_prior_mean": action_prior.mean.detach(),
+                "_diagnostic_task_schema": task_schema.detach(),
+            }
+        )
+    return result
 
 
 def _baseline_losses(policy: nn.Module, processed: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -1467,6 +2373,14 @@ def evaluate(
     accelerator: Accelerator,
 ) -> dict[str, Any]:
     policy.eval()
+    diagnostics_enabled = bool(getattr(args, "validation_diagnostics", False))
+    if diagnostics_enabled and getattr(accelerator, "num_processes", 1) != 1:
+        # Optional raw-forward failures may differ across ranks. Until their
+        # availability is synchronized, conditional metric gathers are unsafe.
+        raise ValueError("Validation diagnostics currently require a single process.")
+    diagnostic_values: dict[str, list[torch.Tensor]] = {}
+    diagnostic_reasons: list[str] = []
+    diagnostic_mask_sources: list[str] = []
     totals: dict[str, list[torch.Tensor]] = {
         "total": [],
         "flow": [],
@@ -1499,8 +2413,12 @@ def evaluate(
         else:
             processed = _preprocess_with_task_only_goal(policy, preprocessor, raw_batch)
             cached_base_actions = target_actions = task_goal_embedding = None
+        diagnostic_rng_state = None
+        diagnostic_confidence = None
+        diagnostic_phase_token = None
         if args.training_variant == "action_expert_control":
             baseline_flow, foundation_rng_state = _matched_baseline_flow(policy, processed)
+            diagnostic_rng_state = foundation_rng_state
             losses = _action_expert_control_losses(
                 policy,
                 processed,
@@ -1533,6 +2451,8 @@ def evaluate(
                 args,
                 training=False,
             )
+            diagnostic_confidence = confidence
+            diagnostic_phase_token = bank_batch.phase_token
             if args.training_variant == "output_correction":
                 # Fixed validation batches receive a deterministic PI diffusion
                 # stream; Base and corrected metrics reuse the same sampled chunk.
@@ -1575,6 +2495,7 @@ def evaluate(
                 )
             else:
                 baseline_flow, foundation_rng_state = _matched_baseline_flow(policy, processed)
+                diagnostic_rng_state = foundation_rng_state
                 losses = _losses(
                     policy,
                     processed,
@@ -1589,10 +2510,63 @@ def evaluate(
                     paired_improvement_margin=0.0,
                     prior_supervision_horizon=args.prior_injection_horizon,
                     training=False,
+                    return_diagnostics=diagnostics_enabled,
                 )
         else:
             losses = _baseline_losses(policy, processed)
             retrieval_accuracy = losses["flow"].detach().new_full((), float("nan"))
+        if diagnostics_enabled:
+            diagnostic = _collect_validation_diagnostics(
+                policy,
+                processed,
+                losses,
+                foundation_rng_state=diagnostic_rng_state,
+                injection_confidence=diagnostic_confidence,
+                phase_token=diagnostic_phase_token,
+                training_variant=args.training_variant,
+            )
+            mask_source = diagnostic.get("mask_source")
+            if mask_source is not None:
+                diagnostic_mask_sources.append(str(mask_source))
+            reason = diagnostic.get("reason")
+            if reason:
+                diagnostic_reasons.append(str(reason))
+
+            def append_diagnostic(name: str, value: torch.Tensor | None) -> None:
+                if value is None:
+                    return
+                gathered = accelerator.gather_for_metrics(value.detach().reshape(-1)).cpu()
+                diagnostic_values.setdefault(name, []).append(gathered)
+
+            append_diagnostic("student_h50", diagnostic.get("_student_h50"))
+            append_diagnostic("student_h15", diagnostic.get("_student_h15"))
+            append_diagnostic("current_h50", diagnostic.get("_current_h50"))
+            append_diagnostic("current_h15", diagnostic.get("_current_h15"))
+            append_diagnostic("fixed_h50", diagnostic.get("_fixed_h50"))
+            append_diagnostic("fixed_h15", diagnostic.get("_fixed_h15"))
+            append_diagnostic("valid_steps_h50", diagnostic.get("_valid_steps_h50"))
+            append_diagnostic("valid_steps_h15", diagnostic.get("_valid_steps_h15"))
+            for horizon_name in ("h50", "h15"):
+                residual_values = diagnostic.get(f"_residual_{horizon_name}")
+                if residual_values is None:
+                    continue
+                for metric in (
+                    "reference_norm",
+                    "context_delta_norm",
+                    "prior_delta_norm",
+                    "total_delta_norm",
+                    "context_relative_norm",
+                    "prior_relative_norm",
+                    "total_relative_norm",
+                ):
+                    append_diagnostic(
+                        f"residual_{horizon_name}_{metric}",
+                        residual_values.get(metric),
+                    )
+                append_diagnostic(
+                    f"residual_{horizon_name}_valid_steps",
+                    residual_values.get("valid_steps"),
+                )
         if args.training_variant in {
             "zeva",
             "adapter",
@@ -1657,6 +2631,12 @@ def evaluate(
         if per_task
         else float("nan")
     )
+    if diagnostics_enabled:
+        result["validation_diagnostics"] = _finalize_validation_diagnostics(
+            diagnostic_values,
+            reasons=diagnostic_reasons,
+            mask_sources=diagnostic_mask_sources,
+        )
     return result
 
 

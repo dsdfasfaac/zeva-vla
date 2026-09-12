@@ -2,6 +2,14 @@
 
 更新：2026-09-12。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+## 2026-09-13 验证进度
+
+- 默认关闭的诊断实现已完成初版；远程 aigc24 隔离目录 `diagnostics-ztev2-20260913-lubDbq` 中，5 项新诊断测试与 5 项既有 Stage2 v2 测试实际通过（13.13 秒），不是本地缺 PyTorch 导致的 skip。生产源码与已有 checkpoint 未覆盖。
+- 代码审查发现可选 raw-forward 的失败可能因 rank 而异，而其 gather 是条件调用；已限定诊断为单进程，避免多卡条件 collective 挂起。普通训练默认路径不受影响。
+- 加入单进程保护回归测试后，远程复测为 **11 passed in 9.30s**。
+- 核对实际 handoff `PI05Policy.forward`：历史 flow 截取 EEF16 后对 H50/动作维取均值，并不使用 `action_is_pad`。新增 valid-only H15/H50 是另行标注的诊断统计，不能在有 padding 时冒充历史指标的精确重放；这项发现本身还不证明闭环掉点由 padding 引起。
+- 只读 checkpoint 验证入口正在实现，尚未得到真实权重上的 H15 或注入幅度数值。context/prior 分量根据实际投影、gate、confidence 和 embedding dtype 重建；不声称已经直接捕获了 BF16 累加后的有效差值。需要先核对重放结果，再据结果决定训练策略。
+
 ## 已测事实
 
 - 固定的正式配对结果：Base 109/200，ZeVA 110/200，Anchor 101/200。ZeVA 多成功一次，不构成稳定优势证据；完整结果见[评测记录](ROBOTWIN_ZTEV2_PAIRED_RESULTS_20260912.md)。不据此回头选择 checkpoint、任务、seed 或指令。
