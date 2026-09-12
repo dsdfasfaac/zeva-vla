@@ -6,6 +6,8 @@
 
 ## 当前运行
 
+2026-09-12 19:43（北京时间）历史57%参考核查：原始114/200来自 `eval/advantage10-best-v1-paired-v2-native-tf5/formal-b1000-z250-seeded-v1/anchor/report.json`，经safe-router-v4/v5报告带provenance转存。相同十任务、每任务20、seed1000起始、seen、Large_D435640×480、H50/H15、continuous RNG20260907及原生TF5.5.4；foundation SHA同为7d3e945c...。但历史与当前seed manifest不同：200个task-seed只重合181个，双方各独有19个；重合项中只有2个seed+instruction完全相同，179条指令不同。历史model=aigc29/render=aigc24，本轮二者均aigc24。故历史57%与本轮54.5%不是同样本paired比较，不能直接据差值归因为能力下降；当前Base109与Anchor101的同manifest比较有效。样本、指令、物理随机性和host影响尚不能分离。保留57%预设参考门槛，不据测试结果重选权重/种子或放宽标准。ZeVA当前139/200，正常推进，尚无完整结果。
+
 2026-09-12 19:02（北京时间）Anchor完成：101/200=50.5%，200个视频齐全、成功标签与progress一致、全部seed/指令与Base冻结manifest逐条相同。Base109/200=54.5%，本轮同seed高4个百分点（Base-only成功35，Anchor-only成功27；这是样本内差异，不据此宣称统计显著）。Base仍低于预设57%历史参考线，正常性门槛未改。正在只读核查历史114/200所用样本和协议是否与本轮完全一致，不能擅自放宽标准。ZeVA已于18:40:03自动进入评测，当前正常推进、无失败退出，完整成功率尚未产生。
 
 2026-09-12 16:27（北京时间）Base正式评测完成：109/200=54.5%。十任务均20episodes、return_code=0；200个视频齐全，视频成功标签合计109且逐任务与progress一致，seed_manifest中的seed和实际指令逐条一致。低于预先设定57%参考线，因此正常性尚未过关；不能以较弱Base宣称ZeVA达标。Anchor已于16:15:14开始相同seed/指令重放，ZeVA随后自动运行。保留完整结果及选定checkpoint，不按正式测试结果回头挑选权重或种子；同seed Anchor尚未完成，暂不能归因于真实能力下降或评测波动。

@@ -192,6 +192,14 @@ seed/instruction checks passed. Base is 4 percentage points higher on these
 paired cases, but remains below the historical 57% floor. ZeVA evaluation is
 running. Historical-reference comparability is being audited without changing
 the gate or using test outcomes to reselect weights.
+
+Historical-reference audit (19:43): the 57% Anchor used the same protocol but
+a different frozen seed/instruction manifest. Of 200 task-seeds, 181 overlap;
+only 2 overlapping cases also have identical instructions. Model hosting also
+changed from aigc29 to aigc24. Thus 57% versus 54.5% is not a paired capability
+comparison; only the current Base/Anchor/ZeVA share exact cases. The predeclared
+reference floor remains unchanged, and no test-driven checkpoint reselection
+is performed.
 The fresh-run entry point is
 `scripts/train_robotwin_advantage10_ztev2.sh`; historical commands below are
 not this experiment. Training is complete; closed-loop delivery is not.
