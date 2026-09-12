@@ -28,7 +28,9 @@ precomputed_baseline_root=${PRECOMPUTED_BASELINE_ROOT:-}
 # launchers must pass their independently observed validation count explicitly.
 precomputed_baseline_expected_successes=${PRECOMPUTED_BASELINE_EXPECTED_SUCCESSES:-114}
 base_port=${BASE_PORT:-19200}
-zeva_root=/mnt/100T/users/dingxin/VLA/zeva-vla/ICML26-BehaviorVLA
+# An isolated serving-script release can retain node-local changes in the
+# working checkout while pinning the implementation used for all conditions.
+zeva_root=${ZEVA_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-vla/ICML26-BehaviorVLA}
 shared_runtime=${SHARED_RUNTIME:-/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin}
 # The validated a24 deployment keeps a node-local copy for I/O speed.  Other
 # idle render nodes may use the identical shared checkout/venv when evaluating

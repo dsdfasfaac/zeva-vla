@@ -8,6 +8,8 @@
 
 最新执行状态（2026-09-12 14:04，北京时间）：两支Stage2均已完成5000步，ZeVA在aigc24的恢复正常结束，完整模型/adapter/optimizer已保存。按预定held-out flow选择Base004500（0.01872689）与ZeVA005000（0.01828257），进入正式十任务×20同seed评测的preflight。以上覆盖前段13:30的加载状态；offline flow不能替代闭环成功率，本轮暂未产生正式成功率。
 
+14:13更新：preflight通过，aigc24已启动Base→Anchor→ZeVA正式pipeline（PID4129168），模型server正在加载。每支10×20，从seed1000筛首20个expert-valid seeds，并共享精确seed/指令及H50/H15、Large_D435、seen randomized协议；结果目录为 `eval/formal-ztev2-selected-pair-20260912`。正常性须核对Base≥max(同seed Anchor,57%)，最终优势须实际ZeVA>Base；不声称此刻已有成功率。
+
 ## 1. 问题定义与设计原则
 
 当前这轮的选步口径：两支均完成5000步预算后，分别在完整保存的checkpoints中按 held-out validation **flow loss最低**选择，完全同分取较早step。不能用混有Gaussian NLL的ZeVA total loss代替共同指标，也不依据正式闭环成功率或ZeVA内部residual-off代理挑选最终pair。路径固定后再做同seed闭环比较；仅有offline flow改善不算交付成功。

@@ -174,8 +174,12 @@ settings and verified identical dataset contents. This recovery is not bit-exact
 (RNG was not saved and auxiliary library versions differ); provenance is retained.
 Independent held-out flow selection chose Base step 4,500 (`0.01872689`) and
 ZeVA step 5,000 (`0.01828257`). These are offline losses, not success rates.
-The selected pair is now entering explicit evaluation preflight; formal rollout
-results are not yet available.
+The selected pair passed explicit evaluation preflight. At 14:13 the formal
+Base -> Anchor -> ZeVA pipeline started on aigc24 (8 slots); model servers are
+loading, and no completed rollout results are available yet. The dedicated
+serving-script release is `eval-release-ztev2-20260912`; all conditions share
+H50/H15, Large_D435, seen randomized scenes, and the same 20 expert-valid
+seeds/instructions per task starting from seed 1000.
 The fresh-run entry point is
 `scripts/train_robotwin_advantage10_ztev2.sh`; historical commands below are
 not this experiment. Training is complete; closed-loop delivery is not.
