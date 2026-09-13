@@ -2,9 +2,10 @@
 
 This command loads the selected best-v1 foundation and a real v2 ZTE
 checkpoint, then checks zero-residual Base equivalence and one H15 recurrent
-update.  Optional bank/live paths are metadata-only validated here; they are
-never fabricated or silently treated as usable when an exporter marked them
-incomplete.
+update. Bank/live paths are validated against their checkpoint lineage; when a
+retrieval checkpoint is supplied, the real bank/retrieval path is loaded too.
+An optional compiled-anchor check verifies immutable teacher weights after a
+temporary student perturbation, without creating an optimizer or checkpoint.
 """
 
 from __future__ import annotations
@@ -45,6 +46,10 @@ class Args:
     )
     causal_bank: str | None = None
     live_queries: str | None = None
+    initial_stage2_checkpoint: str | None = None
+    goal_embedding_checkpoint: str | None = None
+    retrieval_checkpoint: str | None = None
+    check_compiled_anchor: bool = False
     device: str = "cuda:0"
     task: str = "pick up the object"
     seed: int = 1000
@@ -153,6 +158,10 @@ def main(args: Args) -> None:
         device=args.device,
         foundation_checkpoint=args.foundation_checkpoint,
         zte_checkpoint=args.zte_checkpoint,
+        stage2_checkpoint=args.initial_stage2_checkpoint,
+        goal_embedding_checkpoint=args.goal_embedding_checkpoint,
+        retrieval_checkpoint=args.retrieval_checkpoint,
+        causal_bank=args.causal_bank if args.retrieval_checkpoint is not None else None,
     )
     raw_observation = {
         "observation.state": torch.zeros(14, dtype=torch.float32),
@@ -212,11 +221,74 @@ def main(args: Args) -> None:
     if not finite:
         raise AssertionError("Best-v1/v2 smoke emitted non-finite EEF16 actions.")
 
+    anchor_check = {"requested": args.check_compiled_anchor}
+    if args.check_compiled_anchor:
+        if args.initial_stage2_checkpoint is None:
+            raise ValueError("Compiled anchor smoke requires an explicit initial Stage2 checkpoint.")
+        policy.configure_action_expert_finetune_stage2()
+        policy.load_foundation_anchor(args.initial_stage2_checkpoint)
+        policy.eval()
+        policy._clear_active_residuals()  # noqa: SLF001
+        core = policy.foundation.model
+        core.forward = torch.compile(core.forward, mode="default")
+        flow_batch = dict(processed)
+        # Synthetic normalized actions: this checks weight swapping, not accuracy.
+        flow_batch["action"] = torch.zeros(1, 50, 16, device=args.device)
+
+        def flow(*, anchor: bool) -> torch.Tensor:
+            _seed(args.seed)
+            with torch.no_grad():
+                result = (
+                    policy.foundation_anchor_forward(flow_batch, reduction="none")
+                    if anchor else policy.foundation(flow_batch, reduction="none")
+                )
+            loss = result[0] if isinstance(result, tuple) else result
+            if not isinstance(loss, torch.Tensor) or not torch.isfinite(loss).all():
+                raise AssertionError("Anchor smoke expected finite per-example flow tensors.")
+            return loss.detach().clone()
+
+        reference = flow(anchor=False)
+        teacher_before = flow(anchor=True)
+        if not torch.equal(reference, teacher_before):
+            raise AssertionError("Fresh compiled student does not equal its fixed teacher.")
+        bias = core.action_out_proj.bias
+        original_bias = bias.detach().clone()
+        try:
+            with torch.no_grad():
+                bias.add_(0.125)
+            changed_student = flow(anchor=False)
+            teacher_after = flow(anchor=True)
+            changed_student_after_teacher = flow(anchor=False)
+            if torch.equal(changed_student, reference):
+                raise AssertionError("Perturbation did not change compiled student flow.")
+            if not torch.equal(teacher_before, teacher_after):
+                raise AssertionError("Compiled fixed teacher drifted with the student.")
+            if not torch.equal(changed_student, changed_student_after_teacher):
+                raise AssertionError("Anchor forward failed to restore the student weights.")
+        finally:
+            with torch.no_grad():
+                bias.copy_(original_bias)
+        anchor_check.update({
+            "passed": True,
+            "teacher_unchanged_after_student_perturbation": True,
+            "student_restored_after_teacher": True,
+            "teacher_matches_initial_student": True,
+            "torch_compile": True,
+            "synthetic_normalized_actions": True,
+            "optimizer_created": False,
+        })
+
     report = {
         "schema": "zeva-robotwin-pi05-bestv1-zte-v2-smoke-v1",
         "passed": True,
         "foundation_runtime": "RobotWinZevaPolicy.from_handoff/native LeRobot PI0.5",
         "foundation_checkpoint": str(Path(args.foundation_checkpoint).resolve()),
+        "initial_stage2_checkpoint": args.initial_stage2_checkpoint,
+        "initial_stage2_model_sha256": (
+            _sha256(Path(args.initial_stage2_checkpoint) / "model.safetensors")
+            if args.initial_stage2_checkpoint is not None else None
+        ),
+        "compiled_anchor_check": anchor_check,
         "zte_checkpoint": str(Path(args.zte_checkpoint).resolve()),
         "zte_checkpoint_sha256": checkpoint_sha256,
         "zte_schema": checkpoint["schema"],

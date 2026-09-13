@@ -1,6 +1,8 @@
 # ZTE v2：配对评测后的诊断边界与下一步
 
-更新：2026-09-13。本文区分已测事实、未测假设和计划，不改变已完成实验。
+更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
+
+**最新：固定teacher匹配训练已提交启动。** aigc29 GPU0–3为ZeVA（launcher PID2701483），GPU4–7为普通Base（PID2701482），各4卡、global256、1000新optimizer steps。真实compiled anchor/zero-init/H15预检及6项launcher契约测试均通过。当前是启动核验/加载阶段，尚未确认optimizer step或新验证结果。训练输出根为`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914`，各分支`train.log`、`manifest.json`和checkpoint写在其`baseline/`、`zeva/`下。隔离代码与外层启动日志位于`/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO`，分别`baseline-launch.log`、`zeva-launch.log`。不要启动第二份，也不要将此新实验伪装成旧ZeVA resume。
 
 ## 当前结论：全量验证已完成
 
@@ -20,6 +22,16 @@
 **可支持的结论：当前权重下，弱小的离线收益主要来自context分支；prior单独没有降低平均H15误差，加入context后反而略抵消其收益。简单把prior放大50倍没有改善H15，不能将“gate太小”当成充分解释。** H50放大后略好、H15略差，进一步说明部署前15步必须单列观察。差值很小，未计算episode级置信区间，不能声称统计显著，也不能推出ZTE信息本身无效。未经该倍率训练的压力测试不等价于重新训练后的结果。
 
 原始报告：[原始对照](results/robotwin-ztev2-20260912/same_host_control.json)、[context-only](results/robotwin-ztev2-20260912/context_only.json)、[prior-only](results/robotwin-ztev2-20260912/prior_only.json)、[prior×50](results/robotwin-ztev2-20260912/prior_strength_test.json)、[运行计划](results/robotwin-ztev2-20260912/plan.json)。这些结果不能用作正式测试选checkpoint或直接决定部署倍率；不据此删除用户指定的prior路线。下一步收敛到prior监督/梯度路径的最小训练改动审查，而不是继续扫gate。
+
+### 下一轮：固定 Base teacher 的匹配训练（2026-09-14，已提交启动）
+
+Luna的监督/梯度审查没有发现NLL遗漏反传：NLL监督prior及上游context表示，flow监督action expert和两路注入投影；prior dropout只作用于注入而不关闭NLL。没有据此修改NLL、倍率或Stage1。已确认的可改机制是preservation当前默认使用随student更新的residual-off对照；它不是独立Base能力锚点。
+
+计划让普通Base和ZeVA都从既定`baseline/004500`出发，各再训练1000 optimizer steps、warmup100、每250步存档，固定step1000为比较候选。ZeVA使用同一004500作为immutable preservation teacher并初始化新的零残差adapter；不加载旧ZeVA005000 adapter。两支均保留指定best-v1起源、共享历史4500步和同等后续AE预算，optimizer重新建立，明确是**新实验，不是旧ZeVA续训**。冻结ZTE/bank/VLM、AE LR5e-6、新模块LR5e-5、global256、双残差/Gaussian NLL、dropout0.4、H50输出/H15执行及门控初始化均保持。共有初始化和预算变化意味着不能把它与旧实验的差异解释为纯单因素teacher因果效应。
+
+**边界：现有hinge是`relu(student_flow - teacher_flow.detach())`，只对较差样本增加专家标签的flow梯度权重，不是teacher动作蒸馏，更不保证策略能力被保留。** 固定teacher是否有益必须实际测量。训练后分别报告fixed anchor、current residual-off及同预算新Base的样本平均H15/H50；不拿H50替代H15，不以正式成功标签选步或倍率。若没有residual正增益或出现能力退化，记录不支持此假设，不把该轮包装成成功。1000步是有界验证预算，不代表已承诺训练充分或可交付。
+
+真实模型预检位于`/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO`，smoke PID2691401已完成，报告`passed=true`：共同Base初始化的零残差on/off均bit-exact、H15 transition=1；`torch.compile`下扰动student后teacher不变，调用后student权重正确恢复。模型SHA为既定`2f106633…`，Stage1/完整bank/live来源匹配。[原始smoke报告](results/robotwin-fixed-anchor-20260914/compiled-anchor-smoke.json)。预检使用合成图像/动作，只验证前向实现，不证明真实样本训练反传或任务表现。aigc29 `/data1`仅约2.2GB空余，新增checkpoint和编译缓存全部置于`/mnt/100T`；不清理或覆盖他人文件。随后提交两支训练，状态见顶部。[预注册配置](../configs/robotwin_ztev2_fixed_anchor_pair_20260914.json)固定预算、lineage和末步候选；6项标准库launcher契约测试在本地及aigc29均通过，不将它们冒充真实训练反传测试。
 
 输出目录：`/mnt/100T/users/dingxin/VLA/diagnostics-ztev2-ablation-20260913-fGari2/full-fourway`，包含四组各自的`.pid`、`.log`，完成后写同名`.json`；`plan.json`固定实验设置。单次启动脚本有空闲GPU检查、输出目录拒绝覆盖与独立日志，不是另建监视任务。
 

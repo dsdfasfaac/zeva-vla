@@ -57,7 +57,13 @@ context-only improves H15 by 0.07443% versus residual-off, prior-only worsens it
 by 0.00500%, and multiplying prior by 50 gives only 0.04983% improvement,
 below the original dual residual. This does not support simply increasing the
 prior gate as the fix; differences are small and not claimed significant.
-These are not success rates and no new training has started. See the
+These are not success rates. A bounded fixed-teacher pair has been dispatched:
+both variants start from trained Base004500 for 1,000 fresh-optimizer steps;
+ZeVA uses that immutable Base as its preservation reference, with a fresh
+zero-residual adapter. Real compiled-anchor/zero-init/H15 recurrence smoke
+passed; aigc29 GPU0–3 runs ZeVA and GPU4–7 runs Base, with startup/loading in
+progress and no optimizer step confirmed yet. The hinge is expert-loss reweighting, not
+teacher-action distillation or a guarantee of preserved success rate. See the
 [evidence and next-step boundaries](docs/ZTEV2_POST_EVAL_DIAGNOSIS_20260912.md).
 
 The selected PI0.5 has already been trained on the same RoboTwin distribution.
