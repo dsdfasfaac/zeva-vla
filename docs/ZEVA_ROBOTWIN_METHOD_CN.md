@@ -2,7 +2,7 @@
 
 诊断口径补充：当前 step4096 的四项已测 Stage1 辅助指标均达到配置参考线；不能把固定的 `probe_gate_passed=false` 解释成实测不合格。全5874决策诊断及四组同机消融均已完成：H15双残差相对关闭残差仅改善0.0591%，context-only改善0.07443%，prior-only退化0.00500%，prior×50改善0.04983%、低于原始双残差。当前权重的离线收益主要来自context，简单增大prior门控未解决问题；差异很小，未证明统计显著或ZTE无效。这些不是成功率，新训练进展见下段。[完整数值、限制与下一步](ZTEV2_POST_EVAL_DIAGNOSIS_20260912.md)。
 
-下一轮执行口径（2026-09-14 01:09核查，正常训练中）：普通Base和ZeVA均从训练好的Base004500出发，各训练1000新optimizer steps，固定比较末步；ZeVA新建零残差adapter，并以同一004500作immutable teacher。aigc29 GPU0–3运行ZeVA，GPU4–7运行Base；Base已超过576步，ZeVA正进行500步验证/保存。实际manifest确认两支global256、相同初始化；Base仅训练AE，ZeVA使用独立固定teacher，AE LR5e-6、新模块LR5e-5。仍冻结ZTE/bank/VLM，保留原双残差/Gaussian NLL和H50输出/H15执行。不是恢复旧ZeVA；不加载其005000 adapter。真实compiled teacher独立性、零残差等价和H15递归smoke均通过。现有preservation hinge只是对较差样本的专家标签损失重加权，不是动作蒸馏，不保证保能力；尚无新的配对H15终检或成功率结论。
+最新执行口径（2026-09-14 01:40核查，两支1000步均已完成）：普通Base和ZeVA均从训练好的Base004500出发，各训练1000新optimizer steps，固定比较末步；ZeVA新建零残差adapter，并以同一004500作immutable teacher。Base于01:24:59、ZeVA于01:30:46完成（北京时间），完整model/optimizer及ZeVA adapter均已保存。实际manifest确认两支global256、相同初始化；Base仅训练AE，ZeVA使用独立固定teacher，AE LR5e-6、新模块LR5e-5。仍冻结ZTE/bank/VLM，保留原双残差/Gaussian NLL和H50输出/H15执行。不是恢复旧ZeVA；不加载其005000 adapter。真实compiled teacher独立性、零残差等价和H15递归smoke均通过。现有preservation hinge只是对较差样本的专家标签损失重加权，不是动作蒸馏，不保证保能力。末步同样本/同噪声H15/H50诊断已启动，分别对照固定004500和本轮Base001000；尚无新的成功率结论。
 
 最新完整结果（2026-09-12）：Base109/200=54.5%，ZeVA110/200=55.0%，Anchor101/200=50.5%。600个视频及配对seed/指令校验通过；ZeVA仅多成功1次，paired 95% CI为[-7.5,+8.5] pp，且Base未过57%参考线，故验收未通过。原轮训练与正式评测均已完成；以下早期运行状态均为历史快照。[完整十任务表与限制](ROBOTWIN_ZTEV2_PAIRED_RESULTS_20260912.md)。
 

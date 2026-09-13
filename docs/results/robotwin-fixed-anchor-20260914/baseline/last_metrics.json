@@ -1,0 +1,29 @@
+{
+  "step": 1000,
+  "train_loss": 0.017521822825074196,
+  "train_flow": 0.017521822825074196,
+  "train_baseline_flow": null,
+  "train_baseline_sampled": false,
+  "train_prior_nll": NaN,
+  "train_prior_std": NaN,
+  "train_prior_residual_keep": NaN,
+  "train_residual_regression": null,
+  "train_residual_trust_region": null,
+  "train_residual_abs": null,
+  "validation": {
+    "total": 0.02059015817940235,
+    "flow": 0.02059015817940235,
+    "prior": NaN,
+    "prior_std": NaN,
+    "baseline": 0.02059015817940235,
+    "retrieval_accuracy": NaN,
+    "paired_improvement": NaN,
+    "paired_win_fraction": NaN,
+    "paired_degradation": NaN,
+    "residual_regression": NaN,
+    "trust_region": NaN,
+    "residual_abs": NaN,
+    "per_task_paired": {},
+    "minimum_task_paired_improvement": NaN
+  }
+}
