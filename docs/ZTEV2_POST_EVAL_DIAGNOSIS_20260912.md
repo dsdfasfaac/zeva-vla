@@ -4,7 +4,22 @@
 
 ## 当前结论：全量验证已完成
 
-**最新执行状态（2026-09-13）：空闲GPU已释放，四组完整消融已启动。** 在aigc29 GPU0/1/2/3分别运行context-only（PID2655485）、prior-only（2655489）、prior×50（2655493）和同机原始1/1对照（2655497）。每组5874决策、batch8、seed1000，OMP/MKL各8线程，checkpoint及冻结Base不变；同机对照用于控制从aigc24迁移带来的环境差异。此时仍在模型加载阶段，没有新的消融结论或成功率。
+**最新执行状态（2026-09-13 23:56 核查）：四组完整消融均已结束。** aigc29 GPU0/1/2/3上的context-only（PID2655485）、prior-only（2655489）、prior×50（2655493）和同机原始1/1对照（2655497）均完成735 batches，结果文件时间约23:35，进程已退出。每组5874决策、batch8、seed1000，OMP/MKL各8线程，checkpoint及冻结Base不变；同机对照用于控制从aigc24迁移带来的环境差异。没有启动新训练或新的闭环评测。
+
+### 同机四路消融结果
+
+| 配置（context倍率 / prior倍率） | 样本平均 H15 flow，越低越好 | 相对关闭双残差改善 | 样本平均 H50 flow |
+|---|---:|---:|---:|
+| 原始对照 1 / 1 | 0.010179412551 | +0.05914% | 0.018888637424 |
+| context-only 1 / 0 | 0.010177855380 | +0.07443% | 0.018888257444 |
+| prior-only 0 / 1 | 0.010185945779 | −0.00500% | 0.018895527348 |
+| prior 放大 1 / 50 | 0.010180360638 | +0.04983% | 0.018888372928 |
+
+四组的checkpoint、adapter、fixed teacher、全部lineage、诊断源码哈希及除干预倍率外的protocol逐项相同；均`complete=true`、5874决策。样本顺序SHA一致，关闭双残差的H15均值均为`0.010185436345636845`，固定Base的H15均值均为`0.010180731303989887`。新同机原始对照的H15/H50均值还精确复现了先前aigc24报告。这里的均值一致支持对照可比性，不冒充逐样本误差的bit-exact核验。
+
+**可支持的结论：当前权重下，弱小的离线收益主要来自context分支；prior单独没有降低平均H15误差，加入context后反而略抵消其收益。简单把prior放大50倍没有改善H15，不能将“gate太小”当成充分解释。** H50放大后略好、H15略差，进一步说明部署前15步必须单列观察。差值很小，未计算episode级置信区间，不能声称统计显著，也不能推出ZTE信息本身无效。未经该倍率训练的压力测试不等价于重新训练后的结果。
+
+原始报告：[原始对照](results/robotwin-ztev2-20260912/same_host_control.json)、[context-only](results/robotwin-ztev2-20260912/context_only.json)、[prior-only](results/robotwin-ztev2-20260912/prior_only.json)、[prior×50](results/robotwin-ztev2-20260912/prior_strength_test.json)、[运行计划](results/robotwin-ztev2-20260912/plan.json)。这些结果不能用作正式测试选checkpoint或直接决定部署倍率；不据此删除用户指定的prior路线。下一步收敛到prior监督/梯度路径的最小训练改动审查，而不是继续扫gate。
 
 输出目录：`/mnt/100T/users/dingxin/VLA/diagnostics-ztev2-ablation-20260913-fGari2/full-fourway`，包含四组各自的`.pid`、`.log`，完成后写同名`.json`；`plan.json`固定实验设置。单次启动脚本有空闲GPU检查、输出目录拒绝覆盖与独立日志，不是另建监视任务。
 
@@ -26,7 +41,7 @@ H15 context/prior 残差相对 noisy-action embedding 的**重建范数比**分�
 
 原验证 `flow` 对batch均值再平均，末批只有2条；新诊断按样本平均，因此本次原指标与新H50聚合不作精确等价声明。单批无末批加权差异的真实smoke已验证差值0。当前数据未提供显式action padding mask，诊断使用`implicit_all_action_steps_valid`；不能据此断言轨迹末尾没有重复填充。
 
-下一步是预先指定的验证集分支消融：context-only、prior-only，以及保持context不变将prior门控乘50。它们用于检查“prior幅度不足”与“prior信息无益/有害”两种假设，不是正式测试选参，也不直接变更部署权重。保持同5874决策、batch8、seed1000、固定Base及所有物理协议。[预先固定的消融设置](../configs/robotwin_ztev2_validation_ablation_20260913.json)。放大后变差也不能单独证明ZTE无信息，因为当前权重并非在该幅度训练。
+上述预先指定的验证集分支消融已完成，结果见顶部；不是正式测试选参，也未变更部署权重。保持同5874决策、batch8、seed1000、固定Base及所有物理协议。[预先固定的消融设置](../configs/robotwin_ztev2_validation_ablation_20260913.json)。放大后变差也不能单独证明ZTE无信息，因为当前权重并非在该幅度训练。
 
 历史资源与实现状态（09-13下午，已被顶部启动记录覆盖）：Luna连续遭遇transport错误，root接手完成只读门控开关，默认1/1不替换方法；异常退出也恢复原方法。8个本地隔离控制流用例通过，当时未作完整tensor/runtime测试。8台授权H100当时全部高负载，未抢占他人作业；随后释放资源、完成真实预检并启动消融。没有新训练。
 

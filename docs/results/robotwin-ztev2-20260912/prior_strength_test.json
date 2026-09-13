@@ -1,0 +1,358 @@
+{
+  "checkpoint": {
+    "adapter": {
+      "bytes": 13670837,
+      "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000/zeva_adapter.pth",
+      "sha256": "967b78f509e4ba8e74f40967496f740c81149526ff2b46c913bcc81552f51e02"
+    },
+    "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000/model.safetensors",
+    "model_bytes": 9354050752,
+    "model_sha256": "4ea8f6ca9a806b297e4881197041b222dedf29e25680aea44d2d5c465162611b",
+    "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000"
+  },
+  "diagnostic_source_sha256": {
+    "entrypoint": "0bbc0499b38802736f3319bf04a62b1aa2ff21174eb9b163a5cb17be794f4cb8",
+    "trainer": "9ac8a5871651f309fa33f84d9da351949f7f50d8522503579752757010af4e41"
+  },
+  "fixed_teacher": {
+    "available": true,
+    "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500/model.safetensors",
+    "model_bytes": 9354050752,
+    "model_sha256": "2f106633403e5f2146bf7cd4f56858cbfdb856e9b2966d1c724a79ac4948c84f",
+    "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500",
+    "shared_frozen_weights_verified": true
+  },
+  "legacy_unmasked_flow_equivalence": {
+    "available": false,
+    "diagnostic_h50_mean": 0.01888837292790413,
+    "equal_batch_weighting": false,
+    "legacy_unmasked_flow": 0.018869373947381973,
+    "padding_free": true,
+    "raw_replay": "same-noise raw.mean((1,2)) versus existing evaluate(flow)",
+    "reason": "ordinary evaluate(flow) averages batch means; the final batch was partial",
+    "valid_examples": 5874,
+    "valid_steps": 293700
+  },
+  "lineage": {
+    "causal_bank": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/train_causal_bank.pt",
+    "causal_bank_sha256": "33b11b41992d07890a798602cb8cadebc0f798b8959adfc3b8cf5b660bf14ad9",
+    "live_queries": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/live_queries_h15.pt",
+    "live_queries_sha256": "c39e3c6565c438b9496133833a7288a08a81a7985fc1723bf8a39d6ad2d47de6",
+    "stage1_schema": "zeva-robotwin-zte-stage1-v2-checkpoint",
+    "stage1_step": 4096,
+    "statistics_sha256": "9747c46391f6ac2e868b6c4bab62a3be6028aca4995dea48790bee275e16b7d1",
+    "task_retrieval": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/task_retrieval.pth",
+    "task_retrieval_sha256": "c54b3275af4b15999a5d849f476c19ff3d01c76150a487679e9bbe61928798b7",
+    "task_retrieval_validation_accuracy": 0.982962965965271,
+    "trainer_manifest_schema": "zeva-robotwin-stage2-action-expert-manifest-v11",
+    "transition_horizon": 15,
+    "zte_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-scheduler-repair-20260911i/zte_v2_step_004096.pth",
+    "zte_checkpoint_sha256": "ce9402981b8e2f1ce597e2cb150b795ae246f84fb81b3bb72fae023a3decf899"
+  },
+  "protocol": {
+    "available_validation_batches": 735,
+    "batch_size": 8,
+    "checkpoint_written": false,
+    "complete": true,
+    "dataset_adapter": "/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data/adapter.json",
+    "dataset_adapter_sha256": "8ac54abcec7704b0111b7c28be3fb3a18e27e0ebe8e3dcf8ddff948b36100f8f",
+    "dataset_root": "/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data",
+    "decoder_threads": 1,
+    "evaluated_batches": 735,
+    "executed_horizon": 15,
+    "optimizer_created": false,
+    "ordered_validation_samples_sha256": "a9c6a8e30aa3f7ecbfcb9ce81d6a141ef563300d41e339a22d06fb75a0418ac1",
+    "policy_horizon": 50,
+    "requested_eval_batches": 0,
+    "seed": 1000,
+    "single_process": true,
+    "torch_compile": false,
+    "training_variant": "zeva",
+    "validation_decision_samples": 5874,
+    "validation_diagnostics": true,
+    "validation_only_intervention": {
+      "context_gate_scale": 1.0,
+      "deployment_or_checkpoint_modified": false,
+      "prior_gate_scale": 50.0
+    },
+    "validation_split": "validation5",
+    "video_backend": "torchcodec"
+  },
+  "result": {
+    "baseline": 0.01903514936566353,
+    "flow": 0.018869373947381973,
+    "minimum_task_paired_improvement": -0.00023512044572271407,
+    "paired_degradation": 0.0007820281898602843,
+    "paired_improvement": 0.00016577444330323488,
+    "paired_win_fraction": 0.45476192235946655,
+    "per_task_paired": {
+      "beat_block_hammer": {
+        "count": 220,
+        "paired_degradation": 0.0003141063207294792,
+        "paired_improvement": -1.790484589037078e-06,
+        "paired_win_fraction": 0.4681818187236786
+      },
+      "blocks_ranking_rgb": {
+        "count": 839,
+        "paired_degradation": 0.0008915491052903235,
+        "paired_improvement": -0.00023512044572271407,
+        "paired_win_fraction": 0.43504172563552856
+      },
+      "blocks_ranking_size": {
+        "count": 839,
+        "paired_degradation": 0.0010360400192439556,
+        "paired_improvement": 0.001437641680240631,
+        "paired_win_fraction": 0.47437426447868347
+      },
+      "handover_block": {
+        "count": 531,
+        "paired_degradation": 0.0006769857718609273,
+        "paired_improvement": -0.00014071885379962623,
+        "paired_win_fraction": 0.4557438790798187
+      },
+      "hanging_mug": {
+        "count": 619,
+        "paired_degradation": 0.0008314993465319276,
+        "paired_improvement": 0.0005108079640194774,
+        "paired_win_fraction": 0.43618738651275635
+      },
+      "pick_dual_bottles": {
+        "count": 233,
+        "paired_degradation": 0.0006343884742818773,
+        "paired_improvement": 0.00031575607135891914,
+        "paired_win_fraction": 0.5021459460258484
+      },
+      "put_bottles_dustbin": {
+        "count": 1145,
+        "paired_degradation": 0.0008472270565107465,
+        "paired_improvement": -0.00023322022752836347,
+        "paired_win_fraction": 0.42882096767425537
+      },
+      "scan_object": {
+        "count": 313,
+        "paired_degradation": 0.0012399614788591862,
+        "paired_improvement": -0.00016502925427630544,
+        "paired_win_fraction": 0.44408944249153137
+      },
+      "stack_bowls_three": {
+        "count": 866,
+        "paired_degradation": 0.0004939116770401597,
+        "paired_improvement": -3.993671271018684e-05,
+        "paired_win_fraction": 0.46420323848724365
+      },
+      "stamp_seal": {
+        "count": 269,
+        "paired_degradation": 0.00038664191379211843,
+        "paired_improvement": 1.6866435544216074e-05,
+        "paired_win_fraction": 0.5464683771133423
+      }
+    },
+    "prior": 6.7691874504089355,
+    "prior_std": 0.595429003238678,
+    "residual_abs": null,
+    "residual_regression": null,
+    "retrieval_accuracy": 0.9984694123268127,
+    "total": 0.08734333515167236,
+    "trust_region": null,
+    "validation_diagnostics": {
+      "available": true,
+      "enabled": true,
+      "executed_horizon": 15,
+      "flow": {
+        "current_residual_off_executed_h15": {
+          "available": true,
+          "max": 1.0490666627883911,
+          "mean": 0.010185436345636845,
+          "min": 0.0001365058560622856,
+          "valid_examples": 5874,
+          "valid_steps": 88110
+        },
+        "current_residual_off_h50": {
+          "available": true,
+          "max": 2.2950854301452637,
+          "mean": 0.018892936408519745,
+          "min": 0.00014307409583125263,
+          "valid_examples": 5874,
+          "valid_steps": 293700
+        },
+        "zeva_residual_on_executed_h15": {
+          "available": true,
+          "max": 1.0468629598617554,
+          "mean": 0.01018036063760519,
+          "min": 0.00013865012442693114,
+          "valid_examples": 5874,
+          "valid_steps": 88110
+        },
+        "zeva_residual_on_h50": {
+          "available": true,
+          "max": 2.2937796115875244,
+          "mean": 0.01888837292790413,
+          "min": 0.0001431864220649004,
+          "valid_examples": 5874,
+          "valid_steps": 293700
+        }
+      },
+      "injected_residual_norms": {
+        "available": true,
+        "h15": {
+          "available": true,
+          "context_delta_norm": {
+            "available": true,
+            "max": 0.5354865193367004,
+            "mean": 0.2769101560115814,
+            "min": 0.1259324699640274,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "context_relative_norm": {
+            "available": true,
+            "max": 0.015847429633140564,
+            "mean": 0.0034690278116613626,
+            "min": 0.0010182836558669806,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "horizon": 15,
+          "prior_delta_norm": {
+            "available": true,
+            "max": 0.1443425863981247,
+            "mean": 0.0606544129550457,
+            "min": 0.0310827624052763,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "prior_relative_norm": {
+            "available": true,
+            "max": 0.0024725315161049366,
+            "mean": 0.0007498833583667874,
+            "min": 0.00022357265697792172,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "reference": "pre_injection_noisy_action_embedding",
+          "reference_norm": {
+            "available": true,
+            "max": 153.65164184570312,
+            "mean": 92.45636749267578,
+            "min": 24.45427131652832,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "total_delta_norm": {
+            "available": true,
+            "max": 0.5791782736778259,
+            "mean": 0.3006461560726166,
+            "min": 0.1326940804719925,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "total_relative_norm": {
+            "available": true,
+            "max": 0.017118031159043312,
+            "mean": 0.0037612561136484146,
+            "min": 0.0010849914979189634,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          }
+        },
+        "h50": {
+          "available": true,
+          "context_delta_norm": {
+            "available": true,
+            "max": 0.977660059928894,
+            "mean": 0.5055664777755737,
+            "min": 0.2299201637506485,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "context_relative_norm": {
+            "available": true,
+            "max": 0.013552726246416569,
+            "mean": 0.0030039844568818808,
+            "min": 0.0010361262829974294,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "horizon": 50,
+          "prior_delta_norm": {
+            "available": true,
+            "max": 0.5389600396156311,
+            "mean": 0.1456628441810608,
+            "min": 0.058224231004714966,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "prior_relative_norm": {
+            "available": true,
+            "max": 0.0035266876220703125,
+            "mean": 0.0008280569454655051,
+            "min": 0.00023640369181521237,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "reference": "pre_injection_noisy_action_embedding",
+          "reference_norm": {
+            "available": true,
+            "max": 416.65093994140625,
+            "mean": 184.75244140625,
+            "min": 54.40653610229492,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "total_delta_norm": {
+            "available": true,
+            "max": 1.110119342803955,
+            "mean": 0.5714020133018494,
+            "min": 0.24419674277305603,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "total_relative_norm": {
+            "available": true,
+            "max": 0.015060214325785637,
+            "mean": 0.0033685178495943546,
+            "min": 0.0011024590348824859,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          }
+        },
+        "measurement": "projected gated context/prior tensors divided by the measured pre-injection noisy action-embedding norm"
+      },
+      "mask_source": [
+        "implicit_all_action_steps_valid"
+      ],
+      "paired": {
+        "current_residual_off": {
+          "available": true,
+          "degradation": 4.647830064641312e-05,
+          "improvement": 5.076413799542934e-06,
+          "label": "current_residual_off",
+          "student_flow": 0.01018036063760519,
+          "teacher_flow": 0.010185436345636845,
+          "valid_examples": 5874,
+          "valid_steps": 88110,
+          "win_fraction": 0.5108954906463623
+        },
+        "fixed_teacher": {
+          "available": true,
+          "degradation": 0.0004987848224118352,
+          "improvement": 3.7119212947800406e-07,
+          "label": "fixed_teacher",
+          "student_flow": 0.01018036063760519,
+          "teacher_flow": 0.010180731303989887,
+          "valid_examples": 5874,
+          "valid_steps": 88110,
+          "win_fraction": 0.46833503246307373
+        }
+      },
+      "policy_horizon": 50,
+      "preprocessing_contract": "same processed batch, PI0.5 image preprocessing, action preparation, and normalization path as the ordinary H50 validation",
+      "raw_flow_source": "PI05Pytorch.forward unreduced [B,H,D] flow errors"
+    }
+  },
+  "schema": "zeva-robotwin-stage2-validation-diagnostics-v1",
+  "source_manifest": {
+    "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/manifest.json",
+    "sha256": "11a6f16e549065ad7d6890f2792682ec163dde090723fc0d35469b096ac2be32"
+  }
+}

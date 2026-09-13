@@ -1,0 +1,358 @@
+{
+  "checkpoint": {
+    "adapter": {
+      "bytes": 13670837,
+      "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000/zeva_adapter.pth",
+      "sha256": "967b78f509e4ba8e74f40967496f740c81149526ff2b46c913bcc81552f51e02"
+    },
+    "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000/model.safetensors",
+    "model_bytes": 9354050752,
+    "model_sha256": "4ea8f6ca9a806b297e4881197041b222dedf29e25680aea44d2d5c465162611b",
+    "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/005000"
+  },
+  "diagnostic_source_sha256": {
+    "entrypoint": "0bbc0499b38802736f3319bf04a62b1aa2ff21174eb9b163a5cb17be794f4cb8",
+    "trainer": "9ac8a5871651f309fa33f84d9da351949f7f50d8522503579752757010af4e41"
+  },
+  "fixed_teacher": {
+    "available": true,
+    "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500/model.safetensors",
+    "model_bytes": 9354050752,
+    "model_sha256": "2f106633403e5f2146bf7cd4f56858cbfdb856e9b2966d1c724a79ac4948c84f",
+    "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500",
+    "shared_frozen_weights_verified": true
+  },
+  "legacy_unmasked_flow_equivalence": {
+    "available": false,
+    "diagnostic_h50_mean": 0.018895527347922325,
+    "equal_batch_weighting": false,
+    "legacy_unmasked_flow": 0.01887652277946472,
+    "padding_free": true,
+    "raw_replay": "same-noise raw.mean((1,2)) versus existing evaluate(flow)",
+    "reason": "ordinary evaluate(flow) averages batch means; the final batch was partial",
+    "valid_examples": 5874,
+    "valid_steps": 293700
+  },
+  "lineage": {
+    "causal_bank": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/train_causal_bank.pt",
+    "causal_bank_sha256": "33b11b41992d07890a798602cb8cadebc0f798b8959adfc3b8cf5b660bf14ad9",
+    "live_queries": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/live_queries_h15.pt",
+    "live_queries_sha256": "c39e3c6565c438b9496133833a7288a08a81a7985fc1723bf8a39d6ad2d47de6",
+    "stage1_schema": "zeva-robotwin-zte-stage1-v2-checkpoint",
+    "stage1_step": 4096,
+    "statistics_sha256": "9747c46391f6ac2e868b6c4bab62a3be6028aca4995dea48790bee275e16b7d1",
+    "task_retrieval": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/task_retrieval.pth",
+    "task_retrieval_sha256": "c54b3275af4b15999a5d849f476c19ff3d01c76150a487679e9bbe61928798b7",
+    "task_retrieval_validation_accuracy": 0.982962965965271,
+    "trainer_manifest_schema": "zeva-robotwin-stage2-action-expert-manifest-v11",
+    "transition_horizon": 15,
+    "zte_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-scheduler-repair-20260911i/zte_v2_step_004096.pth",
+    "zte_checkpoint_sha256": "ce9402981b8e2f1ce597e2cb150b795ae246f84fb81b3bb72fae023a3decf899"
+  },
+  "protocol": {
+    "available_validation_batches": 735,
+    "batch_size": 8,
+    "checkpoint_written": false,
+    "complete": true,
+    "dataset_adapter": "/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data/adapter.json",
+    "dataset_adapter_sha256": "8ac54abcec7704b0111b7c28be3fb3a18e27e0ebe8e3dcf8ddff948b36100f8f",
+    "dataset_root": "/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data",
+    "decoder_threads": 1,
+    "evaluated_batches": 735,
+    "executed_horizon": 15,
+    "optimizer_created": false,
+    "ordered_validation_samples_sha256": "a9c6a8e30aa3f7ecbfcb9ce81d6a141ef563300d41e339a22d06fb75a0418ac1",
+    "policy_horizon": 50,
+    "requested_eval_batches": 0,
+    "seed": 1000,
+    "single_process": true,
+    "torch_compile": false,
+    "training_variant": "zeva",
+    "validation_decision_samples": 5874,
+    "validation_diagnostics": true,
+    "validation_only_intervention": {
+      "context_gate_scale": 0.0,
+      "deployment_or_checkpoint_modified": false,
+      "prior_gate_scale": 1.0
+    },
+    "validation_split": "validation5",
+    "video_backend": "torchcodec"
+  },
+  "result": {
+    "baseline": 0.01903514936566353,
+    "flow": 0.01887652277946472,
+    "minimum_task_paired_improvement": -0.00024777385988272727,
+    "paired_degradation": 0.0007842679624445736,
+    "paired_improvement": 0.00015862408326938748,
+    "paired_win_fraction": 0.45374149084091187,
+    "per_task_paired": {
+      "beat_block_hammer": {
+        "count": 220,
+        "paired_degradation": 0.0003206132387276739,
+        "paired_improvement": -4.702230853581568e-06,
+        "paired_win_fraction": 0.48181816935539246
+      },
+      "blocks_ranking_rgb": {
+        "count": 839,
+        "paired_degradation": 0.0008887185831554234,
+        "paired_improvement": -0.00023331842385232449,
+        "paired_win_fraction": 0.43623360991477966
+      },
+      "blocks_ranking_size": {
+        "count": 839,
+        "paired_degradation": 0.001037200796417892,
+        "paired_improvement": 0.0014147976180538535,
+        "paired_win_fraction": 0.47318235039711
+      },
+      "handover_block": {
+        "count": 531,
+        "paired_degradation": 0.000678693235386163,
+        "paired_improvement": -0.0001525542902527377,
+        "paired_win_fraction": 0.4444444477558136
+      },
+      "hanging_mug": {
+        "count": 619,
+        "paired_degradation": 0.0008336829487234354,
+        "paired_improvement": 0.0005068249301984906,
+        "paired_win_fraction": 0.43134087324142456
+      },
+      "pick_dual_bottles": {
+        "count": 233,
+        "paired_degradation": 0.0006294416380114853,
+        "paired_improvement": 0.0003273422480560839,
+        "paired_win_fraction": 0.5107296109199524
+      },
+      "put_bottles_dustbin": {
+        "count": 1145,
+        "paired_degradation": 0.0008585571777075529,
+        "paired_improvement": -0.00024777385988272727,
+        "paired_win_fraction": 0.4218340516090393
+      },
+      "scan_object": {
+        "count": 313,
+        "paired_degradation": 0.0012345310533419251,
+        "paired_improvement": -0.00016327826597262174,
+        "paired_win_fraction": 0.4600639045238495
+      },
+      "stack_bowls_three": {
+        "count": 866,
+        "paired_degradation": 0.0004955860204063356,
+        "paired_improvement": -4.227118915878236e-05,
+        "paired_win_fraction": 0.46766743063926697
+      },
+      "stamp_seal": {
+        "count": 269,
+        "paired_degradation": 0.0003839751298073679,
+        "paired_improvement": 1.860012525867205e-05,
+        "paired_win_fraction": 0.5390334725379944
+      }
+    },
+    "prior": 6.7691874504089355,
+    "prior_std": 0.595429003238678,
+    "residual_abs": null,
+    "residual_regression": null,
+    "retrieval_accuracy": 0.9984694123268127,
+    "total": 0.08735273033380508,
+    "trust_region": null,
+    "validation_diagnostics": {
+      "available": true,
+      "enabled": true,
+      "executed_horizon": 15,
+      "flow": {
+        "current_residual_off_executed_h15": {
+          "available": true,
+          "max": 1.0490666627883911,
+          "mean": 0.010185436345636845,
+          "min": 0.0001365058560622856,
+          "valid_examples": 5874,
+          "valid_steps": 88110
+        },
+        "current_residual_off_h50": {
+          "available": true,
+          "max": 2.2950854301452637,
+          "mean": 0.018892936408519745,
+          "min": 0.00014307409583125263,
+          "valid_examples": 5874,
+          "valid_steps": 293700
+        },
+        "zeva_residual_on_executed_h15": {
+          "available": true,
+          "max": 1.049710988998413,
+          "mean": 0.01018594577908516,
+          "min": 0.00013406146899797022,
+          "valid_examples": 5874,
+          "valid_steps": 88110
+        },
+        "zeva_residual_on_h50": {
+          "available": true,
+          "max": 2.2946765422821045,
+          "mean": 0.018895527347922325,
+          "min": 0.00014542376447934657,
+          "valid_examples": 5874,
+          "valid_steps": 293700
+        }
+      },
+      "injected_residual_norms": {
+        "available": true,
+        "h15": {
+          "available": true,
+          "context_delta_norm": {
+            "available": true,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "context_relative_norm": {
+            "available": true,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "horizon": 15,
+          "prior_delta_norm": {
+            "available": true,
+            "max": 0.0028868515510112047,
+            "mean": 0.0012130882823839784,
+            "min": 0.0006216552574187517,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "prior_relative_norm": {
+            "available": true,
+            "max": 4.945063483319245e-05,
+            "mean": 1.4997667676652782e-05,
+            "min": 4.4714529394696e-06,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "reference": "pre_injection_noisy_action_embedding",
+          "reference_norm": {
+            "available": true,
+            "max": 153.65164184570312,
+            "mean": 92.45636749267578,
+            "min": 24.45427131652832,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "total_delta_norm": {
+            "available": true,
+            "max": 0.0028868515510112047,
+            "mean": 0.0012130882823839784,
+            "min": 0.0006216552574187517,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "total_relative_norm": {
+            "available": true,
+            "max": 4.945063483319245e-05,
+            "mean": 1.4997667676652782e-05,
+            "min": 4.4714529394696e-06,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          }
+        },
+        "h50": {
+          "available": true,
+          "context_delta_norm": {
+            "available": true,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "context_relative_norm": {
+            "available": true,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "horizon": 50,
+          "prior_delta_norm": {
+            "available": true,
+            "max": 0.010779200121760368,
+            "mean": 0.0029132564086467028,
+            "min": 0.0011644846526905894,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "prior_relative_norm": {
+            "available": true,
+            "max": 7.053375884424895e-05,
+            "mean": 1.656113818171434e-05,
+            "min": 4.728074145532446e-06,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "reference": "pre_injection_noisy_action_embedding",
+          "reference_norm": {
+            "available": true,
+            "max": 416.65093994140625,
+            "mean": 184.75244140625,
+            "min": 54.40653610229492,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "total_delta_norm": {
+            "available": true,
+            "max": 0.010779200121760368,
+            "mean": 0.0029132564086467028,
+            "min": 0.0011644846526905894,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "total_relative_norm": {
+            "available": true,
+            "max": 7.053375884424895e-05,
+            "mean": 1.656113818171434e-05,
+            "min": 4.728074145532446e-06,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          }
+        },
+        "measurement": "projected gated context/prior tensors divided by the measured pre-injection noisy action-embedding norm"
+      },
+      "mask_source": [
+        "implicit_all_action_steps_valid"
+      ],
+      "paired": {
+        "current_residual_off": {
+          "available": true,
+          "degradation": 3.404115705052391e-05,
+          "improvement": -5.090145691610815e-07,
+          "label": "current_residual_off",
+          "student_flow": 0.01018594577908516,
+          "teacher_flow": 0.010185436345636845,
+          "valid_examples": 5874,
+          "valid_steps": 88110,
+          "win_fraction": 0.48876404762268066
+        },
+        "fixed_teacher": {
+          "available": true,
+          "degradation": 0.0005026083090342581,
+          "improvement": -5.214240900386358e-06,
+          "label": "fixed_teacher",
+          "student_flow": 0.01018594577908516,
+          "teacher_flow": 0.010180731303989887,
+          "valid_examples": 5874,
+          "valid_steps": 88110,
+          "win_fraction": 0.466292142868042
+        }
+      },
+      "policy_horizon": 50,
+      "preprocessing_contract": "same processed batch, PI0.5 image preprocessing, action preparation, and normalization path as the ordinary H50 validation",
+      "raw_flow_source": "PI05Pytorch.forward unreduced [B,H,D] flow errors"
+    }
+  },
+  "schema": "zeva-robotwin-stage2-validation-diagnostics-v1",
+  "source_manifest": {
+    "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/zeva/manifest.json",
+    "sha256": "11a6f16e549065ad7d6890f2792682ec163dde090723fc0d35469b096ac2be32"
+  }
+}

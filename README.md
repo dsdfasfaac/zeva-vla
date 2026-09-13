@@ -52,9 +52,12 @@ their configured reference lines; ZTE utility for PI is not yet established by
 those scores. The full 5,874-decision read-only validation completed: H15 flow
 improves only 0.0591% with residuals versus residual-off, and 0.0130% versus
 the fixed trained Base. Prior/context reconstructed residual magnitude is
-about 1/231. Three controlled validation-only branch ablations and an unchanged
-same-host control are now running on aigc29 GPU0–3 (2026-09-13);
-these are not success rates and no new training has started. See the
+about 1/231. All four same-host validation ablations completed (2026-09-13):
+context-only improves H15 by 0.07443% versus residual-off, prior-only worsens it
+by 0.00500%, and multiplying prior by 50 gives only 0.04983% improvement,
+below the original dual residual. This does not support simply increasing the
+prior gate as the fix; differences are small and not claimed significant.
+These are not success rates and no new training has started. See the
 [evidence and next-step boundaries](docs/ZTEV2_POST_EVAL_DIAGNOSIS_20260912.md).
 
 The selected PI0.5 has already been trained on the same RoboTwin distribution.
