@@ -4,6 +4,14 @@
 
 ## 当前结论：全量验证已完成
 
+**最新执行状态（2026-09-13）：空闲GPU已释放，四组完整消融已启动。** 在aigc29 GPU0/1/2/3分别运行context-only（PID2655485）、prior-only（2655489）、prior×50（2655493）和同机原始1/1对照（2655497）。每组5874决策、batch8、seed1000，OMP/MKL各8线程，checkpoint及冻结Base不变；同机对照用于控制从aigc24迁移带来的环境差异。此时仍在模型加载阶段，没有新的消融结论或成功率。
+
+输出目录：`/mnt/100T/users/dingxin/VLA/diagnostics-ztev2-ablation-20260913-fGari2/full-fourway`，包含四组各自的`.pid`、`.log`，完成后写同名`.json`；`plan.json`固定实验设置。单次启动脚本有空闲GPU检查、输出目录拒绝覆盖与独立日志，不是另建监视任务。
+
+Luna已确认已有a29/a24数据全量identity reports的四组件指纹完全相同，报告自身SHA与恢复provenance一致；当前a29 adapter SHA=`8ac54abcec7704b0111b7c28be3fb3a18e27e0ebe8e3dcf8ddff948b36100f8f`匹配原证明。此次只复核报告和adapter，未重读80GB原始数据。显式使用a29原路径`/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data`，不修改历史manifest里的a24路径。
+
+a29未安装pytest（测试命令未执行，不计通过）；8项隔离CPU Tensor/控制流检查在Torch2.7.1+cu126上通过。真实prior×50预检也通过：模型/adapter/fixedBase SHA一致、冻结路径逐张量一致、样本顺序SHA=`a9c6a8e30aa3f7ecbfcb9ce81d6a141ef563300d41e339a22d06fb75a0418ac1`；H50 replay差值0。[两条预检记录](results/robotwin-ztev2-20260912/ablation-preflight-aigc29-prior50-b2x1.json)仅用于实现核验，不能外推总体收益。
+
 固定 ZeVA005000 / Base004500 的 **5874 个验证决策、735 batches** 已全部完成（结果文件时间 09-13 01:52；验证循环17分48秒），两模型冻结路径逐张量一致。模型、adapter、ZTE、bank、retrieval 和 normalization SHA 与既定产物匹配。[完整原始报告](results/robotwin-ztev2-20260912/step5000-diagnostics-full-base4500-b8.json)。
 
 | 相同样本、相同 flow noise 的 H15 指标 | 平均误差 |
@@ -20,7 +28,7 @@ H15 context/prior 残差相对 noisy-action embedding 的**重建范数比**分�
 
 下一步是预先指定的验证集分支消融：context-only、prior-only，以及保持context不变将prior门控乘50。它们用于检查“prior幅度不足”与“prior信息无益/有害”两种假设，不是正式测试选参，也不直接变更部署权重。保持同5874决策、batch8、seed1000、固定Base及所有物理协议。[预先固定的消融设置](../configs/robotwin_ztev2_validation_ablation_20260913.json)。放大后变差也不能单独证明ZTE无信息，因为当前权重并非在该幅度训练。
 
-资源与实现状态（09-13下午）：Luna连续遭遇transport错误，root接手完成只读门控开关，默认1/1不替换方法；异常退出也恢复原方法。8个本地隔离控制流用例通过，尚未把它们称为完整tensor/runtime测试。8台授权H100的64张卡均高负载（约69–79GB显存、100%利用率），未抢占他人作业，**新消融尚未启动**；此前完整5874决策结果不受影响。没有新训练。
+历史资源与实现状态（09-13下午，已被顶部启动记录覆盖）：Luna连续遭遇transport错误，root接手完成只读门控开关，默认1/1不替换方法；异常退出也恢复原方法。8个本地隔离控制流用例通过，当时未作完整tensor/runtime测试。8台授权H100当时全部高负载，未抢占他人作业；随后释放资源、完成真实预检并启动消融。没有新训练。
 
 ## 历史过程：2026-09-13 验证进度
 

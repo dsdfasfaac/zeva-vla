@@ -52,7 +52,8 @@ their configured reference lines; ZTE utility for PI is not yet established by
 those scores. The full 5,874-decision read-only validation completed: H15 flow
 improves only 0.0591% with residuals versus residual-off, and 0.0130% versus
 the fixed trained Base. Prior/context reconstructed residual magnitude is
-about 1/231. Controlled validation-only branch ablations are being prepared;
+about 1/231. Three controlled validation-only branch ablations and an unchanged
+same-host control are now running on aigc29 GPU0–3 (2026-09-13);
 these are not success rates and no new training has started. See the
 [evidence and next-step boundaries](docs/ZTEV2_POST_EVAL_DIAGNOSIS_20260912.md).
 
