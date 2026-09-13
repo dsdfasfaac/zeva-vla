@@ -13,6 +13,42 @@ pytest.importorskip("torch")
 diagnostics = pytest.importorskip("scripts.eval_robotwin_stage2_diagnostics")
 
 
+def test_gate_intervention_scales_branches_and_restores_after_error():
+    class FakePolicy:
+        def _activate_residual_gates(self):
+            self._active_context_gate = 0.01
+            self._active_prior_gate = 0.02
+
+    policy = FakePolicy()
+    with diagnostics._validation_gate_intervention(policy, 1.0, 1.0):
+        assert "_activate_residual_gates" not in vars(policy)
+        policy._activate_residual_gates()
+        assert policy._active_prior_gate == 0.02
+    with pytest.raises(RuntimeError, match="fixture"):
+        with diagnostics._validation_gate_intervention(policy, 0.0, 50.0):
+            policy._activate_residual_gates()
+            assert policy._active_context_gate == 0.0
+            assert policy._active_prior_gate == 1.0
+            policy._activate_residual_gates()  # Replay must not compound scaling.
+            assert policy._active_prior_gate == 1.0
+            raise RuntimeError("fixture")
+    assert "_activate_residual_gates" not in vars(policy)
+    policy._activate_residual_gates()
+    assert policy._active_context_gate == 0.01
+    assert policy._active_prior_gate == 0.02
+    with diagnostics._validation_gate_intervention(policy, 1.0, 0.0):
+        policy._activate_residual_gates()
+        assert policy._active_context_gate == 0.01
+        assert policy._active_prior_gate == 0.0
+
+
+@pytest.mark.parametrize("value", [-1.0, 101.0, float("inf"), float("nan")])
+def test_gate_intervention_rejects_invalid_scale(value):
+    with pytest.raises(ValueError, match="finite"):
+        with diagnostics._validation_gate_intervention(object(), value, 1.0):
+            pass
+
+
 def test_action_only_teacher_requires_identical_frozen_tensors(tmp_path):
     from types import SimpleNamespace
     import torch

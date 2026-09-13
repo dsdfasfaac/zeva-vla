@@ -1,8 +1,28 @@
 # ZTE v2：配对评测后的诊断边界与下一步
 
-更新：2026-09-12。本文区分已测事实、未测假设和计划，不改变已完成实验。
+更新：2026-09-13。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
-## 2026-09-13 验证进度
+## 当前结论：全量验证已完成
+
+固定 ZeVA005000 / Base004500 的 **5874 个验证决策、735 batches** 已全部完成（结果文件时间 09-13 01:52；验证循环17分48秒），两模型冻结路径逐张量一致。模型、adapter、ZTE、bank、retrieval 和 normalization SHA 与既定产物匹配。[完整原始报告](results/robotwin-ztev2-20260912/step5000-diagnostics-full-base4500-b8.json)。
+
+| 相同样本、相同 flow noise 的 H15 指标 | 平均误差 |
+|---|---:|
+| ZeVA 当前 action expert，关闭双残差 | 0.0101854363 |
+| ZeVA 当前 action expert，开启双残差 | 0.0101794126 |
+| 独立训练的固定 Base004500 | 0.0101807313 |
+
+双残差带来的平均相对改善仅 **0.0591%**，对固定 Base 的平均相对改善仅 **0.0130%**。这不是成功率，也没有据此声称统计显著。残差开启相对关闭的样本胜率为50.85%，相对固定Base为46.75%；同一episode内的决策有关联，不能当成5874次独立闭环试验。
+
+H15 context/prior 残差相对 noisy-action embedding 的**重建范数比**分别为 `0.0034690`（约0.347%）和 `0.0000149977`（约0.00150%），prior 约为context的1/231。retrieval accuracy=99.8469%，prior NLL=6.76919。这说明目前接入带来的动作预测增量非常小，但不独自证明ZTE没有信息，也不证明增大gate一定有效。
+
+原验证 `flow` 对batch均值再平均，末批只有2条；新诊断按样本平均，因此本次原指标与新H50聚合不作精确等价声明。单批无末批加权差异的真实smoke已验证差值0。当前数据未提供显式action padding mask，诊断使用`implicit_all_action_steps_valid`；不能据此断言轨迹末尾没有重复填充。
+
+下一步是预先指定的验证集分支消融：context-only、prior-only，以及保持context不变将prior门控乘50。它们用于检查“prior幅度不足”与“prior信息无益/有害”两种假设，不是正式测试选参，也不直接变更部署权重。保持同5874决策、batch8、seed1000、固定Base及所有物理协议。[预先固定的消融设置](../configs/robotwin_ztev2_validation_ablation_20260913.json)。放大后变差也不能单独证明ZTE无信息，因为当前权重并非在该幅度训练。
+
+资源与实现状态（09-13下午）：Luna连续遭遇transport错误，root接手完成只读门控开关，默认1/1不替换方法；异常退出也恢复原方法。8个本地隔离控制流用例通过，尚未把它们称为完整tensor/runtime测试。8台授权H100的64张卡均高负载（约69–79GB显存、100%利用率），未抢占他人作业，**新消融尚未启动**；此前完整5874决策结果不受影响。没有新训练。
+
+## 历史过程：2026-09-13 验证进度
 
 01:32 更新：真实 ZeVA005000 的单批 smoke 已完成，模型/adapter/ZTE/bank/retrieval SHA 与正式选定产物完全匹配。两条真实验证决策上，原 H50 flow 与 raw replay 均为 `0.0061195502`，差值为零；H15 residual-on=`0.0051624347`，current residual-off=`0.0053198677`。同批 H50 略差而 H15 略好，仅说明两种观测不能互相替代，**不能从两条样本外推总体增益**。H15 context/prior 相对范数的重建均值分别约 `0.002976` / `0.00001348`，不是直接捕获的 BF16 累加后差值。完整 smoke JSON 已[归档](results/robotwin-ztev2-20260912/step5000-diagnostics-smoke-b2x1.json)。
 
@@ -31,9 +51,9 @@
 - 某个最后训练 batch 的 NLL 与全验证集 NLL 不能直接当成泛化差距；需要同口径、同样本统计。
 - H50 输出/H15 执行是用户指定协议，不把它作为待修复错误，也不改为 H10 或 H15 输出。
 
-## 当前限定工作：先增加验证观测
+## 历史实施要求：先增加验证观测（已完成）
 
-Luna worker 正在修改本地 Stage2 trainer 和专门测试，增加默认关闭的 validation diagnostics；尚未将改动部署到远程，也没有新训练。要求：
+该阶段由Luna修改本地Stage2 trainer和专门测试，随后在隔离远程副本完成验证；未覆盖生产源码、未启动新训练。原实施要求：
 
 1. 不改变历史 loss、模型权重、门控、优化器、训练步数或默认验证输出。
 2. 分别记录 H50 与前 H15 的 flow error，明确 action padding 与 EEF16 维度处理；不从已归约的标量推测 H15。
@@ -41,6 +61,6 @@ Luna worker 正在修改本地 Stage2 trainer 和专门测试，增加默认关�
 4. 测量或明确标注重建的 context/prior 残差和相对幅度，不用 gate 数值代替。额外 forward 必须恢复 RNG 和临时注入状态。
 5. 单测完成后，先对既定 ZeVA005000 在独立验证样本上做只读重放；保留 checkpoint SHA、样本、噪声与运行时来源。正式 rollout 成功标签不进入这个测量。
 
-这些是当前实施要求，不代表已经获得新的数值。下一轮训练须根据实际观测确定单一可解释改动，继续冻结 ZTE/bank/VLM，保留 AE LR5e-6、新模块 LR5e-5、global256 和现有双残差/Gaussian prior 路径。
+上述验证现已完成，数值见本文顶部。下一轮训练须根据实际观测确定单一可解释改动，继续冻结 ZTE/bank/VLM，保留 AE LR5e-6、新模块 LR5e-5、global256 和现有双残差/Gaussian prior 路径。
 
 若采用额外 action-expert continuation，必须给普通 Base 匹配的额外训练预算与数据；只给 ZeVA 增加 AE 更新不能称为表征增益的干净隔离实验。未启动新的 Stage1、Stage2 或 Stage3。

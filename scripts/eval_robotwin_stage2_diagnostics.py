@@ -8,6 +8,7 @@ artifacts.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import dataclasses
 import hashlib
 import json
@@ -84,6 +85,38 @@ class EvalArgs:
     video_backend: str | None = None
     decoder_threads: int | None = None
     seed: int | None = None
+    context_gate_scale: float = 1.0
+    prior_gate_scale: float = 1.0
+
+
+@contextmanager
+def _validation_gate_intervention(policy, context_scale: float, prior_scale: float):
+    """Scale activated gates for normal forward and diagnostic replay alike."""
+    for value in (context_scale, prior_scale):
+        if not math.isfinite(value) or not 0 <= value <= 100:
+            raise ValueError("Validation gate scales must be finite and in [0,100].")
+    if context_scale == 1.0 and prior_scale == 1.0:
+        yield
+        return
+    method_name = "_activate_residual_gates"
+    had_override = method_name in vars(policy)
+    previous_override = vars(policy).get(method_name)
+    original = getattr(policy, method_name)
+
+    def activate(*args, **kwargs):
+        result = original(*args, **kwargs)
+        policy._active_context_gate = policy._active_context_gate * context_scale
+        policy._active_prior_gate = policy._active_prior_gate * prior_scale
+        return result
+
+    setattr(policy, method_name, activate)
+    try:
+        yield
+    finally:
+        if had_override:
+            setattr(policy, method_name, previous_override)
+        else:
+            delattr(policy, method_name)
 
 
 def _read_json(path: str | Path) -> dict[str, Any]:
@@ -646,15 +679,16 @@ def main(cli: EvalArgs) -> None:
 
     policy, validation_loader = accelerator.prepare(policy, validation_loader)
     policy.eval()
-    result = evaluate(
-        policy,
-        tqdm.tqdm(validation_loader, total=min(args.eval_batches, len(validation_loader)), desc="Read-only validation"),
-        bank,
-        policy.preprocessor,
-        policy.zeva_config,
-        args,
-        accelerator,
-    )
+    with _validation_gate_intervention(policy, cli.context_gate_scale, cli.prior_gate_scale):
+        result = evaluate(
+            policy,
+            tqdm.tqdm(validation_loader, total=min(args.eval_batches, len(validation_loader)), desc="Read-only validation"),
+            bank,
+            policy.preprocessor,
+            policy.zeva_config,
+            args,
+            accelerator,
+        )
     accelerator.wait_for_everyone()
 
     report = {
@@ -670,6 +704,11 @@ def main(cli: EvalArgs) -> None:
         "fixed_teacher": fixed_teacher_identity,
         "lineage": lineage,
         "protocol": {
+            "validation_only_intervention": {
+                "context_gate_scale": cli.context_gate_scale,
+                "prior_gate_scale": cli.prior_gate_scale,
+                "deployment_or_checkpoint_modified": False,
+            },
             "seed": seed,
             "validation_decision_samples": len(validation_dataset),
             "ordered_validation_samples_sha256": hashlib.sha256(
