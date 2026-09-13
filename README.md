@@ -61,8 +61,10 @@ These are not success rates. A bounded fixed-teacher pair has been dispatched:
 both variants start from trained Base004500 for 1,000 fresh-optimizer steps;
 ZeVA uses that immutable Base as its preservation reference, with a fresh
 zero-residual adapter. Real compiled-anchor/zero-init/H15 recurrence smoke
-passed; aigc29 GPU0–3 runs ZeVA and GPU4–7 runs Base, with startup/loading in
-progress and no optimizer step confirmed yet. The hinge is expert-loss reweighting, not
+passed; aigc29 GPU0–3 runs ZeVA and GPU4–7 runs Base. At the 2026-09-14 01:09
+check, Base was beyond step576 and ZeVA was validating/saving step500;
+both had finite active losses and the intended optimizer/teacher manifests.
+The fixed step1000 comparison remains pending. The hinge is expert-loss reweighting, not
 teacher-action distillation or a guarantee of preserved success rate. See the
 [evidence and next-step boundaries](docs/ZTEV2_POST_EVAL_DIAGNOSIS_20260912.md).
 

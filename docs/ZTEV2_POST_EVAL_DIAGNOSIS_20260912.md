@@ -2,7 +2,7 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
-**最新：固定teacher匹配训练已提交启动。** aigc29 GPU0–3为ZeVA（launcher PID2701483），GPU4–7为普通Base（PID2701482），各4卡、global256、1000新optimizer steps。真实compiled anchor/zero-init/H15预检及6项launcher契约测试均通过。当前是启动核验/加载阶段，尚未确认optimizer step或新验证结果。训练输出根为`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914`，各分支`train.log`、`manifest.json`和checkpoint写在其`baseline/`、`zeva/`下。隔离代码与外层启动日志位于`/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO`，分别`baseline-launch.log`、`zeva-launch.log`。不要启动第二份，也不要将此新实验伪装成旧ZeVA resume。
+**最新（2026-09-14 01:09核查）：固定teacher匹配训练正常运行。** aigc29 GPU0–3为ZeVA（launcher PID2701483），GPU4–7为普通Base（PID2701482），各4卡、global256、1000新optimizer steps。Base已超过576步（000500完整checkpoint可用），ZeVA正在500步验证/保存（上次确认完整为000250，不能把当时空的000500目录当成完整产物）。稳态训练约Base1.9秒/步、ZeVA2.1–2.3秒/步，不包含阶段性验证/保存。active flow/NLL有限；Base的prior/retrieval NaN是禁用项，不是训练发散。实际manifest确认两支初始化相同、AE430098464参数/LR5e-6；ZeVA另有2910532参数/LR5e-5，teacher=`independent_frozen_base_action_path`、每4步抽样并同噪声重放，scheduler每optimizer step推进一次。真实compiled anchor/zero-init/H15预检及6项launcher契约测试均通过。末步的同噪声H15/H50终检与新闭环结果尚未产生；不比较两支不同步、不同validation RNG状态下的即时loss来宣称收益。训练输出根为`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914`，各分支`train.log`、`manifest.json`和checkpoint写在其`baseline/`、`zeva/`下。隔离代码与外层启动日志位于`/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO`，分别`baseline-launch.log`、`zeva-launch.log`。不要启动第二份，也不要将此新实验伪装成旧ZeVA resume。
 
 ## 当前结论：全量验证已完成
 
