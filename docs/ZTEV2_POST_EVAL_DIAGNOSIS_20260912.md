@@ -2,6 +2,10 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+**18:33 heartbeat后最新：aigc31完整模型/递归/渲染及8卡计算均通过，但正式启动被资源保护拦截；没有运行episode。** 既定ZeVA001000完整模型加载和两次真实推理通过，输出均[50,16] finite、commit15后transition_count=1，耗时284.34秒，使用Torch2.7.1cu126与实际UUID6。[真实模型报告](results/robotwin-fixed-anchor-20260914/selected-model-smoke-a31-pEWPcm/report.json)。renderer PID1697338已由独立nvidia PIDS核实在GPU6/BA:00.0，640×480且干净rc0；8卡tiny CUDA均actual UUID匹配、finite，约5.54秒。已准备一卡一slot，仍为同样8个逻辑RNG流、固定checkpoint/200组seed及实际指令；19项相关CPU测试通过。
+
+**重要纠正：不能把PID2369486当作已确认退出的进程。** 首次launcher PID1720516在创建正式输出前退出，日志为`GPU 0 has non-Xorg processes; launch cancelled: 2369486`。随后严格检查得到`/proc/2369486`目录存在、status文件不可见，`os.kill(pid,0)`为`EPERM(errno1)`，不是`ESRCH`。此前Luna由ps不可见/kill-zero失败推导“进程不存在”不充分，且被本次内核结果否定；本次不推断具体owner或内核原因，不绕过guard。计算健康通过不等于这些显存可自由占用。a31入口增加安全阻塞记录，需确认GPU分配/共用授权或进程确实消失后再启动；未终止进程或重置设备。仍在检查其他节点可用资源，无新成功率。以下资源推断按本段修正。
+
 17:37 heartbeat后：aigc31模型迁移阻塞已定位为ABI不匹配——系统model Torch2.5.1cu124无法导入现有Mamba编译扩展（undefined symbol），而a24模型用Torch2.7.1cu126；renderer单独Torch2.10通过不代表model可运行。已授权Luna创建全新的shared依赖overlay，优先复制a24的匹配Torch及必要依赖，不更改公共环境或编译现有Mamba。入口新增可选`MODEL_DEPENDENCY_OVERLAY`，保持源码/native TF5优先，记录manifest。a31专用placement要求独立成功proof与overlay路径完全匹配，UUID固定物理2/6，只豁免已确认不存在的历史PID2369486，内存门槛6GiB用于容纳已测3.8GiB残留；任何新活跃C/G进程均拒绝，绝不清理旧句柄。6项placement、4项runtime、5项UUID映射测试通过。正式评测尚未启动。
 
 迁移场景一致性也已只读核对：a24的`/data1/dingxin/robotwin-formal-eval/RoboTwin`与shared RoboTwin的`envs`（忽略`__pycache__`）和整个`task_config`分别`diff -qr`均无差异、rc0。因此候选shared renderer并非未经比对的新场景配置；仍须完成新model runtime真实加载/推理验证。a31本地/data1仅余37GiB，依赖和评测产物使用shared盘（当前约11TiB可用）。

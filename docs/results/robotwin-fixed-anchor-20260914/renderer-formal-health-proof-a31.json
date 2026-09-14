@@ -52,5 +52,5 @@
   },
   "renderer_evidence": "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO/renderer-identity-a31-7yZa7H",
   "eight_gpu_evidence": "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914/model-runtime-8gpu-placement-a31-20260914T100302",
-  "caveat": "Historical PID2369486 has no OS process but retains about 3.8GiB per GPU. It is not killed; fresh launcher checks reject any new active non-Xorg process."
+  "caveat": "Compute/renderer health is verified, not resource availability. Later launch guard rejected PID2369486; os.kill(pid,0) returned EPERM, not ESRCH, so its absence/ownership cannot be inferred from ps visibility. The process was not killed, and formal launch remains blocked pending availability/allocation confirmation."
 }
