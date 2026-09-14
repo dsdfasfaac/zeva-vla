@@ -10,6 +10,8 @@
 
 14:08追加快照：aigc31每卡仍约3809MiB/0%，但默认nvidia-smi进程表变为`No running processes found`，与上一轮PIDS查询结果不一致。已交Luna核实PIDS/compute-apps及设备使用者，未据此宣布卡空闲或启动新进程。
 
+14:40 heartbeat：aigc24仍以rc137结束限时GPU查询，正式目录仍不存在。aigc31追加检查确认PIDS/compute-apps中的2369486为`[Not Found]`且`/proc/2369486`不存在；另有8个PPID1、约52天的`pt_data_worker`持有全部GPU设备句柄。因此此前“同一计算进程占用”应精确理解为驱动残留记录，不能当作活跃训练证明，也不能仅凭默认进程表为空宣布可用。未清理这些历史进程或重置设备；继续检查其他授权节点的资源释放。
+
 ## 最新：固定teacher方案未证明增量收益，准备固定末步闭环
 
 两路终检于09-14 02:03均完成735 batches/5874决策。checkpoint、adapter、Stage1/bank/live/retrieval、样本顺序SHA、seed1000、batch8、源码及预处理协议核对一致，两路student residual-on/off统计完全相同；两种teacher的冻结权重均逐张量核验相同。传回本地曾遇SSH/SFTP挂起，终止本次传输进程并通过带超时的rsync恢复，未影响已完成的训练/验证。
