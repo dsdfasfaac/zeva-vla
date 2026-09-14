@@ -19,7 +19,7 @@ class PlacementTest(unittest.TestCase):
         return subprocess.run(
             ["bash", "-c", "set -eu\nzeva_release=/release\n" + block
              + '\nprintf "%s %s %s %s" "$zeva_model_ip" "$zeva_uuid6" "$zeva_memory_limit" "$zeva_icd"'],
-            env={**os.environ, "EVAL_PLACEMENT": host, "MODEL_DEPENDENCY_OVERLAY": "/verified"},
+            env={**os.environ, "EVAL_PLACEMENT": host, "MODEL_DEPENDENCY_OVERLAY": "/verified", "MODEL_LD_LIBRARY_PATH": "/verified/torch/lib"},
             text=True, capture_output=True,
         )
 

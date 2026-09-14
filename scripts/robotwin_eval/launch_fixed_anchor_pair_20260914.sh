@@ -13,6 +13,10 @@ case "$zeva_placement" in
     zeva_model_ip=172.16.80.158
     zeva_uuid2=GPU-4e851e19-19df-1b0c-cba8-4e0a81c08425
     zeva_uuid6=GPU-2e145d56-44e7-7643-311c-be4bdfb69eb0
+    zeva_physical_gpus=(2 6)
+    zeva_physical_uuids=("$zeva_uuid2" "$zeva_uuid6")
+    zeva_slot_gpu_ids=2,6,2,6,2,6,2,6
+    zeva_slot_cuda_devices=$zeva_uuid2,$zeva_uuid6,$zeva_uuid2,$zeva_uuid6,$zeva_uuid2,$zeva_uuid6,$zeva_uuid2,$zeva_uuid6
     zeva_memory_limit=1024
     zeva_health_proof=$zeva_release/renderer-formal-health-proof.json
     zeva_health_block=$zeva_release/gpu-health-blocked.json
@@ -24,6 +28,19 @@ case "$zeva_placement" in
     zeva_model_ip=172.16.80.165
     zeva_uuid2=GPU-1e870d39-ddd0-127e-11a2-fb875ce44995
     zeva_uuid6=GPU-18077766-169d-96b9-2d53-55d11349ddd5
+    zeva_physical_gpus=(0 1 2 3 4 5 6 7)
+    zeva_physical_uuids=(
+      GPU-da0bafe1-add8-e332-399b-c2c50db124fe
+      GPU-81a4acdc-ff03-5734-fdfb-fe5a86e609f9
+      "$zeva_uuid2"
+      GPU-c37ba47c-c3ed-30b3-2b36-5892793bc97f
+      GPU-cd1b3ba2-89ba-cfda-9135-2c812887b668
+      GPU-1a2b2557-12b8-ec49-31d6-ae3b185d3319
+      "$zeva_uuid6"
+      GPU-267a6ac4-aa8e-3688-f0fc-d2cf14bece60
+    )
+    zeva_slot_gpu_ids=0,1,2,3,4,5,6,7
+    zeva_slot_cuda_devices=$(IFS=,; printf '%s' "${zeva_physical_uuids[*]}")
     # Only the measured ~3.8 GiB residual allocation is allowed, not a live job.
     zeva_memory_limit=6144
     zeva_allowed_stale_pid=2369486
@@ -32,6 +49,7 @@ case "$zeva_placement" in
     zeva_render_runtime=/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin
     zeva_icd=/etc/vulkan/icd.d/nvidia_icd.json
     export MODEL_DEPENDENCY_OVERLAY=${MODEL_DEPENDENCY_OVERLAY:?Specify the verified a31 model dependency overlay}
+    export MODEL_LD_LIBRARY_PATH=${MODEL_LD_LIBRARY_PATH:?Specify the verified isolated CUDA library paths}
     ;;
   *) echo "Unsupported EVAL_PLACEMENT" >&2; exit 2;;
 esac
@@ -40,9 +58,9 @@ esac
   echo "GPU compute/renderer health is blocked; fresh verified recovery required" >&2; exit 2;
 }
 
-# Only GPUs 2 and 6 were verified free. Other cards have graphics workloads
-# despite an empty compute-apps query. Never stop those processes.
-for zeva_gpu in 2 6; do
+# Check every physical target, including graphics processes. Never stop them.
+for zeva_index in "${!zeva_physical_gpus[@]}"; do
+  zeva_gpu=${zeva_physical_gpus[$zeva_index]}
   zeva_row=$(timeout -k 2 15 nvidia-smi -i "$zeva_gpu" --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits) || {
     echo "GPU $zeva_gpu health query failed or timed out; launch cancelled" >&2; exit 2;
   }
@@ -54,7 +72,7 @@ for zeva_gpu in 2 6; do
     echo "GPU $zeva_gpu is no longer idle; launch cancelled" >&2; exit 2;
   }
   zeva_current_uuid=$(timeout -k 2 15 nvidia-smi -i "$zeva_gpu" --query-gpu=uuid --format=csv,noheader)
-  if [[ "$zeva_gpu" == 2 ]]; then zeva_expected_uuid=$zeva_uuid2; else zeva_expected_uuid=$zeva_uuid6; fi
+  zeva_expected_uuid=${zeva_physical_uuids[$zeva_index]}
   [[ "$zeva_current_uuid" == "$zeva_expected_uuid" ]] || {
     echo "Physical GPU identity changed; fresh device verification required" >&2; exit 2;
   }
@@ -78,8 +96,8 @@ done
 
 export ZEVA_ROOT=$zeva_release
 export MODEL_HOST=$zeva_placement RENDER_HOST=$zeva_placement MODEL_IP=$zeva_model_ip
-export SLOTS=8 MODEL_GPU_IDS=2,6,2,6,2,6,2,6 RENDER_GPU_IDS=2,6,2,6,2,6,2,6
-export MODEL_CUDA_DEVICES=$zeva_uuid2,$zeva_uuid6,$zeva_uuid2,$zeva_uuid6,$zeva_uuid2,$zeva_uuid6,$zeva_uuid2,$zeva_uuid6
+export SLOTS=8 MODEL_GPU_IDS=$zeva_slot_gpu_ids RENDER_GPU_IDS=$zeva_slot_gpu_ids
+export MODEL_CUDA_DEVICES=$zeva_slot_cuda_devices
 export RENDER_CUDA_DEVICES=$MODEL_CUDA_DEVICES
 export BASE_PORT=19300 EPISODES=20 ABSOLUTE_START_SEED=1000
 export MODEL_SEED_POLICY=continuous MODEL_RNG_SEED=20260907
@@ -104,7 +122,7 @@ export ZEVA_LABEL=fixed-anchor-zeva-001000-h15
 export ANCHOR_LABEL=untouched-best-v1-h15
 export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
 
-python3 - "$FROZEN_SEED_MANIFEST" "$TASK_MANIFEST" "$zeva_staging" "$zeva_health_proof" "$RENDER_SAPIEN_DEVICE" "$zeva_uuid2" "$zeva_uuid6" "$zeva_placement" "$zeva_icd" "${MODEL_DEPENDENCY_OVERLAY:-}" <<'PY'
+python3 - "$FROZEN_SEED_MANIFEST" "$TASK_MANIFEST" "$zeva_staging" "$zeva_health_proof" "$RENDER_SAPIEN_DEVICE" "$zeva_uuid2" "$zeva_uuid6" "$zeva_placement" "$zeva_icd" "${MODEL_DEPENDENCY_OVERLAY:-}" "${MODEL_LD_LIBRARY_PATH:-}" "$MODEL_CUDA_DEVICES" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -117,11 +135,12 @@ assert proof['passed'] and proof['physical_gpu_index'] == 6
 assert proof['host'] == sys.argv[8]
 assert proof['cuda_visible_devices'] == sys.argv[7]
 assert proof['renderer_device'] == sys.argv[5]
-assert proof['matmul_verified_uuids'] == [sys.argv[6], sys.argv[7]]
+assert proof['matmul_verified_uuids'] == list(dict.fromkeys(sys.argv[12].split(',')))
 assert proof['renderer_exit_code'] == 0
 assert proof['vk_icd_filenames'] == sys.argv[9]
 if sys.argv[8] == 'aigc31':
     assert proof['model_dependency_overlay'] == sys.argv[10]
+    assert proof['model_ld_library_path'] == sys.argv[11]
 assert hashlib.sha256(seed.read_bytes()).hexdigest() == '1b9dbf74bd9d9b8871647a00d6557f84884685d4459065f004bd600a86b1679b'
 assert hashlib.sha256(tasks.read_bytes()).hexdigest() == '0501e43192415f5e32de993866536e25a3c9a51c2622248402bc3b9cd8b157bd'
 manifest = json.loads((staging / 'robotwin_eval_ztev2_staging_manifest.json').read_text())

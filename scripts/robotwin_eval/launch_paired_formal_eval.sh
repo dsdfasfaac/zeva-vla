@@ -10,6 +10,8 @@ set -euo pipefail
 model_host=${MODEL_HOST:-aigc29}
 render_host=${RENDER_HOST:-aigc24}
 model_ip=${MODEL_IP:-172.16.80.163}
+model_num_threads=${MODEL_NUM_THREADS:-8}
+[[ "$model_num_threads" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid MODEL_NUM_THREADS" >&2; exit 2; }
 slots=${SLOTS:-8}
 # Each logical slot can be placed on an independently chosen physical GPU.
 # Repeated IDs are intentional: this supports packing several small model or
@@ -139,6 +141,14 @@ release_runtime=$handoff/runtime
 native_transformers=${NATIVE_TRANSFORMERS_RUNTIME:-/data1/dingxin/transformers5-runtime}
 read_only_runtime=${READ_ONLY_RUNTIME:-false}
 model_dependency_overlay=${MODEL_DEPENDENCY_OVERLAY:-}
+model_ld_library_path=${MODEL_LD_LIBRARY_PATH:-}
+model_ld_env=""
+if [[ -n "$model_ld_library_path" ]]; then
+  [[ "$model_ld_library_path" =~ ^/[A-Za-z0-9_./:-]+$ ]] || {
+    echo "MODEL_LD_LIBRARY_PATH must contain safe absolute paths" >&2; exit 2;
+  }
+  model_ld_env="LD_LIBRARY_PATH='$model_ld_library_path'"
+fi
 if [[ -n "$model_dependency_overlay" ]]; then
   [[ "$model_dependency_overlay" =~ ^/[A-Za-z0-9_./-]+$ ]] || {
     echo "MODEL_DEPENDENCY_OVERLAY must be a safe absolute path" >&2; exit 2;
@@ -353,6 +363,8 @@ start_servers() {
     local pid
     pid=$(ssh "$model_host" "cd '$shared_runtime'; nohup env \
       PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$model_cuda_device' PYTHONPATH='$model_pythonpath' \
+      OMP_NUM_THREADS='$model_num_threads' MKL_NUM_THREADS='$model_num_threads' \
+      $model_ld_env \
       $trace_server_env \
       HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \
       python3 script/policy_model_server.py --port '$port' --config '$config' \
@@ -547,8 +559,10 @@ cat > "$output/manifest.json" <<EOF
   "model_runtime": "native_handoff_transformers_5.5.4",
   "native_transformers_runtime": "$native_transformers",
   "model_dependency_overlay": "$model_dependency_overlay",
+  "model_ld_library_path": "$model_ld_library_path",
   "read_only_runtime": $read_only_runtime,
   "model_host": "$model_host",
+  "model_num_threads": $model_num_threads,
   "render_host": "$render_host",
   "render_sapien_device": "$render_sapien_device",
   "render_mps_pipe_directory": "$render_mps_pipe_directory",

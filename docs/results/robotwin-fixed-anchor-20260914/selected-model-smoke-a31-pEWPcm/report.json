@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "closed_loop_evaluation": false,
+  "synthetic_observations": true,
+  "trained_checkpoint_unchanged": true,
+  "config": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-fixed-anchor-pair-20260914-staging/robotwin_eval_ztev2_zeva.yml",
+  "config_sha256": "c35716ddd585be23f504170da76b0ceab4067ffb10af1b09ad307134ce330ca6",
+  "stage2_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/zeva/001000",
+  "torch_version": "2.7.1+cu126",
+  "torch_path": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/__init__.py",
+  "cuda_visible_devices": "GPU-18077766-169d-96b9-2d53-55d11349ddd5",
+  "device_uuid": "18077766-169d-96b9-2d53-55d11349ddd5",
+  "first_shape": [
+    50,
+    16
+  ],
+  "second_shape": [
+    50,
+    16
+  ],
+  "committed_horizon": 15,
+  "recurrent_transitions": 1,
+  "elapsed_seconds": 284.3419832661748
+}

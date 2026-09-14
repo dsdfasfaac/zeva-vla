@@ -1,0 +1,97 @@
+{
+  "schema": "zeva-model-runtime-manifest-v1",
+  "created_utc": "2026-09-14T09:59:51Z",
+  "host": "aigc31",
+  "overlay_root": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914",
+  "source": {
+    "host": "aigc24",
+    "python_site": "/usr/local/lib/python3.10/dist-packages",
+    "copy_method": "rsync -aH --partial --info=stats2",
+    "copy_log": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/copy-rsync-20260914.log",
+    "copy_finished_utc": "2026-09-14T09:52:21Z",
+    "overlay_bytes": 5291032150,
+    "torch_cuda_build": "cu126"
+  },
+  "components": {
+    "torch": {
+      "version": "2.7.1+cu126",
+      "path": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/__init__.py",
+      "import_seconds": 2.8343094727024436
+    },
+    "transformers": {
+      "version": "5.5.4",
+      "path": "/mnt/100T/users/dingxin/VLA/runtime/zeva-stage2-resume-aigc24-20260912/transformers/__init__.py",
+      "import_seconds": 4.247433138079941
+    },
+    "mamba_ssm": {
+      "version": "2.2.6.post3",
+      "path": "/data1/dingxin/zeva-runtime-deps/mamba_ssm/__init__.py",
+      "import_seconds": 4.53266513440758
+    },
+    "zeva_policy": {
+      "version": null,
+      "path": "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO/scripts/robotwin_eval/zeva_policy.py",
+      "import_seconds": 0.03469456918537617
+    },
+    "openpi.zeva.robotwin_policy": {
+      "version": null,
+      "path": "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO/src/openpi/zeva/robotwin_policy.py",
+      "import_seconds": 1.4680311204865575
+    }
+  },
+  "cuda_probe": {
+    "passed": true,
+    "cuda_visible_devices": "GPU-18077766-169d-96b9-2d53-55d11349ddd5",
+    "device_uuid": "18077766-169d-96b9-2d53-55d11349ddd5",
+    "finite_cuda": true,
+    "evidence_log": "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO/model-runtime-probe-a31-Mxsw6Z/import.log"
+  },
+  "ld_library_path": {
+    "required": true,
+    "directories_sorted": [
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/cusparselt/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cublas/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_cupti/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_nvrtc/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_runtime/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cudnn/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufft/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufile/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/curand/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusolver/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusparse/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nccl/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvjitlink/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvtx/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torchaudio/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/amd/lib",
+      "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/nvidia/lib"
+    ],
+    "value": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/cusparselt/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cublas/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_cupti/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_nvrtc/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_runtime/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cudnn/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufft/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufile/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/curand/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusolver/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusparse/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nccl/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvjitlink/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvtx/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torchaudio/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/amd/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/nvidia/lib"
+  },
+  "pythonpath": [
+    "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO/scripts/robotwin_eval",
+    "/mnt/100T/users/dingxin/VLA/runtime/zeva-stage2-resume-aigc24-20260912",
+    "/data1/dingxin/zeva-runtime-deps",
+    "/mnt/100T/users/dingxin/VLA/runtime/zeva-eval-deps-py310-v1",
+    "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914",
+    "/usr/local/lib/python3.10/dist-packages",
+    "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime/h100-extra-deps",
+    "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime/lerobot-overlay-v2",
+    "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime/lerobot-main-py311-v1/src",
+    "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime/src",
+    "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO/src",
+    "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO",
+    "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime/lerobot-main-deps-py311-v1"
+  ],
+  "verification": {
+    "imports_verified": true,
+    "model_inference_verified": false,
+    "note": "Successful imports and finite CUDA probe do not establish full model loading or inference; no 9GB model was loaded by this runtime audit."
+  },
+  "known_caveats": [
+    "The original probe log reports a torchvision.io warning for missing libpng16.ca116d9f.so.16 from torchvision.libs; that small wheel subdirectory was not copied in this runtime preparation.",
+    "The warning does not affect the validated NumPy/Torch input path, but torchvision.io image/video functionality is not claimed."
+  ]
+}

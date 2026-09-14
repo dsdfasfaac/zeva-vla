@@ -1,0 +1,56 @@
+{
+  "passed": true,
+  "host": "aigc31",
+  "physical_gpu_index": 6,
+  "cuda_visible_devices": "GPU-18077766-169d-96b9-2d53-55d11349ddd5",
+  "renderer_device": "cuda:0",
+  "device_pci": "0000:ba:00.0",
+  "renderer_pid": 1697338,
+  "renderer_exit_code": 0,
+  "vk_icd_filenames": "/etc/vulkan/icd.d/nvidia_icd.json",
+  "frame_shape": [
+    480,
+    640,
+    4
+  ],
+  "finite": true,
+  "matmul_verified_uuids": [
+    "GPU-da0bafe1-add8-e332-399b-c2c50db124fe",
+    "GPU-81a4acdc-ff03-5734-fdfb-fe5a86e609f9",
+    "GPU-1e870d39-ddd0-127e-11a2-fb875ce44995",
+    "GPU-c37ba47c-c3ed-30b3-2b36-5892793bc97f",
+    "GPU-cd1b3ba2-89ba-cfda-9135-2c812887b668",
+    "GPU-1a2b2557-12b8-ec49-31d6-ae3b185d3319",
+    "GPU-18077766-169d-96b9-2d53-55d11349ddd5",
+    "GPU-267a6ac4-aa8e-3688-f0fc-d2cf14bece60"
+  ],
+  "model_dependency_overlay": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914",
+  "model_ld_library_path": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/cusparselt/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cublas/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_cupti/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_nvrtc/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_runtime/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cudnn/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufft/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufile/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/curand/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusolver/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusparse/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nccl/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvjitlink/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvtx/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torchaudio/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/amd/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/nvidia/lib",
+  "model_smoke": {
+    "passed": true,
+    "closed_loop_evaluation": false,
+    "synthetic_observations": true,
+    "trained_checkpoint_unchanged": true,
+    "config": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-fixed-anchor-pair-20260914-staging/robotwin_eval_ztev2_zeva.yml",
+    "config_sha256": "c35716ddd585be23f504170da76b0ceab4067ffb10af1b09ad307134ce330ca6",
+    "stage2_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/zeva/001000",
+    "torch_version": "2.7.1+cu126",
+    "torch_path": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/__init__.py",
+    "cuda_visible_devices": "GPU-18077766-169d-96b9-2d53-55d11349ddd5",
+    "device_uuid": "18077766-169d-96b9-2d53-55d11349ddd5",
+    "first_shape": [
+      50,
+      16
+    ],
+    "second_shape": [
+      50,
+      16
+    ],
+    "committed_horizon": 15,
+    "recurrent_transitions": 1,
+    "elapsed_seconds": 284.3419832661748
+  },
+  "renderer_evidence": "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO/renderer-identity-a31-7yZa7H",
+  "eight_gpu_evidence": "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914/model-runtime-8gpu-placement-a31-20260914T100302",
+  "caveat": "Historical PID2369486 has no OS process but retains about 3.8GiB per GPU. It is not killed; fresh launcher checks reject any new active non-Xorg process."
+}
