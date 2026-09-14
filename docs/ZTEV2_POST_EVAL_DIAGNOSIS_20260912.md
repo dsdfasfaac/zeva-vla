@@ -2,6 +2,10 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+最新运行状态（09-14 13:31 heartbeat 后核查）：显式 SAPIEN 选卡已通过真实 client hook smoke。`CUDA_VISIBLE_DEVICES=6` + `ZEVA_SAPIEN_RENDER_DEVICE=cuda:0`，通过 `sapien.core.SapienRenderer()` 创建的 PID3447001 经 nvidia-smi 确认在物理 GPU6 / PCI BA:00.0，输出480×640×4帧。证据转录见[选卡验证](results/robotwin-fixed-anchor-20260914/renderer-device-smoke.json)；原独立日志未保存，不能冒充原始日志。4项client测试、4项映射测试和3项只读runtime测试本地通过，修复已部署隔离release，未改公共RoboTwin。
+
+本轮启动前发现新的资源健康阻塞：aigc24 SSH/hostname正常，但全局 nvidia-smi 超过2分钟不返回，单独GPU2/6查询也在8秒超时后强制结束（rc137）；进程出现D态，其他任务的查询同时挂起。尚不能确定驱动或硬件根因。未重置GPU、未停止他人任务，正式输出目录仍不存在。专用入口增加GPU查询超时并失败即停止；正在只读检查其他授权节点，不能声称正式闭环已经开始。训练与checkpoint不变，无新成功率。
+
 ## 最新：固定teacher方案未证明增量收益，准备固定末步闭环
 
 两路终检于09-14 02:03均完成735 batches/5874决策。checkpoint、adapter、Stage1/bank/live/retrieval、样本顺序SHA、seed1000、batch8、源码及预处理协议核对一致，两路student residual-on/off统计完全相同；两种teacher的冻结权重均逐张量核验相同。传回本地曾遇SSH/SFTP挂起，终止本次传输进程并通过带超时的rsync恢复，未影响已完成的训练/验证。
@@ -26,6 +30,8 @@ ZeVA相对训练起点改善0.3653%，但新Base改善1.4711%，ZeVA比新Base�
 09-14中午资源复核：不能把`--query-compute-apps`为空当作GPU空闲。aigc24多张卡上有他人的RLBench **G类图形进程**，显存仅约141MiB但利用率100%；未停止或占用这些进程。确认可用的是物理GPU2/6；aigc29和其余授权H100均有训练占用。Luna已完成按slot显式`MODEL_GPU_IDS`/`RENDER_GPU_IDS`映射，4项映射测试及3项只读runtime测试通过。计划在aigc24同机使用映射`2,6,2,6,2,6,2,6`，保留8个独立model RNG流及原任务分配，不把逻辑slots改为2；每张卡需承载4个模型/renderer，启动后必须监测实际显存，不能预先保证性能。
 
 专用入口为`scripts/robotwin_eval/launch_fixed_anchor_pair_20260914.sh`，已部署于同一隔离release；它要求新输出目录、再次确认GPU2/6空闲、核对seed/task/model哈希和19300–19307端口。当前仍在完成SAPIEN实际物理选卡核验，**正式入口尚未执行**；不能凭CUDA环境变量设置就声称不会落到其他卡。前次普通相机smoke验证了640×480渲染，但不替代PID→物理GPU的核验。此前中断保留了映射文件，恢复后未重复启动评测。
+
+随后物理选卡smoke发现真实问题：`CUDA_VISIBLE_DEVICES=6`下PID3399952的SAPIEN **G进程实际位于GPU0/PCI18:00.0**，而GPU6/BA:00.0只有Xorg；smoke自然退出。这证明仅传CUDA映射不足以约束Vulkan renderer。正式入口继续暂停；Luna正在验证显式SapienRenderer设备参数/最小process-local钩子，不能改公共RoboTwin runtime。专用入口将要求保存的`renderer-device-smoke.json`证明与显式设备选择一致，否则拒绝启动。不要运行旧的未验证CUDA-only映射。
 
 历史记录（2026-09-14 01:40核查）：两支均完成1000步。Base于01:24:59、ZeVA于01:30:46完成，两个launcher进程退出，`COMPLETE`及`latest.json step=1000`均确认；每支model.safetensors为9354050752字节，均有optimizer/scheduler training_state，ZeVA另有adapter。训练循环含验证/保存耗时分别45分07秒、50分42秒，另有启动开销。[Base完整manifest与末步记录](results/robotwin-fixed-anchor-20260914/baseline/manifest.json)、[ZeVA完整manifest与末步记录](results/robotwin-fixed-anchor-20260914/zeva/manifest.json)已归档。末步旧口径H50 validation：Base自身flow=0.02059016；ZeVA flow=0.02085952、同次固定teacher=0.02076325（该次ZeVA略差），NLL=11.61310。两支validation RNG状态不同，不能将两个flow直接当同噪声paired比较，也不能据此回头挑其他checkpoint。
 

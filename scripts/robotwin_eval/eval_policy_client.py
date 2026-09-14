@@ -30,6 +30,7 @@ import json
 import threading
 import time
 import random
+import re
 import traceback
 import yaml
 from datetime import datetime
@@ -113,6 +114,77 @@ def as_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _configure_sapien_renderer(config: dict[str, Any]) -> str | None:
+    """Optionally pin SAPIEN's Vulkan renderer to the worker's visible device.
+
+    RoboTwin's ``CUDA_VISIBLE_DEVICES`` only constrains CUDA; SAPIEN's Vulkan
+    device enumeration otherwise starts at physical GPU 0.  The hook is
+    deliberately opt-in so ordinary evaluation keeps the historical import
+    and renderer behavior.  When enabled, callers must use a SAPIEN device
+    alias such as ``cuda:0`` (the local ordinal after CUDA visibility mapping).
+    """
+    raw_spec = os.environ.get("ZEVA_SAPIEN_RENDER_DEVICE", "")
+    device_spec = str(raw_spec).strip()
+    if not device_spec:
+        return None
+    if device_spec != "cpu" and not re.fullmatch(r"cuda:[0-9]+", device_spec):
+        raise ValueError(
+            "ZEVA_SAPIEN_RENDER_DEVICE must be 'cpu' or a cuda:N alias, "
+            f"got {raw_spec!r}"
+        )
+
+    # If a future RoboTwin task config grows an explicit renderer setting,
+    # never silently replace a conflicting value with the process override.
+    for key in ("sapien_render_device", "render_device"):
+        configured = config.get(key)
+        if configured is not None and str(configured).strip() != device_spec:
+            raise ValueError(
+                f"{key}={configured!r} conflicts with "
+                f"ZEVA_SAPIEN_RENDER_DEVICE={device_spec!r}"
+            )
+
+    import sapien
+    import sapien.core as sapien_core
+
+    renderer_class = getattr(sapien, "SapienRenderer")
+    device = sapien.Device(device_spec)
+
+    def device_key(value):
+        if isinstance(value, str):
+            return value.strip()
+        try:
+            return str(value)
+        except Exception:
+            return repr(value)
+
+    expected_key = device_key(device)
+
+    class ZevaPinnedSapienRenderer(renderer_class):
+        def __init__(self, *args, **kwargs):
+            if args:
+                raise RuntimeError(
+                    "ZEVA_SAPIEN_RENDER_DEVICE cannot safely override a "
+                    "positional SAPIEN renderer device"
+                )
+            provided = kwargs.get("device")
+            if provided is not None and device_key(provided) != expected_key:
+                raise RuntimeError(
+                    "SAPIEN renderer device conflicts with "
+                    f"ZEVA_SAPIEN_RENDER_DEVICE={device_spec!r}: {provided!r}"
+                )
+            kwargs["device"] = device
+            super().__init__(**kwargs)
+
+    # Base_Task imports both spellings (``sapien`` and ``sapien.core``).
+    sapien.SapienRenderer = ZevaPinnedSapienRenderer
+    sapien_core.SapienRenderer = ZevaPinnedSapienRenderer
+    print(
+        "Using explicit SAPIEN renderer device "
+        f"{device_spec!r} (CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', '')!r})"
+    )
+    return device_spec
 
 
 def model_seed_policy(value: Any) -> str:
@@ -612,6 +684,9 @@ def main(usr_args):
     args["absolute_start_seed"] = int(usr_args.get("absolute_start_seed", -1))
     args["fixed_seed_sequence"] = as_bool(usr_args.get("fixed_seed_sequence"), False)
     args["model_seed_policy"] = model_seed_policy(usr_args.get("model_seed_policy"))
+    sapien_render_device = _configure_sapien_renderer(args)
+    if sapien_render_device is not None:
+        args["sapien_render_device"] = sapien_render_device
 
     embodiment_type = args.get("embodiment")
     embodiment_config_path = os.path.join(CONFIGS_PATH, "_embodiment_config.yml")

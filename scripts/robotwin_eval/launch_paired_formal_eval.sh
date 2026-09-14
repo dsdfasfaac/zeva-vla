@@ -86,6 +86,7 @@ shared_runtime=${SHARED_RUNTIME:-/mnt/100T/users/dingxin/WAM/playground/Benchmar
 # silent fallback to a different RoboTwin installation.
 render_runtime=${RENDER_RUNTIME:-/data1/dingxin/robotwin-formal-eval/RoboTwin}
 render_vulkan_icd=${RENDER_VULKAN_ICD:-/usr/share/vulkan/icd.d/nvidia_icd.json}
+render_sapien_device=${RENDER_SAPIEN_DEVICE:-}
 render_ld_library_path=${RENDER_LD_LIBRARY_PATH:-}
 render_mps_pipe_directory=${RENDER_MPS_PIPE_DIRECTORY:-}
 render_warp_cache_root=${RENDER_WARP_CACHE_ROOT:-}
@@ -191,6 +192,13 @@ fi
 render_ld_env=""
 if [[ -n "$render_ld_library_path" ]]; then
   render_ld_env="LD_LIBRARY_PATH='$render_ld_library_path'"
+fi
+render_sapien_env=""
+if [[ -n "$render_sapien_device" ]]; then
+  [[ "$render_sapien_device" =~ ^[A-Za-z0-9_:.-]+$ ]] || {
+    echo "Invalid RENDER_SAPIEN_DEVICE" >&2; exit 2;
+  }
+  render_sapien_env="ZEVA_SAPIEN_RENDER_DEVICE='$render_sapien_device'"
 fi
 
 seed_selection="baseline-selects-first-${episodes}-expert-valid-from-${absolute_start_seed};anchor-and-zeva-replay-exact-list"
@@ -352,7 +360,7 @@ run_condition() {
         local started
         started=$(date -Iseconds)
         set +e
-        ssh "$render_host" "cd '$render_runtime'; env PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$render_gpu' VK_ICD_FILENAMES='$render_vulkan_icd' $render_ld_env $render_mps_env $render_warp_env PYTHONPATH='$zeva_root/scripts/robotwin_eval:$render_runtime/script:$render_runtime:$render_runtime/policy' \
+        ssh "$render_host" "cd '$render_runtime'; env PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$render_gpu' VK_ICD_FILENAMES='$render_vulkan_icd' $render_sapien_env $render_ld_env $render_mps_env $render_warp_env PYTHONPATH='$zeva_root/scripts/robotwin_eval:$render_runtime/script:$render_runtime:$render_runtime/policy' \
           .venv_robotwin/bin/python '$zeva_root/scripts/robotwin_eval/eval_policy_client.py' --port '$port' --config '$zeva_root/scripts/robotwin_eval/client_config.yml' \
           --overrides --task_name '$task' --task_config zeva_randomized --test_num '$episodes' \
           --instruction_type seen --seed 0 --absolute_start_seed '$absolute_start_seed' $seed_args \
@@ -487,6 +495,7 @@ cat > "$output/manifest.json" <<EOF
   "read_only_runtime": $read_only_runtime,
   "model_host": "$model_host",
   "render_host": "$render_host",
+  "render_sapien_device": "$render_sapien_device",
   "render_mps_pipe_directory": "$render_mps_pipe_directory",
   "model_gpu_ids": [$model_gpu_ids_json],
   "render_gpu_ids": [$render_gpu_ids_json],

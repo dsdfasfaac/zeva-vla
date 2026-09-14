@@ -12,7 +12,9 @@ export OUTPUT_ROOT=$zeva_runs/eval/formal-fixed-anchor-pair-20260914
 # Only GPUs 2 and 6 were verified free. Other cards have graphics workloads
 # despite an empty compute-apps query. Never stop those processes.
 for zeva_gpu in 2 6; do
-  zeva_row=$(nvidia-smi -i "$zeva_gpu" --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits)
+  zeva_row=$(timeout -k 2 15 nvidia-smi -i "$zeva_gpu" --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits) || {
+    echo "GPU $zeva_gpu health query failed or timed out; launch cancelled" >&2; exit 2;
+  }
   IFS=, read -r zeva_memory zeva_utilization <<< "$zeva_row"
   zeva_memory=${zeva_memory//[[:space:]]/}
   zeva_utilization=${zeva_utilization//[[:space:]]/}
@@ -35,6 +37,8 @@ export NATIVE_TRANSFORMERS_RUNTIME=/mnt/100T/users/dingxin/VLA/runtime/zeva-stag
 export SHARED_RUNTIME=/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin
 export RENDER_RUNTIME=/data1/dingxin/robotwin-formal-eval/RoboTwin
 export RENDER_VULKAN_ICD=/usr/share/vulkan/icd.d/nvidia_icd.json
+# Set only after the saved PID-to-physical-GPU smoke below verifies the value.
+export RENDER_SAPIEN_DEVICE=${RENDER_SAPIEN_DEVICE:?Specify the physically verified SAPIEN device selector}
 export RENDER_WARP_CACHE_ROOT=$OUTPUT_ROOT/warp-cache
 export FROZEN_SEED_MANIFEST=$zeva_runs/eval/formal-ztev2-selected-pair-20260912/seed_manifest.json
 export TASK_MANIFEST=$zeva_release/configs/robotwin_zeva_advantage10.json
@@ -46,14 +50,18 @@ export ZEVA_LABEL=fixed-anchor-zeva-001000-h15
 export ANCHOR_LABEL=untouched-best-v1-h15
 export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
 
-python3 - "$FROZEN_SEED_MANIFEST" "$TASK_MANIFEST" "$zeva_staging" <<'PY'
+python3 - "$FROZEN_SEED_MANIFEST" "$TASK_MANIFEST" "$zeva_staging" "$zeva_release/renderer-device-smoke.json" "$RENDER_SAPIEN_DEVICE" <<'PY'
 import hashlib
 import json
 from pathlib import Path
 import socket
 import sys
 
-seed, tasks, staging = map(Path, sys.argv[1:])
+seed, tasks, staging, smoke = map(Path, sys.argv[1:5])
+proof = json.loads(smoke.read_text())
+assert proof['passed'] and proof['physical_gpu_index'] == 6
+assert proof['cuda_visible_devices'] == '6'
+assert proof['renderer_device'] == sys.argv[5]
 assert hashlib.sha256(seed.read_bytes()).hexdigest() == '1b9dbf74bd9d9b8871647a00d6557f84884685d4459065f004bd600a86b1679b'
 assert hashlib.sha256(tasks.read_bytes()).hexdigest() == '0501e43192415f5e32de993866536e25a3c9a51c2622248402bc3b9cd8b157bd'
 manifest = json.loads((staging / 'robotwin_eval_ztev2_staging_manifest.json').read_text())
