@@ -1,0 +1,2 @@
+Using explicit SAPIEN renderer device 'cuda:0' (CUDA_VISIBLE_DEVICES='GPU-3ccf761f-a31a-809b-90cd-cfdf9394277a')
+{"cuda_visible_devices": "GPU-3ccf761f-a31a-809b-90cd-cfdf9394277a", "device_cuda_id": 0, "device_pci": "0000:ba:00.0", "dtype": "float32", "finite": true, "frame_shape": [480, 640, 4], "hook_path": "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO/scripts/robotwin_eval/eval_policy_client.py", "passed": true, "pid": 1250866, "renderer_device": "cuda:0", "vk_icd_exists": true, "vk_icd_filenames": "/etc/vulkan/icd.d/nvidia_icd.json"}

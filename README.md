@@ -56,8 +56,10 @@ Base by 0.3653%, but is 1.1224% worse than the matched new Base; its residuals
 also slightly worsen H15 (+0.01195%). The fixed-teacher change has not shown
 incremental ZTE utility. These are point estimates, not significance or
 closed-loop success-rate claims. No gate sweep, checkpoint reselection, or
-extra training has followed this result; matched closed-loop evaluation is
-being prepared with the frozen seeds/instructions. Stage1's four auxiliary
+extra training has followed this result. The fixed-seed/instruction evaluation
+controller started on aigc28 at 2026-09-15 01:00 CST after placement checks;
+model-service startup is in progress and no new success rate is available.
+Stage1's four auxiliary
 metrics still clear their configured reference lines and are not official
 BehaviorVLA gates. The preservation hinge is expert-loss reweighting, not
 teacher-action distillation or a guarantee of preserved success rate. See the

@@ -2,6 +2,14 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+**2026-09-15 01:01北京时间：aigc28正式评测控制器已启动，通过资源及固定输入检查，正在启动模型服务；尚无新成功率。** 控制器PID1283028、PPID1，运行入口`launch_paired_formal_eval.sh`；日志为release下`formal-launch-a28.log`，已打印`Pinned models, frozen task/seed/instruction manifests and ports verified`。正式目录`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-fixed-anchor-pair-20260914`现已创建，不能再写“目录不存在”，也不能仅凭目录创建宣称episodes已开始。
+
+8卡CUDA检查actual UUID全部匹配、finite、exit0；完整ZeVA001000实际模型报告两次[50,16] finite、commit15后transition_count=1，耗时280.14秒。[完整模型报告](results/robotwin-fixed-anchor-20260914/selected-model-full-a28-0wgpsdfj/report.json)、[8卡证据](results/robotwin-fixed-anchor-20260914/cuda-health-a28-20260914T160117/)、[汇总proof](results/robotwin-fixed-anchor-20260914/renderer-formal-health-proof-a28.json)。模型probe的SSH在结果回收前超时，退出码未知，未伪造为0；其最终报告/日志已持久化，PID1254111与父进程1254109已消失，16:58:34UTC再次确认8卡0MiB/0%。放行依据为完整功能报告、进程结束及重新检查资源；renderer的真实exit0仍是独立硬条件。新a28入口没有豁免任何不可见PID。此后不修改运行中的评测源码或公共依赖。
+
+**迁移恢复进展（09-14 15:47–15:59 UTC）：aigc28资源与renderer通过，完整模型仍在验证，正式评测未启动。** root确认a28全8卡0MiB/0%、compute-apps为空；随后完整进程预检无C/G任务。GPU6按UUID绑定，shared RoboTwin、`/etc/vulkan/icd.d/nvidia_icd.json`下输出finite640×480，renderer PID1250866实际GPU6 C+G、干净exit0（GPU0另有7MiB枚举G上下文）。[完整证据](results/robotwin-fixed-anchor-20260914/renderer-health-a28-20260914T154905/)。a32默认进程表虽空，精查仍有每卡3.8GiB和不可见PID1182878，未判定为空闲；跳板间歇失败不影响已经取得的a28原始证据。
+
+新增a28固定UUID的8-slot placement，保持全部checkpoint/seed/指令和H50/H15协议；仍要求无非Xorg进程、显存低于1GiB、8卡计算健康与实际模型两次推理/H15递归proof，17项CPU测试通过。新增可选`MODEL_EXTRA_DEPENDENCIES`用于隔离依赖定位，默认仍是原路径；本次a28原依赖目录已存在，没有改公共环境。初始独立import探针虽打印正确Torch2.7.1cu126/Mamba/TF5.5.4，但90秒未退出，不能计作成功；完整selected-model测试改为直接运行既有脚本，保留600秒上限及真实退出码要求，不据此宣称根因或放行评测。
+
 **20:39 heartbeat：一次隔离依赖恢复尝试仍失败，正式评测未启动。** a31在20:40仍有普通训练PID1795058占用全部8卡（约41.5GiB、100%），另有旧PID2369486记录；不抢占。Luna将a31的Vulkan loader1.3.204与NVIDIA EGL vendor JSON复制到全新临时overlay，仅设置该测试进程的库路径；未更改系统驱动、正式配置或阻塞文件。a24 GPU2/6无非Xorg任务、UUID与tiny计算通过后，单次renderer测试于20:43在初始化阶段报`vk::PhysicalDevice::createDeviceUnique: ErrorDeviceLost`，真实exit1，无图像输出、无成功的PID落卡证明。[环境和SHA](results/robotwin-fixed-anchor-20260914/renderer-vulkan-overlay-probe-a24-20260914T124010/evidence/env.txt)、[错误日志](results/robotwin-fixed-anchor-20260914/renderer-vulkan-overlay-probe-a24-20260914T124010/evidence/renderer.stderr.log)、[退出码](results/robotwin-fixed-anchor-20260914/renderer-vulkan-overlay-probe-a24-20260914T124010/evidence/exit-code.txt)。
 
 诊断限制：本次使用shared RoboTwin venv，而非a24正式的`/data1/.../.venv_robotwin`，不能冒充严格单变量A/B。两者已核对SAPIEN版本和libsvulkan2二进制相同，但不等于全部依赖相同。结论仅为这条隔离恢复路径没有成功，不宣称排除所有用户态因素或确认硬件根因。另查16:14曾成功的a24日志也有missing loader/GLVND警告，因此警告本身不充分解释失败。没有部署overlay到正式入口，没有继续重复尝试或新增训练。

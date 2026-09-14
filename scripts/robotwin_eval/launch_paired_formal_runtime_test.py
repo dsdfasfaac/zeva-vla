@@ -44,6 +44,16 @@ class RuntimeSetupTest(unittest.TestCase):
     def test_shell_syntax(self):
         subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
 
+    def test_extra_dependencies_path_validation(self):
+        source = SCRIPT.read_text()
+        block = source[source.index("model_extra_dependencies="):source.index("model_ld_library_path=")]
+        for path, passes in (("/verified/mamba", True), ("relative/path", False), ("/bad'path", False)):
+            result = subprocess.run(
+                ["bash", "-c", "set -eu\n" + block],
+                env={"MODEL_EXTRA_DEPENDENCIES": path}, capture_output=True,
+            )
+            self.assertEqual(result.returncode == 0, passes)
+
     def test_optional_overlay_preserves_source_and_native_precedence(self):
         source = SCRIPT.read_text()
         setup = source.split("model_pythonpath=$zeva_root/scripts/robotwin_eval:", 1)[1]

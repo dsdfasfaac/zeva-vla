@@ -141,6 +141,10 @@ release_runtime=$handoff/runtime
 native_transformers=${NATIVE_TRANSFORMERS_RUNTIME:-/data1/dingxin/transformers5-runtime}
 read_only_runtime=${READ_ONLY_RUNTIME:-false}
 model_dependency_overlay=${MODEL_DEPENDENCY_OVERLAY:-}
+model_extra_dependencies=${MODEL_EXTRA_DEPENDENCIES:-/data1/dingxin/zeva-runtime-deps}
+[[ "$model_extra_dependencies" =~ ^/[A-Za-z0-9_./-]+$ ]] || {
+  echo "MODEL_EXTRA_DEPENDENCIES must be a safe absolute path" >&2; exit 2;
+}
 model_ld_library_path=${MODEL_LD_LIBRARY_PATH:-}
 model_ld_env=""
 if [[ -n "$model_ld_library_path" ]]; then
@@ -332,7 +336,7 @@ fi
 # Put the experiment's adapter before RoboTwin's bundled policy directory.
 # Otherwise policy_model_server.py appends ./policy and can silently import a
 # stale ZeVA adapter that does not load the Stage 2 foundation weights.
-model_pythonpath=$zeva_root/scripts/robotwin_eval:$native_transformers:/data1/dingxin/zeva-runtime-deps:$shared_py310_deps:$model_pythonpath:$release_runtime/h100-extra-deps:$release_runtime/lerobot-overlay-v2:$release_runtime/lerobot-main-py311-v1/src:$release_runtime/src:$zeva_root/src:$zeva_root:$release_runtime/lerobot-main-deps-py311-v1
+model_pythonpath=$zeva_root/scripts/robotwin_eval:$native_transformers:$model_extra_dependencies:$shared_py310_deps:$model_pythonpath:$release_runtime/h100-extra-deps:$release_runtime/lerobot-overlay-v2:$release_runtime/lerobot-main-py311-v1/src:$release_runtime/src:$zeva_root/src:$zeva_root:$release_runtime/lerobot-main-deps-py311-v1
 if [[ -n "$model_dependency_overlay" ]]; then
   ssh "$model_host" "test -d '$model_dependency_overlay/torch'"
   model_pythonpath=$zeva_root/scripts/robotwin_eval:$native_transformers:$model_dependency_overlay:$model_pythonpath
@@ -559,6 +563,7 @@ cat > "$output/manifest.json" <<EOF
   "model_runtime": "native_handoff_transformers_5.5.4",
   "native_transformers_runtime": "$native_transformers",
   "model_dependency_overlay": "$model_dependency_overlay",
+  "model_extra_dependencies": "$model_extra_dependencies",
   "model_ld_library_path": "$model_ld_library_path",
   "read_only_runtime": $read_only_runtime,
   "model_host": "$model_host",

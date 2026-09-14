@@ -51,6 +51,32 @@ case "$zeva_placement" in
     export MODEL_DEPENDENCY_OVERLAY=${MODEL_DEPENDENCY_OVERLAY:?Specify the verified a31 model dependency overlay}
     export MODEL_LD_LIBRARY_PATH=${MODEL_LD_LIBRARY_PATH:?Specify the verified isolated CUDA library paths}
     ;;
+  aigc28)
+    zeva_model_ip=172.16.80.162
+    zeva_uuid2=GPU-ecaaa0cf-4454-f076-588a-c1667591a8d3
+    zeva_uuid6=GPU-3ccf761f-a31a-809b-90cd-cfdf9394277a
+    zeva_physical_gpus=(0 1 2 3 4 5 6 7)
+    zeva_physical_uuids=(
+      GPU-c4d9aceb-c274-fb29-e145-f6c2ef560bdc
+      GPU-1b146bd7-326f-3563-b97e-24a26e13fa09
+      "$zeva_uuid2"
+      GPU-045ff755-16e3-8b76-cd03-4cf0ae1996b6
+      GPU-ef75e39b-bdd0-7f30-b1ae-199650d79299
+      GPU-2adf85a6-fab7-9216-fb00-14b253a4cd3e
+      "$zeva_uuid6"
+      GPU-323fc89e-78b5-e87e-91c3-f10569ac4e56
+    )
+    zeva_slot_gpu_ids=0,1,2,3,4,5,6,7
+    zeva_slot_cuda_devices=$(IFS=,; printf '%s' "${zeva_physical_uuids[*]}")
+    zeva_memory_limit=1024
+    zeva_allowed_stale_pid=""
+    zeva_health_proof=$zeva_release/renderer-formal-health-proof-a28.json
+    zeva_health_block=$zeva_release/gpu-health-blocked-a28.json
+    zeva_render_runtime=/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin
+    zeva_icd=/etc/vulkan/icd.d/nvidia_icd.json
+    export MODEL_DEPENDENCY_OVERLAY=${MODEL_DEPENDENCY_OVERLAY:?Specify the verified model dependency overlay}
+    export MODEL_LD_LIBRARY_PATH=${MODEL_LD_LIBRARY_PATH:?Specify the verified isolated CUDA library paths}
+    ;;
   *) echo "Unsupported EVAL_PLACEMENT" >&2; exit 2;;
 esac
 [[ $(hostname -s) == "$zeva_placement" ]] || { echo "Run on the selected placement host" >&2; exit 2; }
@@ -138,9 +164,20 @@ assert proof['renderer_device'] == sys.argv[5]
 assert proof['matmul_verified_uuids'] == list(dict.fromkeys(sys.argv[12].split(',')))
 assert proof['renderer_exit_code'] == 0
 assert proof['vk_icd_filenames'] == sys.argv[9]
-if sys.argv[8] == 'aigc31':
+if sys.argv[8] in ('aigc31', 'aigc28'):
     assert proof['model_dependency_overlay'] == sys.argv[10]
     assert proof['model_ld_library_path'] == sys.argv[11]
+if sys.argv[8] == 'aigc28':
+    # The serving functional probe writes its report only after both inferences.
+    # Its SSH transport may close before returning an exit code; never invent 0.
+    # Renderer clean exit is independently required above (DeviceLost guard).
+    assert proof['model_inference_completed'] and proof['model_process_absent_afterwards']
+    model_smoke = proof['model_smoke']
+    assert model_smoke['passed']
+    assert model_smoke['config_sha256'] == 'c35716ddd585be23f504170da76b0ceab4067ffb10af1b09ad307134ce330ca6'
+    assert model_smoke['first_shape'] == model_smoke['second_shape'] == [50, 16]
+    assert model_smoke['committed_horizon'] == 15 and model_smoke['recurrent_transitions'] == 1
+    assert model_smoke['cuda_visible_devices'] in proof['matmul_verified_uuids']
 assert hashlib.sha256(seed.read_bytes()).hexdigest() == '1b9dbf74bd9d9b8871647a00d6557f84884685d4459065f004bd600a86b1679b'
 assert hashlib.sha256(tasks.read_bytes()).hexdigest() == '0501e43192415f5e32de993866536e25a3c9a51c2622248402bc3b9cd8b157bd'
 manifest = json.loads((staging / 'robotwin_eval_ztev2_staging_manifest.json').read_text())

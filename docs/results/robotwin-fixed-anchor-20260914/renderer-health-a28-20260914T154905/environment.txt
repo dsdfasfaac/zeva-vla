@@ -1,0 +1,17 @@
+smoke_setup_utc=2026-09-14T15:52:18Z
+host=aigc28
+python=/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin/.venv_robotwin/bin/python
+script=/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914/renderer-formal-health-20260914T1534/formal-renderer-smoke.py
+CUDA_VISIBLE_DEVICES=GPU-3ccf761f-a31a-809b-90cd-cfdf9394277a
+ZEVA_SAPIEN_RENDER_DEVICE=cuda:0
+VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json
+LD_LIBRARY_PATH=
+script_sha256=
+dcad5395613b5545126a89fc01dc5110ebcaff4f7ce5454a9b8606f4cf3880ed  /mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914/renderer-formal-health-20260914T1534/formal-renderer-smoke.py
+icd_sha256=
+7bdb6f27d35b66fc848df6f94b8773bba30ea3a7f06f114100d14154a235a34b  /etc/vulkan/icd.d/nvidia_icd.json
+driver=
+NVRM version: NVIDIA UNIX x86_64 Kernel Module  580.159.03  Fri Apr 24 06:16:47 UTC 2026
+GCC version:  gcc version 11.4.0 (Ubuntu 11.4.0-1ubuntu1~22.04.2) 
+Python 3.10.12
+command=timeout -k 3 90s /mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin/.venv_robotwin/bin/python /mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914/renderer-formal-health-20260914T1534/formal-renderer-smoke.py

@@ -1,0 +1,62 @@
+{
+  "passed": true,
+  "host": "aigc28",
+  "physical_gpu_index": 6,
+  "cuda_visible_devices": "GPU-3ccf761f-a31a-809b-90cd-cfdf9394277a",
+  "renderer_device": "cuda:0",
+  "device_pci": "0000:ba:00.0",
+  "renderer_pid": 1250866,
+  "renderer_exit_code": 0,
+  "vk_icd_filenames": "/etc/vulkan/icd.d/nvidia_icd.json",
+  "frame_shape": [
+    480,
+    640,
+    4
+  ],
+  "finite": true,
+  "matmul_verified_uuids": [
+    "GPU-c4d9aceb-c274-fb29-e145-f6c2ef560bdc",
+    "GPU-1b146bd7-326f-3563-b97e-24a26e13fa09",
+    "GPU-ecaaa0cf-4454-f076-588a-c1667591a8d3",
+    "GPU-045ff755-16e3-8b76-cd03-4cf0ae1996b6",
+    "GPU-ef75e39b-bdd0-7f30-b1ae-199650d79299",
+    "GPU-2adf85a6-fab7-9216-fb00-14b253a4cd3e",
+    "GPU-3ccf761f-a31a-809b-90cd-cfdf9394277a",
+    "GPU-323fc89e-78b5-e87e-91c3-f10569ac4e56"
+  ],
+  "model_dependency_overlay": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914",
+  "model_ld_library_path": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/cusparselt/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cublas/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_cupti/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_nvrtc/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_runtime/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cudnn/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufft/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufile/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/curand/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusolver/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusparse/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nccl/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvjitlink/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvtx/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torchaudio/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/amd/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/nvidia/lib",
+  "model_extra_dependencies": "/data1/dingxin/zeva-runtime-deps",
+  "model_inference_completed": true,
+  "model_process_absent_afterwards": true,
+  "model_exit_code": null,
+  "model_exit_verified": false,
+  "model_smoke": {
+    "passed": true,
+    "closed_loop_evaluation": false,
+    "synthetic_observations": true,
+    "trained_checkpoint_unchanged": true,
+    "config": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-fixed-anchor-pair-20260914-staging/robotwin_eval_ztev2_zeva.yml",
+    "config_sha256": "c35716ddd585be23f504170da76b0ceab4067ffb10af1b09ad307134ce330ca6",
+    "stage2_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/zeva/001000",
+    "torch_version": "2.7.1+cu126",
+    "torch_path": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/__init__.py",
+    "cuda_visible_devices": "GPU-c4d9aceb-c274-fb29-e145-f6c2ef560bdc",
+    "device_uuid": "c4d9aceb-c274-fb29-e145-f6c2ef560bdc",
+    "first_shape": [
+      50,
+      16
+    ],
+    "second_shape": [
+      50,
+      16
+    ],
+    "committed_horizon": 15,
+    "recurrent_transitions": 1,
+    "elapsed_seconds": 280.1419160258956
+  },
+  "renderer_evidence": "/mnt/100T/users/dingxin/VLA/runtime/renderer-health-a28-20260914T154905",
+  "eight_gpu_evidence": "/mnt/100T/users/dingxin/VLA/runtime/cuda-health-a28-20260914T160117",
+  "model_evidence": "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO/selected-model-full-a28-0wgpsdfj",
+  "caveat": "The complete synthetic model report and final log establish two finite inferences and one H15 recurrent transition. SSH transport timed out before the model subprocess exit status was received; exit code is unknown, not asserted as zero. PIDs1254111/1254109 were absent afterwards and all eight GPUs were zero-memory/zero-utilization at2026-09-14T16:58:34Z. Renderer exit0 and eight-GPU probe exit0 were separately captured. Resource availability must be rechecked at launch."
+}

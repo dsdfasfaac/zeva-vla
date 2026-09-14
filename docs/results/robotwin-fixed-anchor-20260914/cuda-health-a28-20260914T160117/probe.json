@@ -1,0 +1,119 @@
+{
+  "cuda_visible_devices": "GPU-c4d9aceb-c274-fb29-e145-f6c2ef560bdc,GPU-1b146bd7-326f-3563-b97e-24a26e13fa09,GPU-ecaaa0cf-4454-f076-588a-c1667591a8d3,GPU-045ff755-16e3-8b76-cd03-4cf0ae1996b6,GPU-ef75e39b-bdd0-7f30-b1ae-199650d79299,GPU-2adf85a6-fab7-9216-fb00-14b253a4cd3e,GPU-3ccf761f-a31a-809b-90cd-cfdf9394277a,GPU-323fc89e-78b5-e87e-91c3-f10569ac4e56",
+  "device_count": 8,
+  "devices": [
+    {
+      "compute_capability": [
+        9,
+        0
+      ],
+      "expected_uuid": "GPU-c4d9aceb-c274-fb29-e145-f6c2ef560bdc",
+      "finite_matmul": true,
+      "torch_name": "NVIDIA H100 80GB HBM3",
+      "torch_property_uuid": "c4d9aceb-c274-fb29-e145-f6c2ef560bdc",
+      "total_memory": 85017493504,
+      "visible_ordinal": 0
+    },
+    {
+      "compute_capability": [
+        9,
+        0
+      ],
+      "expected_uuid": "GPU-1b146bd7-326f-3563-b97e-24a26e13fa09",
+      "finite_matmul": true,
+      "torch_name": "NVIDIA H100 80GB HBM3",
+      "torch_property_uuid": "1b146bd7-326f-3563-b97e-24a26e13fa09",
+      "total_memory": 85017493504,
+      "visible_ordinal": 1
+    },
+    {
+      "compute_capability": [
+        9,
+        0
+      ],
+      "expected_uuid": "GPU-ecaaa0cf-4454-f076-588a-c1667591a8d3",
+      "finite_matmul": true,
+      "torch_name": "NVIDIA H100 80GB HBM3",
+      "torch_property_uuid": "ecaaa0cf-4454-f076-588a-c1667591a8d3",
+      "total_memory": 85017493504,
+      "visible_ordinal": 2
+    },
+    {
+      "compute_capability": [
+        9,
+        0
+      ],
+      "expected_uuid": "GPU-045ff755-16e3-8b76-cd03-4cf0ae1996b6",
+      "finite_matmul": true,
+      "torch_name": "NVIDIA H100 80GB HBM3",
+      "torch_property_uuid": "045ff755-16e3-8b76-cd03-4cf0ae1996b6",
+      "total_memory": 85017493504,
+      "visible_ordinal": 3
+    },
+    {
+      "compute_capability": [
+        9,
+        0
+      ],
+      "expected_uuid": "GPU-ef75e39b-bdd0-7f30-b1ae-199650d79299",
+      "finite_matmul": true,
+      "torch_name": "NVIDIA H100 80GB HBM3",
+      "torch_property_uuid": "ef75e39b-bdd0-7f30-b1ae-199650d79299",
+      "total_memory": 85017493504,
+      "visible_ordinal": 4
+    },
+    {
+      "compute_capability": [
+        9,
+        0
+      ],
+      "expected_uuid": "GPU-2adf85a6-fab7-9216-fb00-14b253a4cd3e",
+      "finite_matmul": true,
+      "torch_name": "NVIDIA H100 80GB HBM3",
+      "torch_property_uuid": "2adf85a6-fab7-9216-fb00-14b253a4cd3e",
+      "total_memory": 85017493504,
+      "visible_ordinal": 5
+    },
+    {
+      "compute_capability": [
+        9,
+        0
+      ],
+      "expected_uuid": "GPU-3ccf761f-a31a-809b-90cd-cfdf9394277a",
+      "finite_matmul": true,
+      "torch_name": "NVIDIA H100 80GB HBM3",
+      "torch_property_uuid": "3ccf761f-a31a-809b-90cd-cfdf9394277a",
+      "total_memory": 85017493504,
+      "visible_ordinal": 6
+    },
+    {
+      "compute_capability": [
+        9,
+        0
+      ],
+      "expected_uuid": "GPU-323fc89e-78b5-e87e-91c3-f10569ac4e56",
+      "finite_matmul": true,
+      "torch_name": "NVIDIA H100 80GB HBM3",
+      "torch_property_uuid": "323fc89e-78b5-e87e-91c3-f10569ac4e56",
+      "total_memory": 85017493504,
+      "visible_ordinal": 7
+    }
+  ],
+  "expected_ordered_uuids": [
+    "GPU-c4d9aceb-c274-fb29-e145-f6c2ef560bdc",
+    "GPU-1b146bd7-326f-3563-b97e-24a26e13fa09",
+    "GPU-ecaaa0cf-4454-f076-588a-c1667591a8d3",
+    "GPU-045ff755-16e3-8b76-cd03-4cf0ae1996b6",
+    "GPU-ef75e39b-bdd0-7f30-b1ae-199650d79299",
+    "GPU-2adf85a6-fab7-9216-fb00-14b253a4cd3e",
+    "GPU-3ccf761f-a31a-809b-90cd-cfdf9394277a",
+    "GPU-323fc89e-78b5-e87e-91c3-f10569ac4e56"
+  ],
+  "hold_seconds": 10,
+  "passed": true,
+  "pid": 1255463,
+  "schema": "zeva-cuda-eight-card-finite-v1",
+  "torch_cuda_version": "12.6",
+  "torch_file": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/__init__.py",
+  "torch_version": "2.7.1+cu126"
+}

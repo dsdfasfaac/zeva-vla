@@ -38,6 +38,12 @@ class PlacementTest(unittest.TestCase):
     def test_unknown_host_rejected(self):
         self.assertNotEqual(self.branch("unexpected").returncode, 0)
 
+    def test_a28_placement_requires_no_residual_allocation(self):
+        result = self.branch("aigc28")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("172.16.80.162 GPU-3ccf761f-", result.stdout)
+        self.assertIn("1024 /etc/vulkan/icd.d/nvidia_icd.json", result.stdout)
+
     def processes(self, pid, name, *, allowed="", exists=False):
         source = SCRIPT.read_text()
         code = source.split("-q -x | python3 -c '\n", 1)[1].split(
