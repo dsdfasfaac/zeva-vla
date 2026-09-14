@@ -47,25 +47,19 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 ## Zeva architecture
 
-Post-evaluation status (2026-09-12): the four measured Stage1 diagnostics clear
-their configured reference lines; ZTE utility for PI is not yet established by
-those scores. The full 5,874-decision read-only validation completed: H15 flow
-improves only 0.0591% with residuals versus residual-off, and 0.0130% versus
-the fixed trained Base. Prior/context reconstructed residual magnitude is
-about 1/231. All four same-host validation ablations completed (2026-09-13):
-context-only improves H15 by 0.07443% versus residual-off, prior-only worsens it
-by 0.00500%, and multiplying prior by 50 gives only 0.04983% improvement,
-below the original dual residual. This does not support simply increasing the
-prior gate as the fix; differences are small and not claimed significant.
-These are not success rates. A bounded fixed-teacher pair has been dispatched:
-both variants start from trained Base004500 for 1,000 fresh-optimizer steps;
-ZeVA uses that immutable Base as its preservation reference, with a fresh
-zero-residual adapter. Real compiled-anchor/zero-init/H15 recurrence smoke
-passed; both branches completed step1000 on 2026-09-14 (Base 01:24:59,
-ZeVA 01:30:46, China time), with full model/optimizer state and the ZeVA adapter
-saved. Full same-noise H15/H50 diagnostics against both the original fixed Base
-and the newly trained Base are running on aigc29 GPUs0/1. No new closed-loop
-success rate is available. The hinge is expert-loss reweighting, not
+Current status (2026-09-14): both fixed-teacher-pair branches completed their
+predeclared 1,000 fresh-optimizer steps from trained Base004500. Full matched
+validation on 5,874 decisions also completed. H15 flow is 0.01014354 for ZeVA,
+0.01014233 for its residual-off path, 0.01018073 for the fixed starting Base,
+and 0.01003096 for the newly trained Base. Thus ZeVA improves over the starting
+Base by 0.3653%, but is 1.1224% worse than the matched new Base; its residuals
+also slightly worsen H15 (+0.01195%). The fixed-teacher change has not shown
+incremental ZTE utility. These are point estimates, not significance or
+closed-loop success-rate claims. No gate sweep, checkpoint reselection, or
+extra training has followed this result; matched closed-loop evaluation is
+being prepared with the frozen seeds/instructions. Stage1's four auxiliary
+metrics still clear their configured reference lines and are not official
+BehaviorVLA gates. The preservation hinge is expert-loss reweighting, not
 teacher-action distillation or a guarantee of preserved success rate. See the
 [evidence and next-step boundaries](docs/ZTEV2_POST_EVAL_DIAGNOSIS_20260912.md).
 

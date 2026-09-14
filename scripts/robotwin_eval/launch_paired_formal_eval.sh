@@ -43,7 +43,8 @@ render_mps_pipe_directory=${RENDER_MPS_PIPE_DIRECTORY:-}
 render_warp_cache_root=${RENDER_WARP_CACHE_ROOT:-}
 handoff=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1
 release_runtime=$handoff/runtime
-native_transformers=/data1/dingxin/transformers5-runtime
+native_transformers=${NATIVE_TRANSFORMERS_RUNTIME:-/data1/dingxin/transformers5-runtime}
+read_only_runtime=${READ_ONLY_RUNTIME:-false}
 shared_py310_deps=/mnt/100T/users/dingxin/VLA/runtime/zeva-eval-deps-py310-v1
 output=${OUTPUT_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-paired-stage2a-h15-seen-v1}
 baseline_config=${BASELINE_CONFIG:-$zeva_root/scripts/robotwin_eval/baseline_model_config.yml}
@@ -79,6 +80,10 @@ if ! [[ "$precomputed_baseline_expected_successes" =~ ^[0-9]+$ ]]; then
 fi
 if [[ "$baseline_is_untouched_anchor" != true && "$baseline_is_untouched_anchor" != false ]]; then
   echo "BASELINE_IS_UNTOUCHED_ANCHOR must be true or false" >&2
+  exit 2
+fi
+if [[ "$read_only_runtime" != true && "$read_only_runtime" != false ]]; then
+  echo "READ_ONLY_RUNTIME must be true or false" >&2
   exit 2
 fi
 if [[ "$require_explicit_foundation" != true && "$require_explicit_foundation" != false ]]; then
@@ -195,12 +200,19 @@ PY
 # metadata are linked here; compiled dependencies continue to come from the
 # host's tested 3.10 runtime.  A stock best-v1 anchor must pass before results
 # from this launcher are reportable.
-ssh "$model_host" "mkdir -p '$native_transformers'; \
+if [[ "$read_only_runtime" == true ]]; then
+  # Reuse an already verified runtime without changing symlinks used by other jobs.
+  ssh "$model_host" "test -d '$native_transformers/transformers' && \
+    test -d '$native_transformers/huggingface_hub' && \
+    test -d '$native_transformers/transformers-5.5.4.dist-info'"
+else
+  ssh "$model_host" "mkdir -p '$native_transformers'; \
   ln -sfn '$release_runtime/lerobot-main-deps-py311-v1/transformers' '$native_transformers/transformers'; \
   ln -sfn '$release_runtime/lerobot-main-deps-py311-v1/transformers-5.5.4.dist-info' '$native_transformers/transformers-5.5.4.dist-info'; \
   ln -sfn '$release_runtime/lerobot-main-deps-py311-v1/huggingface_hub' '$native_transformers/huggingface_hub'; \
   ln -sfn '$release_runtime/lerobot-main-deps-py311-v1/huggingface_hub-1.27.0.dist-info' '$native_transformers/huggingface_hub-1.27.0.dist-info'; \
   ln -sfn '$release_runtime/lerobot-main-deps-py311-v1/tokenizers-0.22.2.dist-info' '$native_transformers/tokenizers-0.22.2.dist-info'"
+fi
 # Put the experiment's adapter before RoboTwin's bundled policy directory.
 # Otherwise policy_model_server.py appends ./policy and can silently import a
 # stale ZeVA adapter that does not load the Stage 2 foundation weights.
@@ -421,6 +433,8 @@ cat > "$output/manifest.json" <<EOF
   "outcome_trace_split": "$outcome_trace_split",
   "outcome_trace_protocol": "$outcome_trace_protocol",
   "model_runtime": "native_handoff_transformers_5.5.4",
+  "native_transformers_runtime": "$native_transformers",
+  "read_only_runtime": $read_only_runtime,
   "model_host": "$model_host",
   "render_host": "$render_host",
   "render_mps_pipe_directory": "$render_mps_pipe_directory",

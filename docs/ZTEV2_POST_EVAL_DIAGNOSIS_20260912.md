@@ -2,7 +2,28 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
-**最新（2026-09-14 01:40核查）：两支均完成1000步。** Base于01:24:59、ZeVA于01:30:46完成，两个launcher进程退出，`COMPLETE`及`latest.json step=1000`均确认；每支model.safetensors为9354050752字节，均有optimizer/scheduler training_state，ZeVA另有adapter。训练循环含验证/保存耗时分别45分07秒、50分42秒，另有启动开销。[Base完整manifest与末步记录](results/robotwin-fixed-anchor-20260914/baseline/manifest.json)、[ZeVA完整manifest与末步记录](results/robotwin-fixed-anchor-20260914/zeva/manifest.json)已归档。末步旧口径H50 validation：Base自身flow=0.02059016；ZeVA flow=0.02085952、同次固定teacher=0.02076325（该次ZeVA略差），NLL=11.61310。两支validation RNG状态不同，不能将两个flow直接当同噪声paired比较，也不能据此回头挑其他checkpoint。
+## 最新：固定teacher方案未证明增量收益，准备固定末步闭环
+
+两路终检于09-14 02:03均完成735 batches/5874决策。checkpoint、adapter、Stage1/bank/live/retrieval、样本顺序SHA、seed1000、batch8、源码及预处理协议核对一致，两路student residual-on/off统计完全相同；两种teacher的冻结权重均逐张量核验相同。传回本地曾遇SSH/SFTP挂起，终止本次传输进程并通过带超时的rsync恢复，未影响已完成的训练/验证。
+
+| 固定同样本、同噪声的 H15 路径 | 样本平均 flow error |
+|---|---:|
+| 训练起点 Base004500 | 0.010180731304 |
+| 同预算新 Base001000 | 0.010030957870 |
+| 新 ZeVA001000，关闭残差 | 0.010142331943 |
+| 新 ZeVA001000，开启残差 | 0.010143543594 |
+
+ZeVA相对训练起点改善0.3653%，但新Base改善1.4711%，ZeVA比新Base差1.1224%；开启残差比同权重关闭残差略差0.01195%，逐样本胜率48.47%。H50 residual-on=0.018861809745、off=0.018864864483，H50微小正收益不能替代实际执行H15上的负点估计。prior NLL=11.60375。未计算episode级置信区间，不能宣称统计显著；这些不是成功率。
+
+**预设动作收益检查：相对固定起点不回退满足；普通Base相对起点不回退满足；residual-on应优于off不满足，且ZeVA不及同预算Base。** 因而不支持“仅换固定teacher足以提供ZTE增益”，不继续该方案的盲目加步数/倍率搜索。它仍未证明Stage1编码器无效。保留预定step1000做正常配对闭环，不能把负的离线点估计直接解释成成功率下降，也不根据正式标签改选checkpoint。
+
+固定产物：ZeVA model SHA=`f5e4812a01e01da9936ee23a8f2c9e7d5e70037112f821e759a329d37bc4d11a`，adapter=`cbf0100994d43d7faa2aba23d4f38ae665331f565df53636d6435654c25a1c57`，新Base model=`bcf1d4f5f3e77926b8b7f798bb983378ad096e3892eed1a66058c5d98ed9bc17`。[对固定起点原始报告](results/robotwin-fixed-anchor-20260914/vs-fixed-anchor.json)、[对同预算Base原始报告](results/robotwin-fixed-anchor-20260914/vs-matched-base.json)。
+
+闭环将复用原`eval/formal-ztev2-selected-pair-20260912/seed_manifest.json`（SHA=`1b9dbf74bd9d9b8871647a00d6557f84884685d4459065f004bd600a86b1679b`）中的200组seed/实际seen指令，不重筛；本地已有原manifest，哈希再次一致。维持10tasks、Large_D435640×480、demo_randomized语义的`zeva_randomized`配置、H50/H15、视频审计。拟同时重跑untouched Anchor核验正常性，Base门槛仍为max(同条件Anchor,57%)；不放松。当前Luna正在检查空闲renderer并做隔离初始化smoke；正式闭环尚未启动。
+
+配置预检首次SSH调用超时，但后续经aigc24共享路径确认远端已成功生成3个配置及完整manifest（mtime09-14 08:10），没有重跑或覆盖目录。新Base/ZeVA的model SHA与完整诊断报告吻合，train-only bank/语言及物理协议通过检查。[配置预检原始manifest](results/robotwin-fixed-anchor-20260914/eval-staging/robotwin_eval_ztev2_staging_manifest.json)，远端目录为`RUNROOT/eval/formal-fixed-anchor-pair-20260914-staging`。正式launcher增加可选`READ_ONLY_RUNTIME=true`和`NATIVE_TRANSFORMERS_RUNTIME`，复用已验证共享overlay，不改公共runtime symlink；3项隔离shell分支/语法测试通过。默认历史分支保持不变，新开关不改推理数学或模型权重。
+
+历史记录（2026-09-14 01:40核查）：两支均完成1000步。Base于01:24:59、ZeVA于01:30:46完成，两个launcher进程退出，`COMPLETE`及`latest.json step=1000`均确认；每支model.safetensors为9354050752字节，均有optimizer/scheduler training_state，ZeVA另有adapter。训练循环含验证/保存耗时分别45分07秒、50分42秒，另有启动开销。[Base完整manifest与末步记录](results/robotwin-fixed-anchor-20260914/baseline/manifest.json)、[ZeVA完整manifest与末步记录](results/robotwin-fixed-anchor-20260914/zeva/manifest.json)已归档。末步旧口径H50 validation：Base自身flow=0.02059016；ZeVA flow=0.02085952、同次固定teacher=0.02076325（该次ZeVA略差），NLL=11.61310。两支validation RNG状态不同，不能将两个flow直接当同噪声paired比较，也不能据此回头挑其他checkpoint。
 
 预设末步的完整只读终检已启动：隔离目录`/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO`下，aigc29 GPU0/PID2767372输出`vs-fixed-anchor.json`（teacher=原Base004500），GPU1/PID2767373输出`vs-matched-base.json`（teacher=本轮Base001000）；同名`.log`记录过程。两路均使用ZeVA001000、batch8、seed1000、eval_batches0覆盖完整5874决策，分别给出H15/H50、current residual-off和固定teacher结果。它们不创建optimizer或修改checkpoint。当前仍在加载，没有终检结论或新闭环成功率。Luna同时只读核对后续正式评测的固定seed/实际instruction复用与启动协议，不重筛测试样本。
 
