@@ -23,6 +23,10 @@ ZeVA相对训练起点改善0.3653%，但新Base改善1.4711%，ZeVA比新Base�
 
 配置预检首次SSH调用超时，但后续经aigc24共享路径确认远端已成功生成3个配置及完整manifest（mtime09-14 08:10），没有重跑或覆盖目录。新Base/ZeVA的model SHA与完整诊断报告吻合，train-only bank/语言及物理协议通过检查。[配置预检原始manifest](results/robotwin-fixed-anchor-20260914/eval-staging/robotwin_eval_ztev2_staging_manifest.json)，远端目录为`RUNROOT/eval/formal-fixed-anchor-pair-20260914-staging`。正式launcher增加可选`READ_ONLY_RUNTIME=true`和`NATIVE_TRANSFORMERS_RUNTIME`，复用已验证共享overlay，不改公共runtime symlink；3项隔离shell分支/语法测试通过。默认历史分支保持不变，新开关不改推理数学或模型权重。
 
+09-14中午资源复核：不能把`--query-compute-apps`为空当作GPU空闲。aigc24多张卡上有他人的RLBench **G类图形进程**，显存仅约141MiB但利用率100%；未停止或占用这些进程。确认可用的是物理GPU2/6；aigc29和其余授权H100均有训练占用。Luna已完成按slot显式`MODEL_GPU_IDS`/`RENDER_GPU_IDS`映射，4项映射测试及3项只读runtime测试通过。计划在aigc24同机使用映射`2,6,2,6,2,6,2,6`，保留8个独立model RNG流及原任务分配，不把逻辑slots改为2；每张卡需承载4个模型/renderer，启动后必须监测实际显存，不能预先保证性能。
+
+专用入口为`scripts/robotwin_eval/launch_fixed_anchor_pair_20260914.sh`，已部署于同一隔离release；它要求新输出目录、再次确认GPU2/6空闲、核对seed/task/model哈希和19300–19307端口。当前仍在完成SAPIEN实际物理选卡核验，**正式入口尚未执行**；不能凭CUDA环境变量设置就声称不会落到其他卡。前次普通相机smoke验证了640×480渲染，但不替代PID→物理GPU的核验。此前中断保留了映射文件，恢复后未重复启动评测。
+
 历史记录（2026-09-14 01:40核查）：两支均完成1000步。Base于01:24:59、ZeVA于01:30:46完成，两个launcher进程退出，`COMPLETE`及`latest.json step=1000`均确认；每支model.safetensors为9354050752字节，均有optimizer/scheduler training_state，ZeVA另有adapter。训练循环含验证/保存耗时分别45分07秒、50分42秒，另有启动开销。[Base完整manifest与末步记录](results/robotwin-fixed-anchor-20260914/baseline/manifest.json)、[ZeVA完整manifest与末步记录](results/robotwin-fixed-anchor-20260914/zeva/manifest.json)已归档。末步旧口径H50 validation：Base自身flow=0.02059016；ZeVA flow=0.02085952、同次固定teacher=0.02076325（该次ZeVA略差），NLL=11.61310。两支validation RNG状态不同，不能将两个flow直接当同噪声paired比较，也不能据此回头挑其他checkpoint。
 
 预设末步的完整只读终检已启动：隔离目录`/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO`下，aigc29 GPU0/PID2767372输出`vs-fixed-anchor.json`（teacher=原Base004500），GPU1/PID2767373输出`vs-matched-base.json`（teacher=本轮Base001000）；同名`.log`记录过程。两路均使用ZeVA001000、batch8、seed1000、eval_batches0覆盖完整5874决策，分别给出H15/H50、current residual-off和固定teacher结果。它们不创建optimizer或修改checkpoint。当前仍在加载，没有终检结论或新闭环成功率。Luna同时只读核对后续正式评测的固定seed/实际instruction复用与启动协议，不重筛测试样本。

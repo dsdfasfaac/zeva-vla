@@ -11,6 +11,54 @@ model_host=${MODEL_HOST:-aigc29}
 render_host=${RENDER_HOST:-aigc24}
 model_ip=${MODEL_IP:-172.16.80.163}
 slots=${SLOTS:-8}
+# Each logical slot can be placed on an independently chosen physical GPU.
+# Repeated IDs are intentional: this supports packing several small model or
+# renderer processes onto a verified GPU while leaving task assignment and
+# slot/port identity unchanged.
+model_gpu_ids_csv=${MODEL_GPU_IDS:-}
+render_gpu_ids_csv=${RENDER_GPU_IDS:-}
+if ! [[ "$slots" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SLOTS must be a positive integer" >&2
+  exit 2
+fi
+model_gpu_ids=()
+if [[ -z "$model_gpu_ids_csv" ]]; then
+  for ((gpu_slot = 0; gpu_slot < slots; gpu_slot++)); do
+    model_gpu_ids+=("$gpu_slot")
+  done
+else
+  IFS=',' read -r -a model_gpu_ids <<< "$model_gpu_ids_csv"
+  if (( ${#model_gpu_ids[@]} != slots )); then
+    echo "MODEL_GPU_IDS must contain exactly $slots comma-separated IDs" >&2
+    exit 2
+  fi
+  for gpu_id in "${model_gpu_ids[@]}"; do
+    if ! [[ "$gpu_id" =~ ^(0|[1-9][0-9]*)$ ]]; then
+      echo "MODEL_GPU_IDS requires non-negative integer IDs; got: $gpu_id" >&2
+      exit 2
+    fi
+  done
+fi
+render_gpu_ids=()
+if [[ -z "$render_gpu_ids_csv" ]]; then
+  for ((gpu_slot = 0; gpu_slot < slots; gpu_slot++)); do
+    render_gpu_ids+=("$gpu_slot")
+  done
+else
+  IFS=',' read -r -a render_gpu_ids <<< "$render_gpu_ids_csv"
+  if (( ${#render_gpu_ids[@]} != slots )); then
+    echo "RENDER_GPU_IDS must contain exactly $slots comma-separated IDs" >&2
+    exit 2
+  fi
+  for gpu_id in "${render_gpu_ids[@]}"; do
+    if ! [[ "$gpu_id" =~ ^(0|[1-9][0-9]*)$ ]]; then
+      echo "RENDER_GPU_IDS requires non-negative integer IDs; got: $gpu_id" >&2
+      exit 2
+    fi
+  done
+fi
+model_gpu_ids_json=$(IFS=','; printf '%s' "${model_gpu_ids[*]}")
+render_gpu_ids_json=$(IFS=','; printf '%s' "${render_gpu_ids[*]}")
 episodes=${EPISODES:-20}
 absolute_start_seed=${ABSOLUTE_START_SEED:-1000}
 model_seed_policy=${MODEL_SEED_POLICY:-continuous}
@@ -238,10 +286,11 @@ start_servers() {
   server_pids=()
   for slot in $(seq 0 $((slots - 1))); do
     local port=$((base_port + slot))
+    local model_gpu=${model_gpu_ids[$slot]}
     local log="$condition_root/logs/server-slot${slot}.log"
     local pid
     pid=$(ssh "$model_host" "cd '$shared_runtime'; nohup env \
-      PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$slot' PYTHONPATH='$model_pythonpath' \
+      PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$model_gpu' PYTHONPATH='$model_pythonpath' \
       $trace_server_env \
       HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \
       python3 script/policy_model_server.py --port '$port' --config '$config' \
@@ -277,6 +326,7 @@ run_condition() {
   for slot in $(seq 0 $((slots - 1))); do
     (
       local port=$((base_port + slot))
+      local render_gpu=${render_gpu_ids[$slot]}
       local render_warp_env=""
       if [[ -n "$render_warp_cache_root" ]]; then
         ssh "$render_host" "mkdir -p '$render_warp_cache_root/slot-$slot'"
@@ -302,7 +352,7 @@ run_condition() {
         local started
         started=$(date -Iseconds)
         set +e
-        ssh "$render_host" "cd '$render_runtime'; env PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$slot' VK_ICD_FILENAMES='$render_vulkan_icd' $render_ld_env $render_mps_env $render_warp_env PYTHONPATH='$zeva_root/scripts/robotwin_eval:$render_runtime/script:$render_runtime:$render_runtime/policy' \
+        ssh "$render_host" "cd '$render_runtime'; env PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$render_gpu' VK_ICD_FILENAMES='$render_vulkan_icd' $render_ld_env $render_mps_env $render_warp_env PYTHONPATH='$zeva_root/scripts/robotwin_eval:$render_runtime/script:$render_runtime:$render_runtime/policy' \
           .venv_robotwin/bin/python '$zeva_root/scripts/robotwin_eval/eval_policy_client.py' --port '$port' --config '$zeva_root/scripts/robotwin_eval/client_config.yml' \
           --overrides --task_name '$task' --task_config zeva_randomized --test_num '$episodes' \
           --instruction_type seen --seed 0 --absolute_start_seed '$absolute_start_seed' $seed_args \
@@ -438,6 +488,8 @@ cat > "$output/manifest.json" <<EOF
   "model_host": "$model_host",
   "render_host": "$render_host",
   "render_mps_pipe_directory": "$render_mps_pipe_directory",
+  "model_gpu_ids": [$model_gpu_ids_json],
+  "render_gpu_ids": [$render_gpu_ids_json],
   "slots": $slots
 }
 EOF
