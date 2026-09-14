@@ -138,6 +138,12 @@ handoff=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory
 release_runtime=$handoff/runtime
 native_transformers=${NATIVE_TRANSFORMERS_RUNTIME:-/data1/dingxin/transformers5-runtime}
 read_only_runtime=${READ_ONLY_RUNTIME:-false}
+model_dependency_overlay=${MODEL_DEPENDENCY_OVERLAY:-}
+if [[ -n "$model_dependency_overlay" ]]; then
+  [[ "$model_dependency_overlay" =~ ^/[A-Za-z0-9_./-]+$ ]] || {
+    echo "MODEL_DEPENDENCY_OVERLAY must be a safe absolute path" >&2; exit 2;
+  }
+fi
 shared_py310_deps=/mnt/100T/users/dingxin/VLA/runtime/zeva-eval-deps-py310-v1
 output=${OUTPUT_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-paired-stage2a-h15-seen-v1}
 baseline_config=${BASELINE_CONFIG:-$zeva_root/scripts/robotwin_eval/baseline_model_config.yml}
@@ -317,6 +323,10 @@ fi
 # Otherwise policy_model_server.py appends ./policy and can silently import a
 # stale ZeVA adapter that does not load the Stage 2 foundation weights.
 model_pythonpath=$zeva_root/scripts/robotwin_eval:$native_transformers:/data1/dingxin/zeva-runtime-deps:$shared_py310_deps:$model_pythonpath:$release_runtime/h100-extra-deps:$release_runtime/lerobot-overlay-v2:$release_runtime/lerobot-main-py311-v1/src:$release_runtime/src:$zeva_root/src:$zeva_root:$release_runtime/lerobot-main-deps-py311-v1
+if [[ -n "$model_dependency_overlay" ]]; then
+  ssh "$model_host" "test -d '$model_dependency_overlay/torch'"
+  model_pythonpath=$zeva_root/scripts/robotwin_eval:$native_transformers:$model_dependency_overlay:$model_pythonpath
+fi
 
 server_pids=()
 stop_servers() {
@@ -536,6 +546,7 @@ cat > "$output/manifest.json" <<EOF
   "outcome_trace_protocol": "$outcome_trace_protocol",
   "model_runtime": "native_handoff_transformers_5.5.4",
   "native_transformers_runtime": "$native_transformers",
+  "model_dependency_overlay": "$model_dependency_overlay",
   "read_only_runtime": $read_only_runtime,
   "model_host": "$model_host",
   "render_host": "$render_host",

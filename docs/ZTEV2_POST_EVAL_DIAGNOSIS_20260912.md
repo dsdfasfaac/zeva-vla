@@ -2,6 +2,10 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+17:37 heartbeat后：aigc31模型迁移阻塞已定位为ABI不匹配——系统model Torch2.5.1cu124无法导入现有Mamba编译扩展（undefined symbol），而a24模型用Torch2.7.1cu126；renderer单独Torch2.10通过不代表model可运行。已授权Luna创建全新的shared依赖overlay，优先复制a24的匹配Torch及必要依赖，不更改公共环境或编译现有Mamba。入口新增可选`MODEL_DEPENDENCY_OVERLAY`，保持源码/native TF5优先，记录manifest。a31专用placement要求独立成功proof与overlay路径完全匹配，UUID固定物理2/6，只豁免已确认不存在的历史PID2369486，内存门槛6GiB用于容纳已测3.8GiB残留；任何新活跃C/G进程均拒绝，绝不清理旧句柄。6项placement、4项runtime、5项UUID映射测试通过。正式评测尚未启动。
+
+迁移场景一致性也已只读核对：a24的`/data1/dingxin/robotwin-formal-eval/RoboTwin`与shared RoboTwin的`envs`（忽略`__pycache__`）和整个`task_config`分别`diff -qr`均无差异、rc0。因此候选shared renderer并非未经比对的新场景配置；仍须完成新model runtime真实加载/推理验证。a31本地/data1仅余37GiB，依赖和评测产物使用shared盘（当前约11TiB可用）。
+
 **16:45 heartbeat后的最新状态：UUID固定设备、正式ICD的aigc24恢复验证通过，但启动前GPU2/6已被他人渲染任务占用，未启动正式评测。** 16:09–16:14的完整证据现已回收：两卡tiny matmul的Torch UUID分别匹配物理2/6且finite/rc0；renderer PID3674669实际PCI BA:00.0、nvidia GPU6 C+G、finite640×480帧、干净退出rc0。[原始证据](results/robotwin-fixed-anchor-20260914/renderer-formal-health-20260914T1534/)、[核验汇总](results/robotwin-fixed-anchor-20260914/renderer-formal-health-proof.json)。目录名1534不是实际运行时间，以metadata的16:09–16:14为准。UUID机制已加入模型与renderer launcher，并保留数字物理映射和全部8个逻辑RNG流；5项映射、3项runtime、4项client测试通过。专用入口同时检查UUID对应关系及非Xorg进程，不能把0%/低显存的G任务当空闲。健康恢复不等于资源已预留，旧blocker仍保留到正式恢复交接。
 
 备选aigc31：原驱动记录PID2369486无对应OS进程，历史worker持有句柄不等于正在训练；因此不做清理，先用极小计算验证是否能与残留分配共存。物理2/6 UUID限定的tiny CUDA finite通过（系统Torch没有UUID属性，未将该输出单独作为物理身份复核）。随后使用现有`/etc/vulkan/icd.d/nvidia_icd.json`（与a24相同内容）和shared RoboTwin Python，UUID6 renderer输出PCI BA:00.0、finite640×480帧，进程干净rc0，证据在`release/renderer-health-a31-FlDVZb`；5秒PIDS采样未捕获renderer PID，不宣称已有完整nvidia PID独立证明。shared renderer Python为3.10/Torch2.10cu128，与a24模型runtime尚未核对，正在做只读依赖审查，不直接迁移模型。以下资源状态为历史记录。

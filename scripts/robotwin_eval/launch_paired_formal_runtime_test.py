@@ -44,6 +44,26 @@ class RuntimeSetupTest(unittest.TestCase):
     def test_shell_syntax(self):
         subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
 
+    def test_optional_overlay_preserves_source_and_native_precedence(self):
+        source = SCRIPT.read_text()
+        setup = source.split("model_pythonpath=$zeva_root/scripts/robotwin_eval:", 1)[1]
+        block = 'if [[ -n "$model_dependency_overlay" ]]; then' + setup.split(
+            'if [[ -n "$model_dependency_overlay" ]]; then', 1
+        )[1].split("\nfi", 1)[0] + "\nfi"
+        for overlay, expected in (
+            ("", "/legacy"),
+            ("/verified", "/release/scripts/robotwin_eval:/native:/verified:/legacy"),
+        ):
+            result = subprocess.run(
+                ["bash", "-c", "\n".join([
+                    "set -euo pipefail", "ssh() { return 0; }",
+                    "model_host=test", "zeva_root=/release", "native_transformers=/native",
+                    "model_pythonpath=/legacy", f"model_dependency_overlay={overlay}",
+                    block, 'printf "%s" "$model_pythonpath"',
+                ])], text=True, capture_output=True, check=True,
+            )
+            self.assertEqual(result.stdout, expected)
+
 
 if __name__ == "__main__":
     unittest.main()
