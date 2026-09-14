@@ -8,6 +8,9 @@ zeva_staging=$zeva_runs/eval/formal-fixed-anchor-pair-20260914-staging
 export OUTPUT_ROOT=$zeva_runs/eval/formal-fixed-anchor-pair-20260914
 [[ ! -e "$OUTPUT_ROOT" ]] || { echo "Refusing existing evaluation output" >&2; exit 2; }
 [[ $(hostname -s) == aigc24 ]] || { echo "Run this verified placement on aigc24" >&2; exit 2; }
+[[ ! -e "$zeva_release/gpu-health-blocked.json" ]] || {
+  echo "GPU compute/renderer health is blocked; fresh verified recovery required" >&2; exit 2;
+}
 
 # Only GPUs 2 and 6 were verified free. Other cards have graphics workloads
 # despite an empty compute-apps query. Never stop those processes.

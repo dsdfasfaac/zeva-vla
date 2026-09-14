@@ -2,6 +2,10 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+**最新资源状态（15:13–15:22）：aigc24 的 nvidia-smi 恢复返回，但计算/渲染未恢复验证通过，正式评测仍未启动。** GPU4显示ERR/N/A，其余卡状态表只有Xorg。随后有超时限制的smoke中，`CUDA_VISIBLE_DEVICES=6`、`cuda:0`实际renderer PID3615310位于PCI DB:00.0/物理GPU7，而非BA:00.0/GPU6；生成640×480帧后以DeviceLostError退出，rc134。可见帧不等于健康，脚本硬编码的`physical_gpu_index=6`和`passed=true`也不是成功依据。CUDA可见序号2、6下的tiny matmul都报launch timeout；未记录其实际PCI/UUID，不能将日志中的physical_gpu标签当作已核实物理身份。故障后的枚举变化是待核实假设，不是确定根因。当前smoke的ICD环境与正式launcher的一致性仍需核对，未据此断言正式ICD配置错误。
+
+原始smoke已归档于[恢复后验证目录](results/robotwin-fixed-anchor-20260914/renderer-device-smoke-20260914T1520-gpu6-rerun2/)，远端此次日志误放在旧`eval-release-ztev2-20260912`下的独立新子目录，未启动或覆盖旧正式结果。专用入口新增`gpu-health-blocked.json`硬拦截；旧的成功选卡proof不能解除本次阻塞。须以正式runtime完成新的finite CUDA、真实物理GPU身份、renderer干净退出验证，再显式记录解除。未重置GPU、停止他人进程或启动正式任务；无新成功率。以下资源快照为历史记录。
+
 最新运行状态（09-14 13:31 heartbeat 后核查）：显式 SAPIEN 选卡已通过真实 client hook smoke。`CUDA_VISIBLE_DEVICES=6` + `ZEVA_SAPIEN_RENDER_DEVICE=cuda:0`，通过 `sapien.core.SapienRenderer()` 创建的 PID3447001 经 nvidia-smi 确认在物理 GPU6 / PCI BA:00.0，输出480×640×4帧。证据转录见[选卡验证](results/robotwin-fixed-anchor-20260914/renderer-device-smoke.json)；原独立日志未保存，不能冒充原始日志。4项client测试、4项映射测试和3项只读runtime测试本地通过，修复已部署隔离release，未改公共RoboTwin。
 
 本轮启动前发现新的资源健康阻塞：aigc24 SSH/hostname正常，但全局 nvidia-smi 超过2分钟不返回，单独GPU2/6查询也在8秒超时后强制结束（rc137）；进程出现D态，其他任务的查询同时挂起。尚不能确定驱动或硬件根因。未重置GPU、未停止他人任务，正式输出目录仍不存在。专用入口增加GPU查询超时并失败即停止；正在只读检查其他授权节点，不能声称正式闭环已经开始。训练与checkpoint不变，无新成功率。

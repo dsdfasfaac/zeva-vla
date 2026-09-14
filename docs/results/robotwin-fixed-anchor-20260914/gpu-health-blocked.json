@@ -1,0 +1,9 @@
+{
+  "host": "aigc24",
+  "blocked": true,
+  "observed_at_local": "2026-09-14 15:20 Asia/Shanghai",
+  "reason": "Post-recovery CUDA smoke timed out; renderer generated a frame but exited with DeviceLostError and used PCI DB:00.0 rather than expected BA:00.0. GPU4 remains ERR/N/A.",
+  "caveat": "Ordinal CUDA visibility is not proof of physical GPU selection after a device failure. Renderer smoke ICD environment must be checked against formal launcher before assigning root cause.",
+  "evidence_directory": "/mnt/100T/users/dingxin/VLA/eval-release-ztev2-20260912/renderer-device-smoke-20260914T1520-gpu6-rerun2",
+  "clear_condition": "Fresh successful finite CUDA and renderer checks under the formal runtime, verified physical GPU identity, clean renderer exit, and idle-device check; then explicitly remove this blocker as a recorded recovery action."
+}
