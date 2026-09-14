@@ -2,6 +2,10 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+**20:39 heartbeat：一次隔离依赖恢复尝试仍失败，正式评测未启动。** a31在20:40仍有普通训练PID1795058占用全部8卡（约41.5GiB、100%），另有旧PID2369486记录；不抢占。Luna将a31的Vulkan loader1.3.204与NVIDIA EGL vendor JSON复制到全新临时overlay，仅设置该测试进程的库路径；未更改系统驱动、正式配置或阻塞文件。a24 GPU2/6无非Xorg任务、UUID与tiny计算通过后，单次renderer测试于20:43在初始化阶段报`vk::PhysicalDevice::createDeviceUnique: ErrorDeviceLost`，真实exit1，无图像输出、无成功的PID落卡证明。[环境和SHA](results/robotwin-fixed-anchor-20260914/renderer-vulkan-overlay-probe-a24-20260914T124010/evidence/env.txt)、[错误日志](results/robotwin-fixed-anchor-20260914/renderer-vulkan-overlay-probe-a24-20260914T124010/evidence/renderer.stderr.log)、[退出码](results/robotwin-fixed-anchor-20260914/renderer-vulkan-overlay-probe-a24-20260914T124010/evidence/exit-code.txt)。
+
+诊断限制：本次使用shared RoboTwin venv，而非a24正式的`/data1/.../.venv_robotwin`，不能冒充严格单变量A/B。两者已核对SAPIEN版本和libsvulkan2二进制相同，但不等于全部依赖相同。结论仅为这条隔离恢复路径没有成功，不宣称排除所有用户态因素或确认硬件根因。另查16:14曾成功的a24日志也有missing loader/GLVND警告，因此警告本身不充分解释失败。没有部署overlay到正式入口，没有继续重复尝试或新增训练。
+
 **19:54 heartbeat复核：正式输出目录仍不存在。** 19:56根任务SSH成功，a31仍有PID1768793的普通计算任务和PID2369486的驱动记录，不把0%利用率/约4.3GiB显存当空闲；a24除GPU4为N/A外各卡34MiB/0%，仍未解除renderer健康阻塞。其余6节点本轮查询均成功且有高负载计算任务。18:46失败renderer的[原始日志](results/robotwin-fixed-anchor-20260914/renderer-recheck-a24-PwlmaG/renderer.log)与[nvidia物理落卡证据](results/robotwin-fixed-anchor-20260914/renderer-recheck-a24-PwlmaG/nvidia-during.log)现已成功回收。
 
 附加只读诊断发现：a24失败日志有system libvulkan和GLVND ICD缺失警告，系统ldconfig未列出libvulkan，a31成功日志没有这些警告。正确设置`VK_ICD_FILENAMES`不会自动补齐Vulkan loader或EGL vendor JSON。正在核对两环境的user-space依赖差异；这不是已确认的DeviceLost根因，不据此解除安全阻塞，也不改系统驱动或模型/场景协议。

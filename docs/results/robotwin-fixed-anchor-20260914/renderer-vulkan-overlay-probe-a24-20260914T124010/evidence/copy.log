@@ -1,0 +1,43 @@
+copy_started_utc=2026-09-14T12:41:07Z
+source_loader=aigc31:/usr/lib/x86_64-linux-gnu/libvulkan.so.1.3.204
+source_egl=aigc31:/usr/share/glvnd/egl_vendor.d/10_nvidia.json
+source_sha_loader=f2c637267fc08e343f3d617252e1ddcaf035dc714728fbdc35ce9ebd8fc4a453  /usr/lib/x86_64-linux-gnu/libvulkan.so.1.3.204
+source_sha_egl=c4ddd234201d02c306eaa3ad49c4ccc26ea6630e695948cedd4dd0be86aec917  /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+
+Number of files: 1 (reg: 1)
+Number of created files: 1 (reg: 1)
+Number of deleted files: 0
+Number of regular files transferred: 1
+Total file size: 445,104 bytes
+Total transferred file size: 445,104 bytes
+Literal data: 445,104 bytes
+Matched data: 0 bytes
+File list size: 54
+File list generation time: 0.001 seconds
+File list transfer time: 0.000 seconds
+Total bytes sent: 43
+Total bytes received: 445,316
+
+sent 43 bytes  received 445,316 bytes  890,718.00 bytes/sec
+total size is 445,104  speedup is 1.00
+
+Number of files: 1 (reg: 1)
+Number of created files: 1 (reg: 1)
+Number of deleted files: 0
+Number of regular files transferred: 1
+Total file size: 94 bytes
+Total transferred file size: 94 bytes
+Literal data: 94 bytes
+Matched data: 0 bytes
+File list size: 53
+File list generation time: 0.001 seconds
+File list transfer time: 0.000 seconds
+Total bytes sent: 43
+Total bytes received: 205
+
+sent 43 bytes  received 205 bytes  496.00 bytes/sec
+total size is 94  speedup is 0.38
+target_sha_loader=f2c637267fc08e343f3d617252e1ddcaf035dc714728fbdc35ce9ebd8fc4a453  /mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914/renderer-vulkan-overlay-probe-a24-20260914T124010/overlay/lib/libvulkan.so.1.3.204
+target_sha_egl=c4ddd234201d02c306eaa3ad49c4ccc26ea6630e695948cedd4dd0be86aec917  /mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914/renderer-vulkan-overlay-probe-a24-20260914T124010/overlay/10_nvidia.json
+target_link=libvulkan.so.1.3.204
+copy_finished_utc=2026-09-14T12:41:08Z
