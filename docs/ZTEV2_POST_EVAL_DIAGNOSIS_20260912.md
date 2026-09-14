@@ -2,6 +2,16 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+**19:54 heartbeat复核：正式输出目录仍不存在。** 19:56根任务SSH成功，a31仍有PID1768793的普通计算任务和PID2369486的驱动记录，不把0%利用率/约4.3GiB显存当空闲；a24除GPU4为N/A外各卡34MiB/0%，仍未解除renderer健康阻塞。其余6节点本轮查询均成功且有高负载计算任务。18:46失败renderer的[原始日志](results/robotwin-fixed-anchor-20260914/renderer-recheck-a24-PwlmaG/renderer.log)与[nvidia物理落卡证据](results/robotwin-fixed-anchor-20260914/renderer-recheck-a24-PwlmaG/nvidia-during.log)现已成功回收。
+
+附加只读诊断发现：a24失败日志有system libvulkan和GLVND ICD缺失警告，系统ldconfig未列出libvulkan，a31成功日志没有这些警告。正确设置`VK_ICD_FILENAMES`不会自动补齐Vulkan loader或EGL vendor JSON。正在核对两环境的user-space依赖差异；这不是已确认的DeviceLost根因，不据此解除安全阻塞，也不改系统驱动或模型/场景协议。
+
+**19:21 heartbeat：aigc31现有明确的高负载训练占用，aigc24仍未通过renderer健康复核；没有新评测结果。** Luna在19:22:15取得的a31原始输出显示，PID1733831（`/mnt/100T/xielele/openpi-cleaned-droid-venv/bin/python`）占用全部8卡，每卡约29.2GiB、99–100%利用率。旧PID2369486仍是`/proc=present`、`kill -0=Operation not permitted`，**不是ESRCH**；Luna首份摘要再次误写为消失，经索取原始行已纠正，不采用该摘要作为解除依据。a24 GPU1/2/3/5/6/7仅Xorg、34MiB/0%，但健康阻塞仍在；a32/29/15/01/14有计算任务，a28本轮SSH reset未取得快照。没有停止或抢占任何任务。
+
+根任务本轮向a24拉取原始证据、向a31新建只读连接均立即返回 `Connection closed by 36.189.234.168 port 33`（exit255），而Luna上述连接成功；因此只能记录新连接失败，不能宣称跳板全面中断。未改变认证/SSH配置。Luna本轮未保存原始快照文件，证据仅存在工具返回记录，不提供虚构的文件链接。
+
+上一轮18:46的aigc24复核也没有解除健康阻塞：物理GPU6使用正确UUID和正式ICD，生成finite640×480帧后仍发生 `vk::DeviceLostError`、exit134，renderer PID3877344被核实在GPU6。因此不能再用16:14的成功证明当前renderer健康。远端原始目录为 `/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO/renderer-recheck-a24-PwlmaG/`，本轮因SSH失败尚未取回，不提供不存在的本地原始证据链接。已收取此前待返回的tiny CUDA结果：GPU2/6的actual UUID均匹配，Torch2.7.1+cu126且finite/exit0；这只证明微型CUDA计算通过，不能抵消renderer退出失败。保持两台机器的安全阻塞文件，不清理他人进程、不重置GPU；截至最后一次成功检查正式输出目录不存在，无新成功率。
+
 **18:33 heartbeat后最新：aigc31完整模型/递归/渲染及8卡计算均通过，但正式启动被资源保护拦截；没有运行episode。** 既定ZeVA001000完整模型加载和两次真实推理通过，输出均[50,16] finite、commit15后transition_count=1，耗时284.34秒，使用Torch2.7.1cu126与实际UUID6。[真实模型报告](results/robotwin-fixed-anchor-20260914/selected-model-smoke-a31-pEWPcm/report.json)。renderer PID1697338已由独立nvidia PIDS核实在GPU6/BA:00.0，640×480且干净rc0；8卡tiny CUDA均actual UUID匹配、finite，约5.54秒。已准备一卡一slot，仍为同样8个逻辑RNG流、固定checkpoint/200组seed及实际指令；19项相关CPU测试通过。
 
 **重要纠正：不能把PID2369486当作已确认退出的进程。** 首次launcher PID1720516在创建正式输出前退出，日志为`GPU 0 has non-Xorg processes; launch cancelled: 2369486`。随后严格检查得到`/proc/2369486`目录存在、status文件不可见，`os.kill(pid,0)`为`EPERM(errno1)`，不是`ESRCH`。此前Luna由ps不可见/kill-zero失败推导“进程不存在”不充分，且被本次内核结果否定；本次不推断具体owner或内核原因，不绕过guard。计算健康通过不等于这些显存可自由占用。a31入口增加安全阻塞记录，需确认GPU分配/共用授权或进程确实消失后再启动；未终止进程或重置设备。仍在检查其他节点可用资源，无新成功率。以下资源推断按本段修正。
