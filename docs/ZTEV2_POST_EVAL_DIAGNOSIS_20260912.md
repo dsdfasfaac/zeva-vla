@@ -2,6 +2,10 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+**16:45 heartbeat后的最新状态：UUID固定设备、正式ICD的aigc24恢复验证通过，但启动前GPU2/6已被他人渲染任务占用，未启动正式评测。** 16:09–16:14的完整证据现已回收：两卡tiny matmul的Torch UUID分别匹配物理2/6且finite/rc0；renderer PID3674669实际PCI BA:00.0、nvidia GPU6 C+G、finite640×480帧、干净退出rc0。[原始证据](results/robotwin-fixed-anchor-20260914/renderer-formal-health-20260914T1534/)、[核验汇总](results/robotwin-fixed-anchor-20260914/renderer-formal-health-proof.json)。目录名1534不是实际运行时间，以metadata的16:09–16:14为准。UUID机制已加入模型与renderer launcher，并保留数字物理映射和全部8个逻辑RNG流；5项映射、3项runtime、4项client测试通过。专用入口同时检查UUID对应关系及非Xorg进程，不能把0%/低显存的G任务当空闲。健康恢复不等于资源已预留，旧blocker仍保留到正式恢复交接。
+
+备选aigc31：原驱动记录PID2369486无对应OS进程，历史worker持有句柄不等于正在训练；因此不做清理，先用极小计算验证是否能与残留分配共存。物理2/6 UUID限定的tiny CUDA finite通过（系统Torch没有UUID属性，未将该输出单独作为物理身份复核）。随后使用现有`/etc/vulkan/icd.d/nvidia_icd.json`（与a24相同内容）和shared RoboTwin Python，UUID6 renderer输出PCI BA:00.0、finite640×480帧，进程干净rc0，证据在`release/renderer-health-a31-FlDVZb`；5秒PIDS采样未捕获renderer PID，不宣称已有完整nvidia PID独立证明。shared renderer Python为3.10/Torch2.10cu128，与a24模型runtime尚未核对，正在做只读依赖审查，不直接迁移模型。以下资源状态为历史记录。
+
 16:06核对补充：Luna确认15:20那次renderer smoke未设置正式的`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json`。故那次DeviceLost/Vulkan fallback不能直接代表完整正式环境失败；tiny CUDA失败与实际落卡偏移仍是需要解决的独立观测。当前aigc24 GPU4仍ERR，其余卡0–1MiB/0%且无可见进程。保持health blocker，安排一次GPU UUID固定物理身份、正式ICD/当前client hook完全对齐的验证：先有限时tiny CUDA，两卡任一失败即停止；只有均通过才验证renderer与干净退出。未启动正式评测。
 
 **最新资源状态（15:13–15:22）：aigc24 的 nvidia-smi 恢复返回，但计算/渲染未恢复验证通过，正式评测仍未启动。** GPU4显示ERR/N/A，其余卡状态表只有Xorg。随后有超时限制的smoke中，`CUDA_VISIBLE_DEVICES=6`、`cuda:0`实际renderer PID3615310位于PCI DB:00.0/物理GPU7，而非BA:00.0/GPU6；生成640×480帧后以DeviceLostError退出，rc134。可见帧不等于健康，脚本硬编码的`physical_gpu_index=6`和`passed=true`也不是成功依据。CUDA可见序号2、6下的tiny matmul都报launch timeout；未记录其实际PCI/UUID，不能将日志中的physical_gpu标签当作已核实物理身份。故障后的枚举变化是待核实假设，不是确定根因。当前smoke的ICD环境与正式launcher的一致性仍需核对，未据此断言正式ICD配置错误。

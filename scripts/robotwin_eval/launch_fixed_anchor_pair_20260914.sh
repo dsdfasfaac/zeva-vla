@@ -14,6 +14,8 @@ export OUTPUT_ROOT=$zeva_runs/eval/formal-fixed-anchor-pair-20260914
 
 # Only GPUs 2 and 6 were verified free. Other cards have graphics workloads
 # despite an empty compute-apps query. Never stop those processes.
+zeva_uuid2=GPU-4e851e19-19df-1b0c-cba8-4e0a81c08425
+zeva_uuid6=GPU-2e145d56-44e7-7643-311c-be4bdfb69eb0
 for zeva_gpu in 2 6; do
   zeva_row=$(timeout -k 2 15 nvidia-smi -i "$zeva_gpu" --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits) || {
     echo "GPU $zeva_gpu health query failed or timed out; launch cancelled" >&2; exit 2;
@@ -25,11 +27,30 @@ for zeva_gpu in 2 6; do
   (( zeva_memory < 1024 && zeva_utilization <= 5 )) || {
     echo "GPU $zeva_gpu is no longer idle; launch cancelled" >&2; exit 2;
   }
+  zeva_current_uuid=$(timeout -k 2 15 nvidia-smi -i "$zeva_gpu" --query-gpu=uuid --format=csv,noheader)
+  if [[ "$zeva_gpu" == 2 ]]; then zeva_expected_uuid=$zeva_uuid2; else zeva_expected_uuid=$zeva_uuid6; fi
+  [[ "$zeva_current_uuid" == "$zeva_expected_uuid" ]] || {
+    echo "Physical GPU identity changed; fresh device verification required" >&2; exit 2;
+  }
+  zeva_active_jobs=$(timeout -k 2 15 nvidia-smi -i "$zeva_gpu" -q -x | python3 -c '
+import sys
+import xml.etree.ElementTree as ET
+root = ET.parse(sys.stdin)
+for process in root.findall(".//processes/process_info"):
+    name = process.findtext("process_name", "")
+    if name.rsplit("/", 1)[-1] != "Xorg":
+        print(process.findtext("pid", "unknown"), name)
+')
+  [[ -z "$zeva_active_jobs" ]] || {
+    echo "GPU $zeva_gpu has non-Xorg processes; launch cancelled: $zeva_active_jobs" >&2; exit 2;
+  }
 done
 
 export ZEVA_ROOT=$zeva_release
 export MODEL_HOST=aigc24 RENDER_HOST=aigc24 MODEL_IP=172.16.80.158
 export SLOTS=8 MODEL_GPU_IDS=2,6,2,6,2,6,2,6 RENDER_GPU_IDS=2,6,2,6,2,6,2,6
+export MODEL_CUDA_DEVICES=$zeva_uuid2,$zeva_uuid6,$zeva_uuid2,$zeva_uuid6,$zeva_uuid2,$zeva_uuid6,$zeva_uuid2,$zeva_uuid6
+export RENDER_CUDA_DEVICES=$MODEL_CUDA_DEVICES
 export BASE_PORT=19300 EPISODES=20 ABSOLUTE_START_SEED=1000
 export MODEL_SEED_POLICY=continuous MODEL_RNG_SEED=20260907
 export MIN_BASELINE_SUCCESS_RATE=0.57 BASELINE_IS_UNTOUCHED_ANCHOR=false
@@ -53,7 +74,7 @@ export ZEVA_LABEL=fixed-anchor-zeva-001000-h15
 export ANCHOR_LABEL=untouched-best-v1-h15
 export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
 
-python3 - "$FROZEN_SEED_MANIFEST" "$TASK_MANIFEST" "$zeva_staging" "$zeva_release/renderer-device-smoke.json" "$RENDER_SAPIEN_DEVICE" <<'PY'
+python3 - "$FROZEN_SEED_MANIFEST" "$TASK_MANIFEST" "$zeva_staging" "$zeva_release/renderer-formal-health-proof.json" "$RENDER_SAPIEN_DEVICE" "$zeva_uuid2" "$zeva_uuid6" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -63,8 +84,11 @@ import sys
 seed, tasks, staging, smoke = map(Path, sys.argv[1:5])
 proof = json.loads(smoke.read_text())
 assert proof['passed'] and proof['physical_gpu_index'] == 6
-assert proof['cuda_visible_devices'] == '6'
+assert proof['cuda_visible_devices'] == sys.argv[7]
 assert proof['renderer_device'] == sys.argv[5]
+assert proof['matmul_verified_uuids'] == [sys.argv[6], sys.argv[7]]
+assert proof['renderer_exit_code'] == 0
+assert proof['vk_icd_filenames'] == '/usr/share/vulkan/icd.d/nvidia_icd.json'
 assert hashlib.sha256(seed.read_bytes()).hexdigest() == '1b9dbf74bd9d9b8871647a00d6557f84884685d4459065f004bd600a86b1679b'
 assert hashlib.sha256(tasks.read_bytes()).hexdigest() == '0501e43192415f5e32de993866536e25a3c9a51c2622248402bc3b9cd8b157bd'
 manifest = json.loads((staging / 'robotwin_eval_ztev2_staging_manifest.json').read_text())

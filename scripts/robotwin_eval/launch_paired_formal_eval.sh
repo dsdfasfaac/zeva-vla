@@ -17,6 +17,8 @@ slots=${SLOTS:-8}
 # slot/port identity unchanged.
 model_gpu_ids_csv=${MODEL_GPU_IDS:-}
 render_gpu_ids_csv=${RENDER_GPU_IDS:-}
+model_cuda_devices_csv=${MODEL_CUDA_DEVICES:-}
+render_cuda_devices_csv=${RENDER_CUDA_DEVICES:-}
 if ! [[ "$slots" =~ ^[1-9][0-9]*$ ]]; then
   echo "SLOTS must be a positive integer" >&2
   exit 2
@@ -57,8 +59,50 @@ else
     fi
   done
 fi
+validate_cuda_devices_csv() {
+  local variable_name=$1
+  local csv=$2
+  local -a parsed
+  IFS=',' read -r -a parsed <<< "$csv"
+  if (( ${#parsed[@]} != slots )); then
+    echo "$variable_name must contain exactly $slots comma-separated UUIDs" >&2
+    exit 2
+  fi
+  for cuda_device in "${parsed[@]}"; do
+    if ! [[ "$cuda_device" =~ ^GPU-[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+      echo "$variable_name requires full GPU-UUID tokens; got: $cuda_device" >&2
+      exit 2
+    fi
+  done
+}
+model_cuda_devices=()
+if [[ -z "$model_cuda_devices_csv" ]]; then
+  model_cuda_devices=("${model_gpu_ids[@]}")
+else
+  validate_cuda_devices_csv MODEL_CUDA_DEVICES "$model_cuda_devices_csv"
+  IFS=',' read -r -a model_cuda_devices <<< "$model_cuda_devices_csv"
+fi
+render_cuda_devices=()
+if [[ -z "$render_cuda_devices_csv" ]]; then
+  render_cuda_devices=("${render_gpu_ids[@]}")
+else
+  validate_cuda_devices_csv RENDER_CUDA_DEVICES "$render_cuda_devices_csv"
+  IFS=',' read -r -a render_cuda_devices <<< "$render_cuda_devices_csv"
+fi
 model_gpu_ids_json=$(IFS=','; printf '%s' "${model_gpu_ids[*]}")
 render_gpu_ids_json=$(IFS=','; printf '%s' "${render_gpu_ids[*]}")
+json_string_array() {
+  local json='['
+  local item
+  for item in "$@"; do
+    [[ "$json" == '[' ]] || json+=','
+    json+="\"$item\""
+  done
+  json+=']'
+  printf '%s' "$json"
+}
+model_cuda_devices_json=$(json_string_array "${model_cuda_devices[@]}")
+render_cuda_devices_json=$(json_string_array "${render_cuda_devices[@]}")
 episodes=${EPISODES:-20}
 absolute_start_seed=${ABSOLUTE_START_SEED:-1000}
 model_seed_policy=${MODEL_SEED_POLICY:-continuous}
@@ -294,11 +338,11 @@ start_servers() {
   server_pids=()
   for slot in $(seq 0 $((slots - 1))); do
     local port=$((base_port + slot))
-    local model_gpu=${model_gpu_ids[$slot]}
+    local model_cuda_device=${model_cuda_devices[$slot]}
     local log="$condition_root/logs/server-slot${slot}.log"
     local pid
     pid=$(ssh "$model_host" "cd '$shared_runtime'; nohup env \
-      PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$model_gpu' PYTHONPATH='$model_pythonpath' \
+      PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$model_cuda_device' PYTHONPATH='$model_pythonpath' \
       $trace_server_env \
       HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \
       python3 script/policy_model_server.py --port '$port' --config '$config' \
@@ -334,7 +378,7 @@ run_condition() {
   for slot in $(seq 0 $((slots - 1))); do
     (
       local port=$((base_port + slot))
-      local render_gpu=${render_gpu_ids[$slot]}
+      local render_cuda_device=${render_cuda_devices[$slot]}
       local render_warp_env=""
       if [[ -n "$render_warp_cache_root" ]]; then
         ssh "$render_host" "mkdir -p '$render_warp_cache_root/slot-$slot'"
@@ -360,7 +404,7 @@ run_condition() {
         local started
         started=$(date -Iseconds)
         set +e
-        ssh "$render_host" "cd '$render_runtime'; env PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$render_gpu' VK_ICD_FILENAMES='$render_vulkan_icd' $render_sapien_env $render_ld_env $render_mps_env $render_warp_env PYTHONPATH='$zeva_root/scripts/robotwin_eval:$render_runtime/script:$render_runtime:$render_runtime/policy' \
+        ssh "$render_host" "cd '$render_runtime'; env PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES='$render_cuda_device' VK_ICD_FILENAMES='$render_vulkan_icd' $render_sapien_env $render_ld_env $render_mps_env $render_warp_env PYTHONPATH='$zeva_root/scripts/robotwin_eval:$render_runtime/script:$render_runtime:$render_runtime/policy' \
           .venv_robotwin/bin/python '$zeva_root/scripts/robotwin_eval/eval_policy_client.py' --port '$port' --config '$zeva_root/scripts/robotwin_eval/client_config.yml' \
           --overrides --task_name '$task' --task_config zeva_randomized --test_num '$episodes' \
           --instruction_type seen --seed 0 --absolute_start_seed '$absolute_start_seed' $seed_args \
@@ -499,6 +543,8 @@ cat > "$output/manifest.json" <<EOF
   "render_mps_pipe_directory": "$render_mps_pipe_directory",
   "model_gpu_ids": [$model_gpu_ids_json],
   "render_gpu_ids": [$render_gpu_ids_json],
+  "model_cuda_devices": $model_cuda_devices_json,
+  "render_cuda_devices": $render_cuda_devices_json,
   "slots": $slots
 }
 EOF
