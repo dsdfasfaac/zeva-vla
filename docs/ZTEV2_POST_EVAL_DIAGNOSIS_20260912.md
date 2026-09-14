@@ -2,6 +2,8 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+16:06核对补充：Luna确认15:20那次renderer smoke未设置正式的`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json`。故那次DeviceLost/Vulkan fallback不能直接代表完整正式环境失败；tiny CUDA失败与实际落卡偏移仍是需要解决的独立观测。当前aigc24 GPU4仍ERR，其余卡0–1MiB/0%且无可见进程。保持health blocker，安排一次GPU UUID固定物理身份、正式ICD/当前client hook完全对齐的验证：先有限时tiny CUDA，两卡任一失败即停止；只有均通过才验证renderer与干净退出。未启动正式评测。
+
 **最新资源状态（15:13–15:22）：aigc24 的 nvidia-smi 恢复返回，但计算/渲染未恢复验证通过，正式评测仍未启动。** GPU4显示ERR/N/A，其余卡状态表只有Xorg。随后有超时限制的smoke中，`CUDA_VISIBLE_DEVICES=6`、`cuda:0`实际renderer PID3615310位于PCI DB:00.0/物理GPU7，而非BA:00.0/GPU6；生成640×480帧后以DeviceLostError退出，rc134。可见帧不等于健康，脚本硬编码的`physical_gpu_index=6`和`passed=true`也不是成功依据。CUDA可见序号2、6下的tiny matmul都报launch timeout；未记录其实际PCI/UUID，不能将日志中的physical_gpu标签当作已核实物理身份。故障后的枚举变化是待核实假设，不是确定根因。当前smoke的ICD环境与正式launcher的一致性仍需核对，未据此断言正式ICD配置错误。
 
 原始smoke已归档于[恢复后验证目录](results/robotwin-fixed-anchor-20260914/renderer-device-smoke-20260914T1520-gpu6-rerun2/)，远端此次日志误放在旧`eval-release-ztev2-20260912`下的独立新子目录，未启动或覆盖旧正式结果。专用入口新增`gpu-health-blocked.json`硬拦截；旧的成功选卡proof不能解除本次阻塞。须以正式runtime完成新的finite CUDA、真实物理GPU身份、renderer干净退出验证，再显式记录解除。未重置GPU、停止他人进程或启动正式任务；无新成功率。以下资源快照为历史记录。
