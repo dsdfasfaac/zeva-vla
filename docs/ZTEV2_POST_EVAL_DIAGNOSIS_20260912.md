@@ -2,6 +2,8 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+**09-15 01:38北京时间：正式Base闭环已运行，完成2/10任务，其余任务继续；ZeVA尚未开始。** `beat_block_hammer`=17/20（85%），`pick_dual_bottles`=20/20（100%）；每个完成任务均有20条episode结果和20个非空视频文件。仅检查文件存在/非空，不冒充完整视频解码与内容审计。控制器PID1283028仍存活，其他任务日志仍在推进。以上是部分任务结果，不能合并外推为十任务总体成功率或ZeVA增益；继续固定顺序评测，不据此更换权重/seed。部分summary快照保存于`results/robotwin-fixed-anchor-20260914/baseline-live/`。
+
 **2026-09-15 01:01北京时间：aigc28正式评测控制器已启动，通过资源及固定输入检查，正在启动模型服务；尚无新成功率。** 控制器PID1283028、PPID1，运行入口`launch_paired_formal_eval.sh`；日志为release下`formal-launch-a28.log`，已打印`Pinned models, frozen task/seed/instruction manifests and ports verified`。正式目录`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-fixed-anchor-pair-20260914`现已创建，不能再写“目录不存在”，也不能仅凭目录创建宣称episodes已开始。
 
 8卡CUDA检查actual UUID全部匹配、finite、exit0；完整ZeVA001000实际模型报告两次[50,16] finite、commit15后transition_count=1，耗时280.14秒。[完整模型报告](results/robotwin-fixed-anchor-20260914/selected-model-full-a28-0wgpsdfj/report.json)、[8卡证据](results/robotwin-fixed-anchor-20260914/cuda-health-a28-20260914T160117/)、[汇总proof](results/robotwin-fixed-anchor-20260914/renderer-formal-health-proof-a28.json)。模型probe的SSH在结果回收前超时，退出码未知，未伪造为0；其最终报告/日志已持久化，PID1254111与父进程1254109已消失，16:58:34UTC再次确认8卡0MiB/0%。放行依据为完整功能报告、进程结束及重新检查资源；renderer的真实exit0仍是独立硬条件。新a28入口没有豁免任何不可见PID。此后不修改运行中的评测源码或公共依赖。

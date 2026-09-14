@@ -1,0 +1,214 @@
+{
+  "task_name": "beat_block_hammer",
+  "task_config": "zeva_randomized",
+  "policy_name": "zeva_policy",
+  "ckpt_setting": "fixed-anchor-base-001000-h15",
+  "checkpoint_path": null,
+  "config_file": null,
+  "use_ema_weights": true,
+  "instruction_type": "seen",
+  "seed": 0,
+  "absolute_start_seed": 1000,
+  "fixed_seed_sequence": true,
+  "seed_manifest": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-fixed-anchor-pair-20260914/seed_manifest.json",
+  "evaluated_seeds": [
+    1000,
+    1008,
+    1009,
+    1011,
+    1013,
+    1015,
+    1016,
+    1017,
+    1018,
+    1019,
+    1021,
+    1024,
+    1025,
+    1026,
+    1027,
+    1028,
+    1030,
+    1032,
+    1033,
+    1035
+  ],
+  "model_seed_policy": "continuous",
+  "episodes": 20,
+  "successes": 17,
+  "success_rate": 0.85,
+  "domain_id": 10,
+  "fps": 30.0,
+  "resolution": "480",
+  "view_resize_size": "480x640",
+  "chunk_length": 50,
+  "execute_horizon": 15,
+  "action_dim": 16,
+  "num_steps": 30,
+  "guidance": 1.0,
+  "shift": 10.0,
+  "sigma_max": 80.0,
+  "eval_video_log": true,
+  "episode_results": [
+    {
+      "episode_index": 0,
+      "seed": 1000,
+      "success": true,
+      "steps": 94,
+      "step_limit": 400,
+      "instruction": "Pick up the yellow and black hammer grip and use it on the block"
+    },
+    {
+      "episode_index": 1,
+      "seed": 1008,
+      "success": true,
+      "steps": 112,
+      "step_limit": 400,
+      "instruction": "Grab the black and yellow hammer grip to beat the block."
+    },
+    {
+      "episode_index": 2,
+      "seed": 1009,
+      "success": true,
+      "steps": 114,
+      "step_limit": 400,
+      "instruction": "Take the plastic handle metal hammer and beat the block"
+    },
+    {
+      "episode_index": 3,
+      "seed": 1011,
+      "success": true,
+      "steps": 120,
+      "step_limit": 400,
+      "instruction": "Take the grippy handle hammer and strike the block"
+    },
+    {
+      "episode_index": 4,
+      "seed": 1013,
+      "success": true,
+      "steps": 116,
+      "step_limit": 400,
+      "instruction": "Take the medium-sized metal hammer and strike the block"
+    },
+    {
+      "episode_index": 5,
+      "seed": 1015,
+      "success": true,
+      "steps": 131,
+      "step_limit": 400,
+      "instruction": "Grab the silver curved hammer head using the right arm then pound block"
+    },
+    {
+      "episode_index": 6,
+      "seed": 1016,
+      "success": false,
+      "steps": 400,
+      "step_limit": 400,
+      "instruction": "Grab the black and yellow hammer grip using the right arm and strike the block"
+    },
+    {
+      "episode_index": 7,
+      "seed": 1017,
+      "success": true,
+      "steps": 105,
+      "step_limit": 400,
+      "instruction": "Take the hammer with claw-shaped end and beat the block"
+    },
+    {
+      "episode_index": 8,
+      "seed": 1018,
+      "success": true,
+      "steps": 111,
+      "step_limit": 400,
+      "instruction": "With the right arm, grab the medium-sized metal hammer and hammer the block"
+    },
+    {
+      "episode_index": 9,
+      "seed": 1019,
+      "success": true,
+      "steps": 123,
+      "step_limit": 400,
+      "instruction": "Use the hammer with claw-shaped end to hammer the block."
+    },
+    {
+      "episode_index": 10,
+      "seed": 1021,
+      "success": true,
+      "steps": 110,
+      "step_limit": 400,
+      "instruction": "Grab the silver curved hammer head with the right arm and hit block"
+    },
+    {
+      "episode_index": 11,
+      "seed": 1024,
+      "success": true,
+      "steps": 134,
+      "step_limit": 400,
+      "instruction": "Hold the nail-driving hammer and pound the block."
+    },
+    {
+      "episode_index": 12,
+      "seed": 1025,
+      "success": true,
+      "steps": 103,
+      "step_limit": 400,
+      "instruction": "With the right arm, grab the silver curved hammer head and beat the block."
+    },
+    {
+      "episode_index": 13,
+      "seed": 1026,
+      "success": true,
+      "steps": 112,
+      "step_limit": 400,
+      "instruction": "Pick up the grippy handle hammer using the right arm then beat"
+    },
+    {
+      "episode_index": 14,
+      "seed": 1027,
+      "success": true,
+      "steps": 116,
+      "step_limit": 400,
+      "instruction": "Pick the medium-sized metal hammer from the table and strike"
+    },
+    {
+      "episode_index": 15,
+      "seed": 1028,
+      "success": false,
+      "steps": 400,
+      "step_limit": 400,
+      "instruction": "Take the nail-driving hammer using the left arm, hit the block."
+    },
+    {
+      "episode_index": 16,
+      "seed": 1030,
+      "success": true,
+      "steps": 110,
+      "step_limit": 400,
+      "instruction": "Pick the hammer with claw-shaped end and strike the block."
+    },
+    {
+      "episode_index": 17,
+      "seed": 1032,
+      "success": true,
+      "steps": 133,
+      "step_limit": 400,
+      "instruction": "Employ the left arm to grab the silver curved hammer head and hit."
+    },
+    {
+      "episode_index": 18,
+      "seed": 1033,
+      "success": true,
+      "steps": 97,
+      "step_limit": 400,
+      "instruction": "Grab the black and yellow hammer grip using the left arm then pound block"
+    },
+    {
+      "episode_index": 19,
+      "seed": 1035,
+      "success": false,
+      "steps": 400,
+      "step_limit": 400,
+      "instruction": "Catch the medium-sized metal hammer and use it on the block."
+    }
+  ]
+}
