@@ -47,6 +47,13 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 ## Zeva architecture
 
+Development update (2026-09-15): a preregistered **100-step gate-initialization
+mechanism comparison** (0.01 versus 0.10) has passed both real-weight preflights
+and its controller has started on aigc29, from the same Base004500 with fresh
+zero residuals and optimizers. Optimizer progress is not yet confirmed. This is not a new
+matched-Base performance result or a test-label gate sweep. See the
+[fixed design and execution record](docs/ZTEV2_GATE_MECHANISM_20260915.md).
+
 Current status (2026-09-14): both fixed-teacher-pair branches completed their
 predeclared 1,000 fresh-optimizer steps from trained Base004500. Full matched
 validation on 5,874 decisions also completed. H15 flow is 0.01014354 for ZeVA,
@@ -55,8 +62,9 @@ and 0.01003096 for the newly trained Base. Thus ZeVA improves over the starting
 Base by 0.3653%, but is 1.1224% worse than the matched new Base; its residuals
 also slightly worsen H15 (+0.01195%). The fixed-teacher change has not shown
 incremental ZTE utility. These are point estimates, not significance or
-closed-loop success-rate claims. No gate sweep, checkpoint reselection, or
-extra training has followed this result. The fixed-seed/instruction evaluation
+closed-loop success-rate claims. No test-label checkpoint reselection or
+inference gate sweep was used. The later short initialization experiment is
+separate from these completed results. The fixed-seed/instruction evaluation
 controller started on aigc28 at 2026-09-15 01:00 CST after placement checks;
 The completed paired evaluation (2026-09-15) is Base 110/200 (55.0%),
 ZeVA 110/200 (55.0%), and untouched Anchor 104/200 (52.0%). ZeVA's measured

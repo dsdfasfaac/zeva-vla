@@ -1,0 +1,128 @@
+{
+  "schema": "zeva-robotwin-stage2-gate-mechanism-v1",
+  "experiment": {
+    "name": "robotwin-ztev2-gate-mechanism-20260915",
+    "status": "pre_registered_mechanism_development",
+    "purpose": "A two-arm fresh ZeVA continuation that changes only the initial dual-residual gate probability.",
+    "not_a_resume": true,
+    "optimizer_reset": true,
+    "not_a_matched_newly_trained_base_comparison": true,
+    "formal_success_labels_used_for_training_or_selection": false,
+    "candidate_step": 100,
+    "steps": 100,
+    "warmup_steps": 10,
+    "fixed_end_step": 100
+  },
+  "paths": {
+    "handoff_root": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1",
+    "foundation_checkpoint": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1",
+    "stage1_language_checkpoint": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model",
+    "dataset_root": "/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data",
+    "task_subset": "configs/robotwin_zeva_advantage10.json",
+    "initial_stage2_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500",
+    "stage1_zte_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-scheduler-repair-20260911i/zte_v2_step_004096.pth",
+    "stage1_causal_bank": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/train_causal_bank.pt",
+    "stage1_live_queries": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/live_queries_h15.pt",
+    "stage1_task_retrieval": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/task_retrieval.pth",
+    "default_run_root": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gate-mechanism-20260915"
+  },
+  "provenance": {
+    "initial_stage2_checkpoint_step": 4500,
+    "source_model_sha256": "2f106633403e5f2146bf7cd4f56858cbfdb856e9b2966d1c724a79ac4948c84f",
+    "foundation_model_sha256": "7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe",
+    "source_manifest_sha256": "b768c6ff917c94491970caae8a9f814f139b53a66cf7dc0fb9393a3333473750",
+    "dataset_adapter_sha256": "8ac54abcec7704b0111b7c28be3fb3a18e27e0ebe8e3dcf8ddff948b36100f8f",
+    "stage1_zte_sha256": "ce9402981b8e2f1ce597e2cb150b795ae246f84fb81b3bb72fae023a3decf899",
+    "causal_bank_sha256": "33b11b41992d07890a798602cb8cadebc0f798b8959adfc3b8cf5b660bf14ad9",
+    "live_queries_sha256": "c39e3c6565c438b9496133833a7288a08a81a7985fc1723bf8a39d6ad2d47de6",
+    "task_retrieval_sha256": "c54b3275af4b15999a5d849f476c19ff3d01c76150a487679e9bbe61928798b7",
+    "old_zeva_checkpoint_or_adapter": null,
+    "old_zeva_adapter_must_not_be_loaded": true,
+    "student_and_immutable_teacher_are_same_base004500": true
+  },
+  "arms": {
+    "gate001": {
+      "training_variant": "zeva",
+      "initial_stage2_checkpoint": "paths.initial_stage2_checkpoint",
+      "anchor_stage2_checkpoint": "paths.initial_stage2_checkpoint",
+      "initial_residual_gate_probability": 0.01
+    },
+    "gate010": {
+      "training_variant": "zeva",
+      "initial_stage2_checkpoint": "paths.initial_stage2_checkpoint",
+      "anchor_stage2_checkpoint": "paths.initial_stage2_checkpoint",
+      "initial_residual_gate_probability": 0.1
+    }
+  },
+  "training": {
+    "training_variant": "zeva",
+    "steps": 100,
+    "warmup_steps": 10,
+    "save_freq": 100,
+    "batch_size_per_gpu": 16,
+    "gradient_accumulation_steps": 4,
+    "num_processes": 4,
+    "global_batch_size": 256,
+    "action_expert_learning_rate": 0.000005,
+    "zeva_learning_rate": 0.00005,
+    "prior_loss_weight": 0.01,
+    "prior_distribution": "diagonal Gaussian; negative log likelihood",
+    "prior_residual_dropout_probability": 0.4,
+    "baseline_preserve_interval": 4,
+    "preserve_loss_weight": 1.0,
+    "paired_improvement_margin": 0.0,
+    "gate_regularization_weight": 0.001,
+    "phase_noise_std": 0.02,
+    "memory_dropout": 0.1,
+    "prior_injection_horizon": 50,
+    "action_output_horizon": 50,
+    "executed_horizon": 15,
+    "seed": 1000,
+    "same_seed_and_data_order": true,
+    "fresh_optimizer": true,
+    "zero_initialized_dual_residual_projectors": true,
+    "dual_residuals": ["causal_context", "gaussian_action_prior_mean"]
+  },
+  "frozen": [
+    "PI0.5 vision-language backbone",
+    "Stage1 ZTE/Mamba",
+    "causal bank",
+    "task-language retrieval"
+  ],
+  "validation": {
+    "split": "validation5",
+    "full_validation": true,
+    "eval_batches_cap": 1000000,
+    "expected_decisions": 5874,
+    "fixed_checkpoint_step": 100,
+    "reports": [
+      "sample-weighted H50 flow",
+      "sample-weighted executed H15 flow",
+      "ZeVA current residual-off",
+      "ZeVA fixed-004500 anchor"
+    ],
+    "selection_rule": "Compare only the fixed step-100 validation diagnostics; do not select using formal closed-loop success labels.",
+    "norm_caveat": "A larger injected residual norm is a mechanism observation, not evidence of utility; H15/H50 on-off and fixed-anchor flow must be inspected jointly.",
+    "diagnostic_entrypoint": "scripts/eval_robotwin_stage2_diagnostics.py",
+    "diagnostics_are_read_only": true
+  },
+  "runtime": {
+    "runtime_environment": "verified Torch2.7.1 native Transformers overlay with shared/compiled dependencies",
+    "native_transformers_runtime": "/mnt/100T/users/dingxin/VLA/runtime/zeva-stage2-resume-aigc24-20260912",
+    "shared_runtime_dependencies": "/data1/dingxin/zeva-runtime-deps",
+    "compiled_runtime_dependencies": "/mnt/100T/users/dingxin/VLA/runtime/zeva-eval-deps-py310-v1",
+    "model_dependency_overlay": "optional MODEL_DEPENDENCY_OVERLAY, recorded when supplied",
+    "model_ld_library_path": "optional MODEL_LD_LIBRARY_PATH, recorded when supplied",
+    "launcher": "direct accelerate multi_gpu launch; no legacy runtime symlink mutation",
+    "compile_cache": "one directory per gate arm under the fresh run root",
+    "gpu_policy": "exactly four explicitly listed idle GPUs",
+    "port_policy": "independent explicit DDP port per gate arm"
+  },
+  "caveats": [
+    "This is a 100-optimizer-step mechanism check, not a final performance or success-rate delivery.",
+    "The two arms differ only in initial_residual_gate_probability; Adam updates need not scale 10x with the initial gate.",
+    "Zero projectors make the first-step upstream context/gate flow gradient zero by construction; this is a safety design and not an established bug.",
+    "This is not an exact optimizer resume and not a comparison against a newly trained matched Base arm.",
+    "The fixed teacher hinge only reweights expert-label flow on worse samples; it provides no preservation guarantee and is not action-output distillation."
+  ]
+}

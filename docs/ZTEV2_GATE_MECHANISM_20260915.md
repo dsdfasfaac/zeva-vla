@@ -1,0 +1,30 @@
+# ZTE v2：初始注入强度机制对照
+
+状态：2026-09-15 两种gate真实权重预检通过，100步双臂训练控制器已启动；尚未确认新的optimizer step。上一轮完整闭环仍为 Base 55%、ZeVA 55%，没有新的成功率。
+
+真实权重预检在 aigc29 GPU0 完成，PID256838已退出。隔离源码/日志目录 `/mnt/100T/users/dingxin/VLA/gate-mechanism-20260915-L9BZ2g`。两种初始gate分别通过实际Base004500/ZTE加载、零残差输出等价与H15递归；0.10另通过compiled teacher独立性。两个子进程均exit0，[完整终态](results/robotwin-gate-mechanism-20260915/completion.json)和两份模型报告已归档。测试输入是synthetic zero images，不能替代闭环。
+
+训练控制器 PID285790，在同一aigc29上按gate001→gate010依次运行，每臂4卡0/1/2/3、global256，末步再做单卡全验证诊断。日志为上述隔离目录的 `train-launch.log`；模型输出根目录 `/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gate-mechanism-20260915`。已有产物一律拒绝覆盖，不将目录创建或模型加载视为optimizer已更新。
+
+工程校验：远程7项静态合同测试通过；本地增加实际执行的诊断终态反例测试后共8项通过（拒绝不完整验证、样本数/H15协议错误和写入optimizer的诊断）。真实既有完整诊断报告也通过终态校验。Luna在收尾时触及使用额度，主agent完成最终审查、完整性检查和启动；没有声称Luna完成了远程训练验证。未改生产trainer/policy或历史实验。
+
+## 待检验问题
+
+当前双残差的 flow 路径没有意外 detach。两个投影层零初始化，因此第一步上游 context/prior 没有经投影传来的 flow 梯度；投影更新后该路径才打开。这是安全初始化的预期行为，不是已证实的实现缺陷。context 从第一步仍能通过 Gaussian NLL 学习。
+
+只检验一个假设：初始 gate 从 0.01 改为 0.10，是否让新分支在固定短预算内产生更有用的动作条件信息。Adam 会部分抵消恒定梯度缩放，不能把 gate 十倍等同于参数有效更新十倍；残差范数增大也不等于预测更好。旧 checkpoint 的推理时 prior 放大没有解决收益问题，本实验改变的是训练初始化，而不是再做测试集倍率搜索。
+
+## 固定设计
+
+- 两臂为 `gate001`、`gate010`，均从同一 Base004500 加载 PI 权重，以它作为固定 teacher；新建零投影、adapter 和 optimizer，不读取旧 ZeVA adapter。
+- 每臂固定 100 optimizer steps、warmup 10、末步保存；同 seed=1000、训练数据、批量与其余设置。采用相同随机数初始化和数据顺序机制，不承诺跨进程/设备 bit-exact。
+- 每卡 batch16 × 4卡 × 累积4 = global256；AE LR5e-6、新模块5e-5；冻结 VLM、ZTE、bank/retrieval。Gaussian NLL、prior dropout0.4、memory dropout0.1、双残差、H50训练/输出及H15执行不变。
+- 两臂固定末步在全部 validation5（预期5874决策）上比较相同样本/噪声的 H15/H50 flow、各自 residual-off、固定 Base004500，以及残差相对范数。正式闭环的成功标签不进入训练或选参。
+- 若范数增加但 H15 预测没有改善，不支持“放大初始 gate 可以解决收益”的假设；单次小差异只作开发线索，不能宣布统计显著。
+- 这是两支 ZeVA 的短机制实验，**没有同时训练新的匹配预算普通 Base**，所以不能作为最终 Base/ZeVA 公平成功率交付。若继续完整训练，仍须给普通 Base 匹配训练预算，并独立确认闭环收益。
+
+## 执行前检查
+
+aigc29 的原始 adapter 路径存在；八卡仅观察到 Xorg 小额显存占用，无计算进程。只读 runtime probe 已实际完成一次训练源视频解码：`[3,480,640]`、uint8，CUDA 数值有限，subprocess exit0；Torch2.7.1+cu126、Transformers5.5.4、Mamba2.2.6.post3、TorchCodec0.5+cu128。该单视频检查不是全数据完整性证明，也不是模型 smoke。
+
+`/data1` 只余约2.2GB，输出和编译缓存写到共享 `/mnt/100T`，不清理他人文件。实际模型加载、zero-init等价、H15状态更新及compiled teacher检查已完成；启动脚本再次核对GPU、端口和权重/产物SHA。使用新隔离源码目录，不覆盖历史产物或生产runtime。

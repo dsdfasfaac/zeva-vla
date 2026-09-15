@@ -50,6 +50,7 @@ class Args:
     goal_embedding_checkpoint: str | None = None
     retrieval_checkpoint: str | None = None
     check_compiled_anchor: bool = False
+    initial_residual_gate_probability: float = 0.01
     device: str = "cuda:0"
     task: str = "pick up the object"
     seed: int = 1000
@@ -163,6 +164,12 @@ def main(args: Args) -> None:
         retrieval_checkpoint=args.retrieval_checkpoint,
         causal_bank=args.causal_bank if args.retrieval_checkpoint is not None else None,
     )
+    # This smoke always loads a fresh adapter, never a trained ZeVA adapter.
+    # Check the prerequisite before testing a non-default gate initialization.
+    for projector in (policy.causal_action_projector, policy.prior_action_projector):
+        if any(torch.count_nonzero(parameter).item() for parameter in projector.parameters()):
+            raise AssertionError("Zero-init smoke requires fresh zero residual projectors.")
+    policy.initialize_residual_gate_probability(args.initial_residual_gate_probability)
     raw_observation = {
         "observation.state": torch.zeros(14, dtype=torch.float32),
         "task": args.task,
@@ -282,6 +289,7 @@ def main(args: Args) -> None:
         "schema": "zeva-robotwin-pi05-bestv1-zte-v2-smoke-v1",
         "passed": True,
         "foundation_runtime": "RobotWinZevaPolicy.from_handoff/native LeRobot PI0.5",
+        "initial_residual_gate_probability": args.initial_residual_gate_probability,
         "foundation_checkpoint": str(Path(args.foundation_checkpoint).resolve()),
         "initial_stage2_checkpoint": args.initial_stage2_checkpoint,
         "initial_stage2_model_sha256": (
