@@ -58,8 +58,9 @@ incremental ZTE utility. These are point estimates, not significance or
 closed-loop success-rate claims. No gate sweep, checkpoint reselection, or
 extra training has followed this result. The fixed-seed/instruction evaluation
 controller started on aigc28 at 2026-09-15 01:00 CST after placement checks;
-Base closed-loop evaluation is now in progress (2/10 tasks completed at 01:38
-CST); no complete new Base/ZeVA success-rate comparison is available yet.
+Base closed-loop evaluation completed at 110/200 (55.0%), below the declared
+57% reference floor. Anchor evaluation is in progress (2026-09-15 03:57 CST);
+the new ZeVA result and complete paired comparison are still pending.
 Stage1's four auxiliary
 metrics still clear their configured reference lines and are not official
 BehaviorVLA gates. The preservation hinge is expert-loss reweighting, not

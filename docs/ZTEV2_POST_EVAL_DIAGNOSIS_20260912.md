@@ -2,6 +2,10 @@
 
 更新：2026-09-14。本文区分已测事实、未测假设和计划，不改变已完成实验。
 
+**09-15 03:57北京时间：Base十任务已全部完成，110/200=55.0%；状态为running_anchor，ZeVA尚未开始。** 普通训练Base仍低于预设57%参考线，不能宣布达到“正常且ZeVA更好”的交付目标。原始[Base report](results/robotwin-fixed-anchor-20260914/baseline-live/report.json)已回收；各任务依次为hammer17、RGB10、size7、handover8、mug6、dual bottles20、dustbin5、scan6、bowls13、stamp18，分母均20。不依据已看到的正式结果更换checkpoint/seed，继续既定Anchor和ZeVA闭环。
+
+运行中dustbin seed1024曾在expert初始化`TASK_ENV.play_once()`中发生`IndexError`，既有客户端记录同一frozen seed重试1/20后继续，最终该任务完成20次、5次成功；这是被处理的初始化异常，不是新增的policy推理崩溃。未现场修改源码或替换该seed；最终seed/指令/视频一致性继续按既定审计执行。
+
 **09-15 01:38北京时间：正式Base闭环已运行，完成2/10任务，其余任务继续；ZeVA尚未开始。** `beat_block_hammer`=17/20（85%），`pick_dual_bottles`=20/20（100%）；每个完成任务均有20条episode结果和20个非空视频文件。仅检查文件存在/非空，不冒充完整视频解码与内容审计。控制器PID1283028仍存活，其他任务日志仍在推进。以上是部分任务结果，不能合并外推为十任务总体成功率或ZeVA增益；继续固定顺序评测，不据此更换权重/seed。部分summary快照保存于`results/robotwin-fixed-anchor-20260914/baseline-live/`。
 
 **2026-09-15 01:01北京时间：aigc28正式评测控制器已启动，通过资源及固定输入检查，正在启动模型服务；尚无新成功率。** 控制器PID1283028、PPID1，运行入口`launch_paired_formal_eval.sh`；日志为release下`formal-launch-a28.log`，已打印`Pinned models, frozen task/seed/instruction manifests and ports verified`。正式目录`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-fixed-anchor-pair-20260914`现已创建，不能再写“目录不存在”，也不能仅凭目录创建宣称episodes已开始。
