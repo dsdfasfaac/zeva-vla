@@ -1,0 +1,102 @@
+{
+  "arm": "gate010",
+  "contract_config": {
+    "path": "/mnt/100T/users/dingxin/VLA/gate-mechanism-recovery-20260915-KU3sjc/configs/robotwin_ztev2_gate_mechanism_20260915.json",
+    "sha256": "f15f6d2c776e8ae1876fac5f15ad29a2977cffe710e0d0519b9d6c0644bcb6cc"
+  },
+  "ddp": {
+    "gpu_list": "0,1,2,3",
+    "main_process_port": 29615,
+    "num_processes": 4
+  },
+  "initial_residual_gate_probability": 0.1,
+  "launcher": {
+    "path": "/mnt/100T/users/dingxin/VLA/gate-mechanism-recovery-20260915-KU3sjc/scripts/train_robotwin_ztev2_gate_mechanism.sh",
+    "sha256": "32566ff09117a67ebb63393f5920affa54f16f4a367a599f2e78019393455e7a"
+  },
+  "lineage": {
+    "base_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500",
+    "base_manifest_sha256": "b768c6ff917c94491970caae8a9f814f139b53a66cf7dc0fb9393a3333473750",
+    "base_model_sha256": "2f106633403e5f2146bf7cd4f56858cbfdb856e9b2966d1c724a79ac4948c84f",
+    "causal_bank": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/train_causal_bank.pt",
+    "causal_bank_sha256": "33b11b41992d07890a798602cb8cadebc0f798b8959adfc3b8cf5b660bf14ad9",
+    "dataset_adapter_sha256": "8ac54abcec7704b0111b7c28be3fb3a18e27e0ebe8e3dcf8ddff948b36100f8f",
+    "dataset_root": "/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data",
+    "foundation_checkpoint": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1",
+    "foundation_model_sha256": "7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe",
+    "handoff_root": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1",
+    "initial_stage2_and_immutable_teacher": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500",
+    "live_queries": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/live_queries_h15.pt",
+    "live_queries_sha256": "c39e3c6565c438b9496133833a7288a08a81a7985fc1723bf8a39d6ad2d47de6",
+    "old_zeva_adapter": "forbidden",
+    "runtime_root": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime",
+    "stage1_language_checkpoint": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model",
+    "task_retrieval": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/task_retrieval.pth",
+    "task_retrieval_sha256": "c54b3275af4b15999a5d849f476c19ff3d01c76150a487679e9bbe61928798b7",
+    "task_subset": "/mnt/100T/users/dingxin/VLA/gate-mechanism-recovery-20260915-KU3sjc/configs/robotwin_zeva_advantage10.json",
+    "zte_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-scheduler-repair-20260911i/zte_v2_step_004096.pth",
+    "zte_sha256": "ce9402981b8e2f1ce597e2cb150b795ae246f84fb81b3bb72fae023a3decf899"
+  },
+  "not_a_matched_newly_trained_base_comparison": true,
+  "not_a_resume": true,
+  "optimizer_reset": true,
+  "runtime": {
+    "compiled_dependencies": "/mnt/100T/users/dingxin/VLA/runtime/zeva-eval-deps-py310-v1",
+    "cuda_cache_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gate-mechanism-20260915/_compile-cache/gate010/cuda",
+    "hf_home": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gate-mechanism-20260915/_compile-cache/gate010/huggingface",
+    "ld_library_path": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/cusparselt/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cublas/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_cupti/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_nvrtc/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_runtime/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cudnn/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufft/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufile/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/curand/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusolver/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusparse/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nccl/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvjitlink/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvtx/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torchaudio/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/amd/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/nvidia/lib",
+    "mamba_ssm_module_file": "/data1/dingxin/zeva-runtime-deps/mamba_ssm/__init__.py",
+    "model_dependency_overlay": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914",
+    "model_ld_library_path": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/cusparselt/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cublas/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_cupti/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_nvrtc/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cuda_runtime/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cudnn/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufft/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cufile/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/curand/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusolver/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/cusparse/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nccl/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvjitlink/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/nvidia/nvtx/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torchaudio/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/amd/lib:/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/triton/backends/nvidia/lib",
+    "native_transformers_runtime": "/mnt/100T/users/dingxin/VLA/runtime/zeva-stage2-resume-aigc24-20260912",
+    "python": "/usr/bin/python3",
+    "pythonpath": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914:/mnt/100T/users/dingxin/VLA/runtime/zeva-stage2-resume-aigc24-20260912:/data1/dingxin/zeva-runtime-deps:/mnt/100T/users/dingxin/VLA/runtime/zeva-eval-deps-py310-v1:/usr/local/lib/python3.10/dist-packages:/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime/h100-extra-deps:/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime/lerobot-overlay-v2:/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime/lerobot-main-py311-v1/src:/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime/src:/mnt/100T/users/dingxin/VLA/gate-mechanism-recovery-20260915-KU3sjc/src:/mnt/100T/users/dingxin/VLA/gate-mechanism-recovery-20260915-KU3sjc:/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime/lerobot-main-deps-py311-v1",
+    "shared_dependencies": "/data1/dingxin/zeva-runtime-deps",
+    "system_runtime_symlink_mutation": false,
+    "torch_home": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gate-mechanism-20260915/_compile-cache/gate010/torch",
+    "torch_module_file": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/__init__.py",
+    "torch_version": "2.7.1+cu126",
+    "torchcodec_module_file": "/data1/dingxin/zeva-runtime-deps/torchcodec/__init__.py",
+    "torchinductor_cache_dir": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gate-mechanism-20260915/_compile-cache/gate010/torchinductor",
+    "transformers_module_file": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/runtime/lerobot-main-deps-py311-v1/transformers/__init__.py",
+    "triton_cache_dir": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gate-mechanism-20260915/_compile-cache/gate010/triton",
+    "xdg_cache_home": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gate-mechanism-20260915/_compile-cache/gate010/xdg"
+  },
+  "schema": "zeva-robotwin-stage2-gate-mechanism-launch-v1",
+  "training": {
+    "action_expert_learning_rate": 5e-06,
+    "action_output_horizon": 50,
+    "batch_size_per_gpu": 16,
+    "executed_horizon": 15,
+    "fresh_optimizer": true,
+    "global_batch_size": 256,
+    "gradient_accumulation_steps": 4,
+    "memory_dropout": 0.1,
+    "prior_injection_horizon": 50,
+    "prior_loss_weight": 0.01,
+    "prior_residual_dropout_probability": 0.4,
+    "same_seed_and_data_order": true,
+    "save_freq": 100,
+    "seed": 1000,
+    "steps": 100,
+    "warmup_steps": 10,
+    "zero_initialized_dual_residual_projectors": true,
+    "zeva_learning_rate": 5e-05
+  },
+  "training_variant": "zeva",
+  "validation": {
+    "diagnostic_eval_batches": 0,
+    "eval_batches": 1000000,
+    "fixed_checkpoint_step": 100,
+    "formal_success_labels_used": false,
+    "full_validation": true,
+    "larger_residual_norm_is_not_utility": true,
+    "reports": [
+      "H50 flow",
+      "executed H15 flow",
+      "current residual-off",
+      "fixed Base/004500"
+    ],
+    "split": "validation5"
+  }
+}

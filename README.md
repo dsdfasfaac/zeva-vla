@@ -47,14 +47,16 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 ## Zeva architecture
 
-Development update (2026-09-15): a preregistered **100-step gate-initialization
-mechanism comparison** (0.01 versus 0.10) has passed both real-weight preflights
-and gate001 has completed 100 steps and all 5,874 validation decisions on aigc29.
-The explicit-cap completeness flag stopped orchestration; actual full coverage
-was separately audited without altering the raw report. Gate010 has now been
-dispatched with the diagnostic API's uncapped setting (0), with training unchanged.
-Both start from Base004500 with fresh zero residuals and optimizers. This is not a new
-matched-Base performance result or a test-label gate sweep. See the
+Development update (2026-09-15 19:19 CST): the preregistered **100-step
+gate-initialization comparison** (0.01 versus 0.10) completed both arms and all
+5,874 validation decisions. The stronger gate increased context/prior residual
+norms 7.62x/8.45x but did not improve H15: error rose 0.10341% versus the 0.01
+arm, and both residual-on paths were slightly worse than their own off paths.
+This does not support extending the stronger-gate run; it is not a significance
+claim or evidence that ZTE cannot work. No new full training or formal rollout
+has started. The next bounded check is flow-versus-NLL gradient magnitude and
+direction on training samples (not yet running). This is not a new matched-Base
+performance result or a test-label gate sweep. See the
 [fixed design and execution record](docs/ZTEV2_GATE_MECHANISM_20260915.md).
 
 Current status (2026-09-14): both fixed-teacher-pair branches completed their

@@ -1,6 +1,27 @@
 # ZTE v2：初始注入强度机制对照
 
-状态：2026-09-15 gate001已完成100步及全5874决策验证，完整model/adapter/optimizer已保存；gate010控制器已启动，尚无第二臂结果。上一轮完整闭环仍为Base 55%、ZeVA 55%，没有新的成功率。
+状态：2026-09-15 19:19北京时间，两臂均完成100步及全5874决策验证。gate010控制器已退出并记录COMPLETE。**增大初始gate的短程收益假设未获支持，不据此加长训练或进入正式闭环。** 上一轮完整闭环仍为Base 55%、ZeVA 55%，没有新的成功率。
+
+## 完整双臂结果
+
+| 同样本、同噪声验证指标 | gate=0.01 | gate=0.10 |
+|---|---:|---:|
+| H15 residual-on flow error | 0.010279973 | 0.010290603 |
+| H15 current residual-off | 0.010276590 | 0.010286857 |
+| H15 固定Base004500 | 0.010251136 | 0.010251136 |
+| on相对off误差变化 | +0.03292% | +0.03641% |
+| on相对固定Base误差变化 | +0.28130% | +0.38500% |
+| H50 residual-on | 0.019746169 | 0.019749021 |
+| H15 context残差相对范数 | 0.000433618 | 0.003303655 |
+| H15 prior残差相对范数 | 0.000004811 | 0.000040662 |
+
+gate0.10的context/prior残差范数分别为0.01臂的7.62/8.45倍，但H15 error比0.01臂高0.10341%。两臂on均略差于各自off和固定Base。该结果只说明在**这组固定100步设置**下没有观察到放大初始化的收益；小差异没有统计显著性证明，更不能据此否定ZTE编码器或推断闭环成功率。
+
+两臂训练manifest除gate初值、输出目录及同内容task文件的隔离路径外一致；trainer/policy源码SHA、foundation、ZTE、bank、live queries、retrieval同源。验证ordered sample SHA、seed、batch16、adapter SHA、368批和5874决策均一致，固定teacher H15值也完全相同。0.01臂的显式cap标记例外见下节独立覆盖审计；0.10臂`protocol.complete=true`。原始报告：[0.01](results/robotwin-gate-mechanism-20260915/gate001/validation_diagnostics.json)、[0.10](results/robotwin-gate-mechanism-20260915/gate010/validation_diagnostics.json)。本实验没有新训练的匹配普通Base，不能用固定004500替代最终公平对照。
+
+## 下一步边界
+
+停止扩大gate或据此直接加步数。下一项限定检查是：在固定训练样本上，分别测量flow和加权Gaussian NLL对新memory/task/prior模块的梯度范数及方向夹角，识别辅助目标是否主导或与动作目标冲突；loss数值大小本身不能证明梯度主导。该检查不更新optimizer，不使用正式成功标签，不重训Stage1或扩展已取消的frozen-probe研究。**截至本记录，梯度检查尚未启动，新一轮策略训练也未启动。**
 
 ## 完整性标记拦截及恢复
 
