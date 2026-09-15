@@ -396,6 +396,7 @@ payload = {
     },
     "validation": {
         "split": "validation5", "full_validation": True, "eval_batches": 1000000,
+        "diagnostic_eval_batches": 0,
         "fixed_checkpoint_step": 100,
         "reports": ["H50 flow", "executed H15 flow", "current residual-off", "fixed Base/004500"],
         "formal_success_labels_used": False,
@@ -524,7 +525,7 @@ run_arm() {
     --live-queries "$live_queries" \
     --task-retrieval "$task_retrieval" \
     --batch-size "$batch_size" \
-    --eval-batches "$eval_batches" \
+    --eval-batches 0 \
     --video-backend torchcodec \
     --decoder-threads 1 \
     --seed "$seed" \

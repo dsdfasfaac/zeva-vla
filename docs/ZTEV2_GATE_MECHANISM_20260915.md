@@ -1,6 +1,14 @@
 # ZTE v2：初始注入强度机制对照
 
-状态：2026-09-15 两种gate真实权重预检通过，100步双臂训练控制器已启动；尚未确认新的optimizer step。上一轮完整闭环仍为 Base 55%、ZeVA 55%，没有新的成功率。
+状态：2026-09-15 gate001已完成100步及全5874决策验证，完整model/adapter/optimizer已保存；gate010控制器已启动，尚无第二臂结果。上一轮完整闭环仍为Base 55%、ZeVA 55%，没有新的成功率。
+
+## 完整性标记拦截及恢复
+
+首臂训练100/100正常结束，`000100`权重、adapter及training_state已保存。只读验证遍历368/368批次，但控制器285790随后退出：诊断CLI的`complete`字段只在`--eval-batches 0`时为true；原launcher给了1000000的显式上限，因此即使遍历全数据仍标false。这不是loss发散、权重损坏或实际只测了部分样本。
+
+已独立核对四项H15/H50 on/off统计及两个paired统计均有5874个有效样本，H15共88110步、H50共293700步，且没有optimizer或checkpoint写入。[原始报告](results/robotwin-gate-mechanism-20260915/gate001/validation_diagnostics.json)的`complete=false`保持不变，另附[实际覆盖审计](results/robotwin-gate-mechanism-20260915/gate001/coverage-audit.json)，不伪造原控制器COMPLETE标记。该臂H15 on=0.010279973、off=0.010276590、固定Base=0.010251136；等待第二臂后才比较初始化假设，不把单臂点估计当方法效果结论。
+
+修正仅将**后续只读诊断**调用设为`--eval-batches 0`，训练budget/数据/模型/噪声设置不变。未重训首臂、未修改原始指标。旧隔离源码保留；新目录`/mnt/100T/users/dingxin/VLA/gate-mechanism-recovery-20260915-KU3sjc`，trainer与policy字节哈希和旧目录一致，9项本地及远程测试通过。只启动尚未开始的gate010，控制器PID321328，日志`train-launch-gate010.log`，沿用相同输出根目录与四卡；这是恢复实验编排，不是optimizer resume。两臂结束后仍需核对ordered sample SHA、batch/noise、lineage及配对诊断，不能只依赖总COMPLETE文件。
 
 真实权重预检在 aigc29 GPU0 完成，PID256838已退出。隔离源码/日志目录 `/mnt/100T/users/dingxin/VLA/gate-mechanism-20260915-L9BZ2g`。两种初始gate分别通过实际Base004500/ZTE加载、零残差输出等价与H15递归；0.10另通过compiled teacher独立性。两个子进程均exit0，[完整终态](results/robotwin-gate-mechanism-20260915/completion.json)和两份模型报告已归档。测试输入是synthetic zero images，不能替代闭环。
 

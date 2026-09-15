@@ -38,6 +38,12 @@ class GateMechanismContractTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_diagnostic_uses_uncapped_full_validation_api(self) -> None:
+        diagnostic = self.source.split('"$zeva_root/scripts/eval_robotwin_stage2_diagnostics.py"', 1)[1]
+        self.assertIn("--eval-batches 0", diagnostic)
+        self.assertNotIn('--eval-batches "$eval_batches"', diagnostic)
+        self.assertEqual(self.config["validation"]["diagnostic_eval_batches"], 0)
+
     def test_diagnostic_completion_guard_rejects_incomplete_or_changed_protocol(self) -> None:
         blocks = re.findall(r"<<'PY'\n(.*?)\nPY", self.source, re.S)
         guard = next(block for block in blocks if "Diagnostic protocol mismatch:" in block)

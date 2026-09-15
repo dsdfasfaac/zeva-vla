@@ -93,6 +93,7 @@
     "split": "validation5",
     "full_validation": true,
     "eval_batches_cap": 1000000,
+    "diagnostic_eval_batches": 0,
     "expected_decisions": 5874,
     "fixed_checkpoint_step": 100,
     "reports": [
