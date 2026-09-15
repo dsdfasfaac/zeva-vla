@@ -56,9 +56,27 @@ def sha256(path: Path) -> str:
 
 
 def load_flat_yaml(path: Path) -> dict[str, str]:
-    """Read the scalar top-level fields used by RoboTwin policy configs."""
+    """Read JSON or legacy flat-YAML policy scalars without losing JSON keys.
+
+    Staging emits JSON (valid YAML) into .yml files. Splitting those lines on
+    ':' retains quoted keys and trailing commas, producing false lineage and
+    baseline_only failures despite unchanged rollout-time config hashes.
+    """
+    text = path.read_text(encoding="utf-8")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    else:
+        if not isinstance(payload, dict):
+            raise ValueError(f"policy config must be a mapping: {path}")
+        return {
+            key: ("true" if value is True else "false" if value is False
+                  else "null" if value is None else str(value))
+            for key, value in payload.items()
+        }
     values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in text.splitlines():
         line = raw_line.split("#", 1)[0].strip()
         if not line or ":" not in line:
             continue

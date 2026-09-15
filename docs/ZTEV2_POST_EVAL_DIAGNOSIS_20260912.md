@@ -4,7 +4,9 @@
 
 **最终：固定teacher配对闭环已完成，Base110/200=55.0%、ZeVA110/200=55.0%、Anchor104/200=52.0%，验收失败。** 三条件均10任务×20 episodes；结束时间09-15 06:49:32北京时间。ZeVA−Base=0个百分点，discordant pairs=32/32，paired bootstrap 95% CI=[−7.5,+8.0]个百分点，McNemar p=1.0。Base超过同条件Anchor，但低于预设57%参考线；不能用Anchor替代训练Base宣称增强成功。完整任务表与审计限制见[正式结果](ROBOTWIN_FIXED_ANCHOR_PAIRED_RESULTS_20260915.md)，原始report/acceptance/manifest已取回`results/robotwin-fixed-anchor-20260914/formal-complete/`。以下“正在评测”均为历史快照。
 
-这次没有通过交付目标，不继续原方案盲目加步数，也不根据正式任务涨跌改选seed/任务/倍率。下一步只在训练/验证数据上检验明确机制假设，再决定新训练；Stage1辅助分数达线既不能保证增强，也不能被此次平局反证为编码器无效。三条件600视频现均通过独立ffprobe/尺寸/计数检查，固定seed及实际指令完全配对，证据已并入formal-complete；不把ffprobe等同于全帧解码。另一个通用审计脚本的配置文本检查错误仍需澄清，不用数据审计覆盖该问题。
+这次没有通过交付目标，不继续原方案盲目加步数，也不根据正式任务涨跌改选seed/任务/倍率。下一步只在训练/验证数据上检验明确机制假设，再决定新训练；Stage1辅助分数达线既不能保证增强，也不能被此次平局反证为编码器无效。三条件600视频现均通过独立ffprobe/尺寸/计数检查，固定seed及实际指令完全配对，证据已并入formal-complete；不把ffprobe等同于全帧解码。
+
+09-15配置审计问题已查清：原审计`completion_audit.json`的3条错误分别是Base/ZeVA没有显式best-v1和Base不是baseline_only。实际3个配置哈希与rollout-time记录完全匹配；错误来自`load_flat_yaml`不能正确读取JSON格式的.yml文件。修复为先解析JSON再保留旧flat-YAML路径，5项回归测试与真实配置SHA/字段检查通过。只修改审计器，不修改评测数据或配置，也不放宽验收条件。修正版全量远程审计因跳板连接重置尚未执行；新输出目录预留于`/mnt/100T/users/dingxin/VLA/runtime/audit-json-config-fix-20260915-Bt2hJL`，不覆盖原失败报告。
 
 **09-15 03:57北京时间：Base十任务已全部完成，110/200=55.0%；状态为running_anchor，ZeVA尚未开始。** 普通训练Base仍低于预设57%参考线，不能宣布达到“正常且ZeVA更好”的交付目标。原始[Base report](results/robotwin-fixed-anchor-20260914/baseline-live/report.json)已回收；各任务依次为hammer17、RGB10、size7、handover8、mug6、dual bottles20、dustbin5、scan6、bowls13、stamp18，分母均20。不依据已看到的正式结果更换checkpoint/seed，继续既定Anchor和ZeVA闭环。
 

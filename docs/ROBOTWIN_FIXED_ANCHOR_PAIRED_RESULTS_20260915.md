@@ -38,7 +38,9 @@ Base-only 成功 32 对，ZeVA-only 成功 32 对；精确 McNemar p=1.0，episo
 
 控制器已完成三条件结构及配对 seed/指令检查并生成 [paired report](results/robotwin-fixed-anchor-20260914/formal-complete/paired_report.json)。[acceptance](results/robotwin-fixed-anchor-20260914/formal-complete/acceptance.json) 为 false：Base ≥ 同条件 Anchor 满足，但 Base ≥ 57% 与 ZeVA > Base 均不满足。历史 57% 并非完全相同的 seed/实际指令集合，这一参考线不能被解释为统计显著的同条件掉点证明。
 
-三条件共 600 个视频均通过独立 ffprobe 容器/视频流/640×480尺寸检查，每任务20个，summary成功数、视频文件命名与固定seed/实际指令逐项一致；[独立数据与视频审计](results/robotwin-fixed-anchor-20260914/formal-complete/paired-data-video-audit.json)的两项汇总检查均为true。不宣称完成逐帧解码或人工内容审查。dustbin 的初始化异常由既有同 frozen-seed 重试逻辑处理；Base seed1024/1035 均保留在最终结果中，没有因初始化异常换 seed。另一个通用审计脚本报告的配置文本检查问题正在独立核实，不能用视频检查通过替代所有配置检查。
+三条件共 600 个视频均通过独立 ffprobe 容器/视频流/640×480尺寸检查，每任务20个，summary成功数、视频文件命名与固定seed/实际指令逐项一致；[独立数据与视频审计](results/robotwin-fixed-anchor-20260914/formal-complete/paired-data-video-audit.json)的两项汇总检查均为true。不宣称完成逐帧解码或人工内容审查。dustbin 的初始化异常由既有同 frozen-seed 重试逻辑处理；Base seed1024/1035 均保留在最终结果中，没有因初始化异常换 seed。
+
+通用审计的三项配置报错已定位为解析器缺陷：staging将JSON写入`.yml`（合法YAML），旧`load_flat_yaml`逐行拆分时保留了键名引号和尾部逗号，误判两支没有best-v1路径及Base没有`baseline_only=true`。三个本地配置副本的SHA与rollout manifest完全一致；修复后均正确解析，5项回归测试通过，并保留“错误路径/false不能通过”的检查。没有改动远端配置、权重或结果。修正版完整审计尚待远程重跑（SSH跳板重置导致本轮未执行）；原始失败审计不被覆盖，结果验收仍为false。
 
 ## 方法判断与后续边界
 
