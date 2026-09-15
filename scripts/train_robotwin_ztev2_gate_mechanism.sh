@@ -13,14 +13,18 @@ set -euo pipefail
 mode=${1:-both}
 case "$mode" in
   gate001|gate010|both) ;;
+  nll_detached) ;;
   *)
-    echo "usage: $0 [gate001|gate010|both]" >&2
+    echo "usage: $0 [gate001|gate010|both|nll_detached]" >&2
     exit 2
     ;;
 esac
 
 zeva_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 contract_config="$zeva_root/configs/robotwin_ztev2_gate_mechanism_20260915.json"
+if [[ "$mode" == nll_detached ]]; then
+  contract_config="$zeva_root/configs/robotwin_ztev2_nll_routing_20260915.json"
+fi
 
 handoff=${ROBOTWIN_HANDOFF:-/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1}
 runtime=${ROBOTWIN_RUNTIME:-$handoff/runtime}
@@ -52,6 +56,9 @@ live_queries_sha256=${ROBOTWIN_LIVE_QUERIES_SHA256:-c39e3c6565c438b9496133833a72
 task_retrieval_sha256=${ROBOTWIN_TASK_RETRIEVAL_SHA256:-c54b3275af4b15999a5d849f476c19ff3d01c76150a487679e9bbe61928798b7}
 
 run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gate-mechanism-20260915}
+if [[ "$mode" == nll_detached ]]; then
+  run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/nll-routing-20260915}
+fi
 
 # The mechanism check is deliberately short, but its optimization/data
 # contract is otherwise the formal fixed-anchor contract.
@@ -84,6 +91,7 @@ gpu_utilization_limit_pct=${GPU_UTILIZATION_LIMIT_PCT:-5}
 case "$mode" in
   gate001) arms=(gate001) ;;
   gate010) arms=(gate010) ;;
+  nll_detached) arms=(nll_detached) ;;
   both) arms=(gate001 gate010) ;;
 esac
 
@@ -271,6 +279,7 @@ port_for_arm() {
   case "$1" in
     gate001) printf '%s\n' "${GATE001_MAIN_PROCESS_PORT:-29614}" ;;
     gate010) printf '%s\n' "${GATE010_MAIN_PROCESS_PORT:-29615}" ;;
+    nll_detached) printf '%s\n' "${NLL_ROUTING_MAIN_PROCESS_PORT:-29616}" ;;
     *) die "unknown gate arm: $1" ;;
   esac
 }
@@ -279,6 +288,7 @@ gate_probability_for_arm() {
   case "$1" in
     gate001) printf '%s\n' "0.01" ;;
     gate010) printf '%s\n' "0.10" ;;
+    nll_detached) printf '%s\n' "0.01" ;;
     *) die "unknown gate arm: $1" ;;
   esac
 }
@@ -356,6 +366,7 @@ payload = {
         "action_output_horizon": 50, "executed_horizon": 15, "seed": int(seed),
         "same_seed_and_data_order": True, "fresh_optimizer": True,
         "zero_initialized_dual_residual_projectors": True,
+        "prior_nll_detach_context": arm == "nll_detached",
     },
     "lineage": {
         "handoff_root": str(Path(handoff).resolve()), "runtime_root": str(Path(runtime).resolve()),
@@ -489,6 +500,9 @@ run_arm() {
     --seed "$seed"
   )
 
+  if [[ "$arm" == nll_detached ]]; then
+    branch_args+=(--prior-nll-detach-context)
+  fi
   "$python_bin" -c 'import torchcodec' >/dev/null 2>&1 || die "TorchCodec is unavailable in the selected runtime"
   "$python_bin" -m accelerate.commands.launch \
     --multi_gpu \

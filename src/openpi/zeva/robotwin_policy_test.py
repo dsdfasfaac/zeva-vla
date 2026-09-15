@@ -48,6 +48,62 @@ def test_gaussian_action_prior_nll_rejects_shape_mismatch():
         gaussian_action_prior_nll(prior, target)
 
 
+def test_nll_input_detachment_preserves_values_and_prior_head_gradients():
+    torch.manual_seed(34)
+    model = RobotWinActionPrior(task_dim=8, phase_dim=4, context_dim=6, hidden_dim=16)
+    inputs = [torch.randn(2, width, requires_grad=True) for width in (8, 4, 6)]
+    ordinary = model(*inputs)
+    auxiliary = model(*inputs, detach_inputs=True)
+    assert torch.equal(ordinary.mean, auxiliary.mean)
+    assert torch.equal(ordinary.log_std, auxiliary.log_std)
+    loss = gaussian_action_prior_nll(auxiliary, torch.zeros_like(auxiliary.mean))
+    gradients = torch.autograd.grad(loss, inputs + list(model.parameters()), allow_unused=True)
+    assert all(value is None for value in gradients[:3])
+    assert any(value is not None and torch.count_nonzero(value) for value in gradients[3:])
+    flow_gradients = torch.autograd.grad(ordinary.mean.square().mean(), inputs)
+    assert all(torch.count_nonzero(value) for value in flow_gradients)
+
+
+def test_policy_nll_routing_keeps_both_flow_paths_attached():
+    torch.manual_seed(35)
+    policy = RobotWinZevaPolicy.__new__(RobotWinZevaPolicy)
+    torch.nn.Module.__init__(policy)
+
+    class Context(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(12, 6)
+
+        def forward(self, task, phase, *unused):
+            return self.linear(torch.cat([task, phase], dim=-1))
+
+    class Foundation(torch.nn.Module):
+        def forward(self, batch, reduction):
+            # Exercise the actual policy.forward routing, not a real PI model.
+            return policy._active_causal_context.square().mean() + policy._active_action_prior.square().mean()
+
+    policy.memory_context_encoder = Context()
+    policy.action_prior = RobotWinActionPrior(task_dim=8, phase_dim=4, context_dim=6, hidden_dim=16)
+    policy.foundation = Foundation()
+    policy._task_schema = lambda batch: batch["task_schema"]
+    policy._activate_residual_gates = lambda *unused: None
+    policy._foundation_rng_state_override = None
+    task = torch.randn(2, 8, requires_grad=True)
+    phase = torch.randn(2, 4)
+    batch = {"task_schema": task}
+    ordinary_flow, ordinary_prior = policy(batch, bank_phase_token=phase)
+    flow, auxiliary = policy(batch, bank_phase_token=phase, prior_nll_detach_context=True)
+    assert torch.equal(flow, ordinary_flow)
+    assert torch.equal(auxiliary.mean, ordinary_prior.mean)
+    shared = [task] + list(policy.memory_context_encoder.parameters())
+    nll = gaussian_action_prior_nll(auxiliary, torch.zeros_like(auxiliary.mean))
+    assert all(x is None for x in torch.autograd.grad(nll, shared, allow_unused=True))
+    inputs = shared + list(policy.action_prior.parameters())
+    gradients = torch.autograd.grad(flow, inputs, allow_unused=True)
+    assert all(g is not None and torch.count_nonzero(g) for g in gradients[:len(shared)])
+    assert any(g is not None and torch.count_nonzero(g) for g in gradients[len(shared):])
+
+
 def test_frozen_foundation_checkpointing_keeps_real_layers_in_eval_mode():
     class Core(torch.nn.Module):
         def __init__(self):

@@ -54,9 +54,17 @@ norms 7.62x/8.45x but did not improve H15: error rose 0.10341% versus the 0.01
 arm, and both residual-on paths were slightly worse than their own off paths.
 This does not support extending the stronger-gate run; it is not a significance
 claim or evidence that ZTE cannot work. No new full training or formal rollout
-has started. A read-only flow-versus-NLL gradient check is now running on the
-same 32 fixed training decisions for both checkpoints, with no optimizer or
-checkpoint writes; results are pending. This is not a new matched-Base
+has started. The read-only gradient check completed on 32 fixed training
+decisions: weighted NLL gradients in the shared memory encoder were 50–1,014x
+the flow gradients, with negative alignment in three of four batches in each
+arm. These are local raw-gradient observations, not Adam-update ratios or
+causal proof of rollout failures. An opt-in NLL-only input-stop-gradient route
+passed direct Torch and real-weight routing checks: flow/NLL values and flow
+gradient norms were unchanged, while NLL-to-shared-feature gradients became
+zero. A preregistered 100-step candidate using this routing has now been
+dispatched; optimizer progress and validation benefit are not yet confirmed.
+See the [gradient evidence and routing scope](docs/ZTEV2_OBJECTIVE_GRADIENTS_20260915.md).
+This is not a new matched-Base
 performance result or a test-label gate sweep. See the
 [fixed design and execution record](docs/ZTEV2_GATE_MECHANISM_20260915.md).
 

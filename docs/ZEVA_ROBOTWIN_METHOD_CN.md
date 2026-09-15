@@ -1,5 +1,9 @@
 # ZeVA–RoboTwin：基于已训练 PI0.5 的因果记忆增强方法
 
+**当前训练候选（2026-09-15）：** NLL-only共享输入stop-gradient已通过真实模型的32样本路由检查：flow/NLL值和flow梯度范数不变，共享task/context的NLL梯度为0，prior head的NLL梯度范数保留。固定100步候选已在aigc29四卡启动，global256、AE5e-6/new5e-5、gate0.01、Gaussian NLL和H50/H15等不变；新建optimizer/adapter，不从旧ZeVA续训。尚未确认optimizer进度，无收益结论。完成后对照原coupled gate001末步及各自off/fixed Base；这不是正式成功率交付。[合同、测试与执行记录](ZTEV2_OBJECTIVE_GRADIENTS_20260915.md)。
+
+**梯度诊断结果与改动（2026-09-15）：** 两臂32条同训练样本的检查均完成exit0。加权NLL对memory encoder的梯度范数为flow的50–1014倍，两臂各3/4批次方向冲突；不将小样本原始梯度比外推为Adam更新或闭环因果结论。已实现默认关闭的NLL-only输入stop-gradient：NLL继续训练prior head，但不回传共享task/context；flow的两条残差路径保持连通。新路由正在隔离验证，尚未训练。[完整证据与边界](ZTEV2_OBJECTIVE_GRADIENTS_20260915.md)。
+
 **限定梯度诊断（2026-09-15，运行中）：** gate对照未显示收益后，已在两臂000100上启动相同32条固定训练decision的flow/加权NLL梯度范数和夹角检查。无optimizer、无checkpoint写入；不是新训练，也不包含Adam/clipping/preserve的完整更新归因。尚无梯度结果，详细范围及PID见[执行记录](ZTEV2_GATE_MECHANISM_20260915.md)。
 
 **机制实验结论（2026-09-15 19:19）：** 两种gate均完成100步及5874决策验证。gate0.10使context/prior残差范数增大7.62/8.45倍，但H15误差比0.01臂高0.10341%，两臂开启残差也都略差于关闭。当前短程结果不支持简单放大初始化，不据此加长训练；小差异不作显著性或闭环结论。后续限定检查flow与加权NLL对新模块的梯度大小/方向，截至此时尚未启动。完整原始指标与限制见[实验记录](ZTEV2_GATE_MECHANISM_20260915.md)。

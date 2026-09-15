@@ -164,7 +164,13 @@ class RobotWinActionPrior(nn.Module):
         task_schema: torch.Tensor,
         phase_token: torch.Tensor,
         causal_context: torch.Tensor,
+        *,
+        detach_inputs: bool = False,
     ) -> RobotWinGaussianActionPrior:
+        if detach_inputs:
+            task_schema = task_schema.detach()
+            phase_token = phase_token.detach()
+            causal_context = causal_context.detach()
         parameters = self.network(torch.cat([task_schema, phase_token, causal_context], dim=-1))
         parameters = parameters.view(-1, ROBOTWIN_ACTION_HORIZON, ROBOTWIN_ACTION_DIM, 2)
         mean = parameters[..., 0]
@@ -1657,8 +1663,13 @@ class RobotWinZevaPolicy(nn.Module):
         cached_base_actions: torch.Tensor | None = None,
         task_goal_embedding: torch.Tensor | None = None,
         foundation_reduction: str = "mean",
+        prior_nll_detach_context: bool = False,
     ):
         """Train the PI0.5 flow policy with Zeva Gaussian-prior conditioning."""
+        if prior_nll_detach_context and (
+            bank_phase_token is None or foundation_only or output_correction or output_residual
+        ):
+            raise ValueError("NLL-only input detachment requires the bank-conditioned flow path")
         if foundation_only:
             return self.foundation(batch, reduction=foundation_reduction)
         if output_correction:
@@ -1750,6 +1761,13 @@ class RobotWinZevaPolicy(nn.Module):
                 foundation_output = self.foundation(batch, reduction=foundation_reduction)
             finally:
                 self._clear_active_residuals()
+            if prior_nll_detach_context:
+                # Keep the original attached prior in the flow graph. Only
+                # the separately returned Gaussian NLL prior stops gradients
+                # into shared task/context features; the prior head still learns.
+                action_prior = self.action_prior(
+                    task_schema, bank_phase_token, causal_context, detach_inputs=True
+                )
             return foundation_output, action_prior
         if previous_image is None or effect_image is None or executed_actions is None:
             raise ValueError("Joint causal training requires previous/effect images and executed actions.")

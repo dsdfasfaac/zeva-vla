@@ -129,6 +129,9 @@ class Args:
     warmup_steps: int = 500
     # BehaviorVLA sums Gaussian NLL over action dimensions and scales it by 0.01.
     prior_loss_weight: float = 0.01
+    # Experimental auxiliary-gradient routing. Flow conditioning stays attached;
+    # Gaussian NLL updates its head but not shared task/context features.
+    prior_nll_detach_context: bool = False
     preserve_loss_weight: float = 1.0
     # Positive margin required of residual-on relative to the matched
     # residual-off forward.  Zero preserves the historical non-regression
@@ -1325,6 +1328,7 @@ def _losses(
     *,
     training: bool,
     return_diagnostics: bool = False,
+    prior_nll_detach_context: bool = False,
 ) -> dict[str, torch.Tensor]:
     unwrapped = policy.module if hasattr(policy, "module") else policy
     if foundation_rng_state is not None:
@@ -1346,6 +1350,7 @@ def _losses(
         injection_confidence=injection_confidence,
         prior_residual_mask=prior_residual_mask,
         foundation_reduction="none",
+        **({"prior_nll_detach_context": True} if prior_nll_detach_context else {}),
     )
     flow_per_sample = _foundation_loss(foundation_output, reduction="none")
     flow = flow_per_sample.mean()
@@ -2509,6 +2514,7 @@ def evaluate(
                     args.prior_residual_dropout_probability,
                     paired_improvement_margin=0.0,
                     prior_supervision_horizon=args.prior_injection_horizon,
+                    prior_nll_detach_context=args.prior_nll_detach_context,
                     training=False,
                     return_diagnostics=diagnostics_enabled,
                 )
@@ -2664,6 +2670,8 @@ def main(args: Args) -> None:
         "output_correction",
         "output_residual",
     }
+    if args.prior_nll_detach_context and args.training_variant != "zeva":
+        raise ValueError("NLL context detachment is restricted to the standard zeva variant")
     prior_only = args.training_variant in {"prior_adapter", "prior_zeva"}
     action_expert_control = args.training_variant == "action_expert_control"
     output_correction = args.training_variant == "output_correction"
@@ -3287,6 +3295,7 @@ def main(args: Args) -> None:
                             float(args.baseline_preserve_interval) if sample_baseline else 1.0
                         ),
                         prior_supervision_horizon=args.prior_injection_horizon,
+                        prior_nll_detach_context=args.prior_nll_detach_context,
                         training=True,
                     )
                 accelerator.backward(micro_losses["total"] / args.gradient_accumulation_steps)

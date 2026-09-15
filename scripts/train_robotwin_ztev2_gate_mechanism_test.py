@@ -38,6 +38,17 @@ class GateMechanismContractTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_nll_routing_is_separate_opt_in_experiment(self) -> None:
+        self.assertIn('if [[ "$arm" == nll_detached ]]; then\n    branch_args+=(--prior-nll-detach-context)', self.source)
+        self.assertIn('nll_detached) arms=(nll_detached)', self.source)
+        self.assertIn('"prior_nll_detach_context": arm == "nll_detached"', self.source)
+        self.assertIn('nll-routing-20260915}', self.source)
+        config = json.loads((ROOT / 'configs/robotwin_ztev2_nll_routing_20260915.json').read_text())
+        self.assertTrue(config['prior_nll_detach_context'])
+        self.assertEqual(config['steps'], 100)
+        self.assertEqual(config['global_batch'], 256)
+        self.assertEqual(config['initial_residual_gate_probability'], 0.01)
+
     def test_diagnostic_uses_uncapped_full_validation_api(self) -> None:
         diagnostic = self.source.split('"$zeva_root/scripts/eval_robotwin_stage2_diagnostics.py"', 1)[1]
         self.assertIn("--eval-batches 0", diagnostic)

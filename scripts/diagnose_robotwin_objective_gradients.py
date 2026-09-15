@@ -42,6 +42,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--detach-nll-context", action="store_true")
     cli = parser.parse_args()
     if cli.output.exists():
         raise FileExistsError(cli.output)
@@ -105,6 +106,7 @@ def main() -> None:
             policy, processed, bank_batch, confidence, None, None,
             args.prior_loss_weight, args.preserve_loss_weight, args.gate_regularization_weight,
             args.prior_residual_dropout_probability,
+            prior_nll_detach_context=cli.detach_nll_context,
             prior_supervision_horizon=args.prior_injection_horizon, training=True)
         flow = torch.autograd.grad(losses["flow"], parameters, retain_graph=True, allow_unused=True)
         prior = torch.autograd.grad(args.prior_loss_weight * losses["prior"], parameters, allow_unused=True)
@@ -131,6 +133,7 @@ def main() -> None:
               "audited_parameters_unchanged": True, "torch_compile": False,
               "gradient_checkpointing": False, "training_masks_enabled": True,
               "objective_horizon": 50, "prior_weight": args.prior_loss_weight,
+              "prior_nll_detach_context": cli.detach_nll_context,
               "excluded_from_attribution": ["preserve hinge", "gate regularizer", "clipping", "Adam state"],
               "caveat": "32 fixed training decisions; local raw-gradient attribution, not optimizer-update or generalization proof",
               "observations": observations}
