@@ -21,7 +21,11 @@ gate0.10的context/prior残差范数分别为0.01臂的7.62/8.45倍，但H15 err
 
 ## 下一步边界
 
-停止扩大gate或据此直接加步数。下一项限定检查是：在固定训练样本上，分别测量flow和加权Gaussian NLL对新memory/task/prior模块的梯度范数及方向夹角，识别辅助目标是否主导或与动作目标冲突；loss数值大小本身不能证明梯度主导。该检查不更新optimizer，不使用正式成功标签，不重训Stage1或扩展已取消的frozen-probe研究。**截至本记录，梯度检查尚未启动，新一轮策略训练也未启动。**
+停止扩大gate或据此直接加步数。限定检查是：在固定训练样本上，分别测量flow和加权Gaussian NLL对新memory/task/prior模块的梯度范数及方向夹角，检查辅助目标与动作目标的局部梯度关系；loss数值大小本身不能证明梯度主导。
+
+**2026-09-15梯度检查已启动，尚无结果。** 同一seed20260915从train集合确定32条decision，4批×8，两臂000100分别加载；保留phase noise/memory/prior dropout，比较同一次forward图上的H50 flow与0.01×Gaussian NLL梯度。覆盖task projector、memory encoder、action prior、两种残差投影及router；未使用正式成功标签。仅为局部梯度诊断，不模拟global256的optimizer更新，不包含preserve hinge、gate regularizer、clipping或Adam预条件，不能单凭梯度比值宣称某项损失控制了实际更新。
+
+执行目录`/mnt/100T/users/dingxin/VLA/objective-gradient-20260915-ovDR64`，aigc29 GPU0/1；两臂监督进程PID387689/387694，日志gate001.log/gate010.log，成功后各写一个新JSON。未创建optimizer、未写checkpoint，检查前后新模块参数逐张量不变；autograd.grad使用eager且关闭gradient checkpointing以兼容多目标求导，冻结VLM/ZTE和训练模式保持。4项CPU/stdlib统计测试在本地和远程通过，实际模型梯度尚待验证。没有启动新策略训练、Stage1重训或已取消的扩展frozen-probe研究。
 
 ## 完整性标记拦截及恢复
 

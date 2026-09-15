@@ -54,8 +54,9 @@ norms 7.62x/8.45x but did not improve H15: error rose 0.10341% versus the 0.01
 arm, and both residual-on paths were slightly worse than their own off paths.
 This does not support extending the stronger-gate run; it is not a significance
 claim or evidence that ZTE cannot work. No new full training or formal rollout
-has started. The next bounded check is flow-versus-NLL gradient magnitude and
-direction on training samples (not yet running). This is not a new matched-Base
+has started. A read-only flow-versus-NLL gradient check is now running on the
+same 32 fixed training decisions for both checkpoints, with no optimizer or
+checkpoint writes; results are pending. This is not a new matched-Base
 performance result or a test-label gate sweep. See the
 [fixed design and execution record](docs/ZTEV2_GATE_MECHANISM_20260915.md).
 
