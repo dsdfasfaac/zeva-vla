@@ -58,9 +58,11 @@ incremental ZTE utility. These are point estimates, not significance or
 closed-loop success-rate claims. No gate sweep, checkpoint reselection, or
 extra training has followed this result. The fixed-seed/instruction evaluation
 controller started on aigc28 at 2026-09-15 01:00 CST after placement checks;
-Base closed-loop evaluation completed at 110/200 (55.0%), below the declared
-57% reference floor. Anchor evaluation is in progress (2026-09-15 03:57 CST);
-the new ZeVA result and complete paired comparison are still pending.
+The completed paired evaluation (2026-09-15) is Base 110/200 (55.0%),
+ZeVA 110/200 (55.0%), and untouched Anchor 104/200 (52.0%). ZeVA's measured
+delta is zero (paired 95% CI −7.5 to +8.0 percentage points); Base is below
+the declared 57% reference floor. Acceptance is false. See the
+[complete ten-task results](docs/ROBOTWIN_FIXED_ANCHOR_PAIRED_RESULTS_20260915.md).
 Stage1's four auxiliary
 metrics still clear their configured reference lines and are not official
 BehaviorVLA gates. The preservation hinge is expert-loss reweighting, not

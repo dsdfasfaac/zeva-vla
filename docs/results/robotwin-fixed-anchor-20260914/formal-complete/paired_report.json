@@ -1,0 +1,80 @@
+{
+  "absolute_delta": 0.0,
+  "anchor_success_rate": 0.52,
+  "baseline_minus_anchor": 0.030000000000000027,
+  "baseline_success_rate": 0.55,
+  "discordant_pairs": {
+    "baseline_only": 32,
+    "zeva_only": 32
+  },
+  "exact_mcnemar_p": 1.0,
+  "paired_bootstrap_95ci": [
+    -0.075,
+    0.08
+  ],
+  "schema": "zeva-robotwin-formal-paired-report-v1",
+  "tasks": [
+    {
+      "baseline_success_rate": 0.85,
+      "delta": 0.09999999999999998,
+      "task": "beat_block_hammer",
+      "zeva_success_rate": 0.95
+    },
+    {
+      "baseline_success_rate": 0.5,
+      "delta": 0.050000000000000044,
+      "task": "blocks_ranking_rgb",
+      "zeva_success_rate": 0.55
+    },
+    {
+      "baseline_success_rate": 0.35,
+      "delta": -0.09999999999999998,
+      "task": "blocks_ranking_size",
+      "zeva_success_rate": 0.25
+    },
+    {
+      "baseline_success_rate": 0.4,
+      "delta": -0.050000000000000044,
+      "task": "handover_block",
+      "zeva_success_rate": 0.35
+    },
+    {
+      "baseline_success_rate": 0.3,
+      "delta": -0.19999999999999998,
+      "task": "hanging_mug",
+      "zeva_success_rate": 0.1
+    },
+    {
+      "baseline_success_rate": 1.0,
+      "delta": 0.0,
+      "task": "pick_dual_bottles",
+      "zeva_success_rate": 1.0
+    },
+    {
+      "baseline_success_rate": 0.25,
+      "delta": 0.2,
+      "task": "put_bottles_dustbin",
+      "zeva_success_rate": 0.45
+    },
+    {
+      "baseline_success_rate": 0.3,
+      "delta": 0.0,
+      "task": "scan_object",
+      "zeva_success_rate": 0.3
+    },
+    {
+      "baseline_success_rate": 0.65,
+      "delta": 0.09999999999999998,
+      "task": "stack_bowls_three",
+      "zeva_success_rate": 0.75
+    },
+    {
+      "baseline_success_rate": 0.9,
+      "delta": -0.09999999999999998,
+      "task": "stamp_seal",
+      "zeva_success_rate": 0.8
+    }
+  ],
+  "total_paired_episodes": 200,
+  "zeva_success_rate": 0.55
+}

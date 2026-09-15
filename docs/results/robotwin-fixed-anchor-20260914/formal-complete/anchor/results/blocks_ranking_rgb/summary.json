@@ -1,0 +1,214 @@
+{
+  "task_name": "blocks_ranking_rgb",
+  "task_config": "zeva_randomized",
+  "policy_name": "zeva_policy",
+  "ckpt_setting": "untouched-best-v1-h15",
+  "checkpoint_path": null,
+  "config_file": null,
+  "use_ema_weights": true,
+  "instruction_type": "seen",
+  "seed": 0,
+  "absolute_start_seed": 1000,
+  "fixed_seed_sequence": true,
+  "seed_manifest": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-fixed-anchor-pair-20260914/seed_manifest.json",
+  "evaluated_seeds": [
+    1000,
+    1001,
+    1003,
+    1007,
+    1008,
+    1010,
+    1011,
+    1012,
+    1013,
+    1014,
+    1015,
+    1016,
+    1017,
+    1019,
+    1020,
+    1021,
+    1022,
+    1023,
+    1024,
+    1025
+  ],
+  "model_seed_policy": "continuous",
+  "episodes": 20,
+  "successes": 8,
+  "success_rate": 0.4,
+  "domain_id": 10,
+  "fps": 30.0,
+  "resolution": "480",
+  "view_resize_size": "480x640",
+  "chunk_length": 50,
+  "execute_horizon": 15,
+  "action_dim": 16,
+  "num_steps": 30,
+  "guidance": 1.0,
+  "shift": 10.0,
+  "sigma_max": 80.0,
+  "eval_video_log": true,
+  "episode_results": [
+    {
+      "episode_index": 0,
+      "seed": 1000,
+      "success": true,
+      "steps": 513,
+      "step_limit": 1200,
+      "instruction": "Grab red block, position it on the left. Next, grab green block to place beside red block, then grab blue block and set it to the right of green block."
+    },
+    {
+      "episode_index": 1,
+      "seed": 1001,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Start with red block on the left, add green block next to it, and then place blue block on the right."
+    },
+    {
+      "episode_index": 2,
+      "seed": 1003,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "First, use the left arm to grab red block and place it on the left. Then grab green block with the left arm and position it next to red block, followed by grabbing blue block with the right arm and placing it next to green block."
+    },
+    {
+      "episode_index": 3,
+      "seed": 1007,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Use the right arm for red block, then the right arm for green block, and the right arm for blue block, arranging them left to right."
+    },
+    {
+      "episode_index": 4,
+      "seed": 1008,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Using the left arm, the left arm, and the right arm, align red block, green block, and blue block in a row from left to right."
+    },
+    {
+      "episode_index": 5,
+      "seed": 1010,
+      "success": true,
+      "steps": 436,
+      "step_limit": 1200,
+      "instruction": "Position red block, green block, and blue block from left to right in the specified sequence."
+    },
+    {
+      "episode_index": 6,
+      "seed": 1011,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "With the left arm, the right arm, and the right arm, place red block, green block, and blue block sequentially from left to right as red, green, blue."
+    },
+    {
+      "episode_index": 7,
+      "seed": 1012,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Start by grabbing red block, place it on the leftmost side. Next, position green block beside red block, and finally set blue block to the right of green block."
+    },
+    {
+      "episode_index": 8,
+      "seed": 1013,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Using the left arm, the right arm, and the left arm, set red block, green block, and blue block from left to right in the sequence red, green, blue."
+    },
+    {
+      "episode_index": 9,
+      "seed": 1014,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Pick red block using the right arm, place it far left. Then grab green block with the left arm, position next to red block. Lastly, grab blue block using the left arm and set right of green block."
+    },
+    {
+      "episode_index": 10,
+      "seed": 1015,
+      "success": true,
+      "steps": 445,
+      "step_limit": 1200,
+      "instruction": "Place red block first, set green block beside it, and complete the row by positioning blue block."
+    },
+    {
+      "episode_index": 11,
+      "seed": 1016,
+      "success": true,
+      "steps": 459,
+      "step_limit": 1200,
+      "instruction": "Grab and place red block first, followed by green block, and finish with blue block in a row."
+    },
+    {
+      "episode_index": 12,
+      "seed": 1017,
+      "success": true,
+      "steps": 472,
+      "step_limit": 1200,
+      "instruction": "Use the right arm for red block to set it leftmost, continue with the left arm to position green block next to red block, and finish by placing blue block using the left arm to the right of green block."
+    },
+    {
+      "episode_index": 13,
+      "seed": 1019,
+      "success": true,
+      "steps": 532,
+      "step_limit": 1200,
+      "instruction": "Pick up red block, green block, and blue block in sequence and position them in a left-to-right row."
+    },
+    {
+      "episode_index": 14,
+      "seed": 1020,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Arrange red block, green block, and blue block in a row using the right arm, the right arm, and the left arm, keeping the left-to-right order."
+    },
+    {
+      "episode_index": 15,
+      "seed": 1021,
+      "success": true,
+      "steps": 469,
+      "step_limit": 1200,
+      "instruction": "red block, then green block, and finally blue block should be placed in a row from left to right."
+    },
+    {
+      "episode_index": 16,
+      "seed": 1022,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Position red block, green block, and blue block on a surface from left to right in the order red, green, blue."
+    },
+    {
+      "episode_index": 17,
+      "seed": 1023,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Use the right arm to place red block on the left, then use the left arm for green block beside red block, and finally the right arm for blue block next to green block."
+    },
+    {
+      "episode_index": 18,
+      "seed": 1024,
+      "success": true,
+      "steps": 530,
+      "step_limit": 1200,
+      "instruction": "Using the right arm, the left arm, and the right arm, set red block, green block, and blue block from left to right in the sequence red, green, blue."
+    },
+    {
+      "episode_index": 19,
+      "seed": 1025,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Position red block first, followed by green block, and end with blue block in a row from left to right."
+    }
+  ]
+}
