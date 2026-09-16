@@ -1,8 +1,10 @@
 # ZeVA v2：保护 Base action expert 的梯度分路实验
 
-状态（2026-09-16 20:48 北京时间）：新候选在 aigc29 GPU0–3 正常完成 1000/1000 optimizer steps，`001000/model.safetensors`、`zeva_adapter.pth`、`training_state.pt` 及完整验证报告均已保存，训练控制器写入 `COMPLETE` 后退出。运行目录为 `/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gradient-route-full-20260916-a29/gradient_route_full`，独立源码快照为 `/mnt/100T/users/dingxin/VLA/gradient-route-test-20260916-PZL6Hh`。**当前路由已未通过预注册的第一道离线门槛，不进入正式闭环评测。** 对同预算训练 Base1000 的严格同噪声诊断正在进行，用于归因基础路径是否被保护，而不是重新决定失败门槛；尚无新成功率。
+状态（2026-09-16 21:04 北京时间）：新候选在 aigc29 GPU0–3 正常完成 1000/1000 optimizer steps，`001000/model.safetensors`、`zeva_adapter.pth`、`training_state.pt` 及完整验证报告均已保存，训练控制器写入 `COMPLETE` 后退出。运行目录为 `/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gradient-route-full-20260916-a29/gradient_route_full`，独立源码快照为 `/mnt/100T/users/dingxin/VLA/gradient-route-test-20260916-PZL6Hh`。**当前路由未通过预注册的第一道离线门槛，不进入正式闭环评测。** 同预算训练 Base1000 的严格同噪声诊断也已完成；这是基础路径归因，不改变失败结论。暂无新成功率。
 
 全 5874 条 validation5 决策、batch16、seed1000、样本顺序 SHA `a9c6a8e30aa3f7ecbfcb9ce81d6a141ef563300d41e339a22d06fb75a0418ac1` 的前 H15 flow error：residual-on `0.010095753706991673`，自身 residual-off `0.010094467550516129`。开启残差比关闭高 **0.012741%**，不满足“必须优于自身 off”。当前诊断中固定训练起点 Base004500 为 `0.010251136496663094`，但起点不是同预算训练 Base，不能代替第二道门槛。[原始全量报告](results/robotwin-gradient-route-20260916/gradient-route1000-vs-base4500-b16-a29.json)。
+
+同一 5874 条、相同顺序/噪声/seed 下的同预算普通 Base1000 为 `0.01009312178939581`；本轮 residual-off 比它高 `0.013333%`，residual-on 比它高 `0.026076%`。与旧 NLL-detached 方案的基础路径差距 `0.72451%` 相比，梯度分路明显缩小了基础路径漂移，但并未使新增 ZeVA 残差产生正向 H15 增益。[同预算原始报告](results/robotwin-gradient-route-20260916/gradient-route1000-vs-base1000-b16-a29.json)。这些极小的均值差不作统计显著性或闭环成功率结论；预注册的数值门槛仍未通过。
 
 ## 可证伪假设
 

@@ -54,8 +54,11 @@ Two-rank DDP, real PI0.5/Stage1 gradient-equivalence, and four-rank one-step
 smokes passed. The 1,000-step training completed, but its full 5,874-decision
 H15 validation **failed the first utility condition**: residual-on error
 `0.0100957537` versus its own off `0.0100944676` (0.01274% worse). It will
-not enter formal rollout. A same-noise comparison with the trained Base1000
-is running to diagnose the action-expert path, not to overturn this failure;
+not enter formal rollout. The same-noise, same-5,874-decision trained Base1000
+comparison is complete: Base1000 H15 error `0.0100931218`; this candidate's
+residual-off and residual-on paths are 0.01333% and 0.02608% worse,
+respectively. Gradient routing greatly reduced the Base-path drift seen in
+the prior NLL-detached trial, but did not establish positive residual utility;
 there is no new success rate. Stage1/bank/VLM, task-language/H15 recurrence,
 global batch 256 and the H50/H15 RoboTwin protocol remain unchanged. See the
 [design, raw checks and fixed decision rule](docs/ZTEV2_GRADIENT_ROUTE_20260916.md).
