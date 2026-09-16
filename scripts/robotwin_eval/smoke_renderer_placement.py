@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import gc
 import json
 import os
 from pathlib import Path
@@ -41,6 +42,7 @@ def main() -> None:
     parser.add_argument("--hook", required=True, type=Path)
     parser.add_argument("--expected-pci", required=True)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--explicit-cleanup", action="store_true")
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError(f"Refusing to overwrite health proof: {args.output}")
@@ -102,6 +104,16 @@ def main() -> None:
     time.sleep(8)
     if not frame_passed:
         raise RuntimeError("Rendered frame did not satisfy formal placement/shape/finite checks")
+    if args.explicit_cleanup:
+        # Distinguish a rendering failure from a C++ teardown failure.  This
+        # experiment is opt-in and does not alter the formal evaluator.
+        print("renderer-cleanup: camera/scene", flush=True)
+        del image, camera, scene
+        gc.collect()
+        print("renderer-cleanup: engine/renderer/device", flush=True)
+        del engine, renderer, device
+        gc.collect()
+        print("renderer-cleanup: complete", flush=True)
 
 
 if __name__ == "__main__":
