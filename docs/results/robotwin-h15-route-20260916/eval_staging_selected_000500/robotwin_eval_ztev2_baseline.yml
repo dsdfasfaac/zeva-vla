@@ -1,0 +1,9 @@
+{
+  "policy_name": "zeva_policy",
+  "handoff_root": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1",
+  "foundation_checkpoint": "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1",
+  "device": "cuda",
+  "model_rng_seed": 20260907,
+  "stage2_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/baseline/001000",
+  "baseline_only": true
+}

@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "closed_loop_evaluation": false,
+  "synthetic_observations": true,
+  "trained_checkpoint_unchanged": true,
+  "config": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/eval_staging_selected_000500/robotwin_eval_ztev2_zeva.yml",
+  "config_sha256": "5f20b2edd0948856e644925ec01cf30af6f57b1ac0c2b768bd93d257a32f4c35",
+  "stage2_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/000500",
+  "torch_version": "2.7.1+cu126",
+  "torch_path": "/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914/torch/__init__.py",
+  "cuda_visible_devices": "GPU-23cf0ed2-0f7a-f425-7457-781b444b2811",
+  "device_uuid": "23cf0ed2-0f7a-f425-7457-781b444b2811",
+  "first_shape": [
+    50,
+    16
+  ],
+  "second_shape": [
+    50,
+    16
+  ],
+  "committed_horizon": 15,
+  "recurrent_transitions": 1,
+  "elapsed_seconds": 119.6644167760387
+}
