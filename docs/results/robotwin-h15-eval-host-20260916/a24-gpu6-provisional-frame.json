@@ -1,0 +1,20 @@
+{
+  "cuda_visible_devices": "GPU-2e145d56-44e7-7643-311c-be4bdfb69eb0",
+  "device_cuda_id": 0,
+  "device_pci": "0000:ba:00.0",
+  "expected_pci": "00000000:BA:00.0",
+  "finite": true,
+  "frame_shape": [
+    480,
+    640,
+    4
+  ],
+  "hook_path": "/mnt/100T/users/dingxin/VLA/h15-route-test-20260916-19B9I7/scripts/robotwin_eval/eval_policy_client.py",
+  "host": "aigc24",
+  "passed": true,
+  "pid": 235038,
+  "renderer_device": "cuda:0",
+  "schema": "zeva-robotwin-renderer-placement-health-v1",
+  "success_labels_used": false,
+  "vk_icd_filenames": "/usr/share/vulkan/icd.d/nvidia_icd.json"
+}
