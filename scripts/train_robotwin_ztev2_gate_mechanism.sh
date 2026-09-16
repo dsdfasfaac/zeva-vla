@@ -13,9 +13,9 @@ set -euo pipefail
 mode=${1:-both}
 case "$mode" in
   gate001|gate010|both) ;;
-  nll_detached|nll_detached_full|gradient_route_full|gradient_route_smoke) ;;
+  nll_detached|nll_detached_full|gradient_route_full|gradient_route_smoke|h15_route_full|h15_route_smoke) ;;
   *)
-    echo "usage: $0 [gate001|gate010|both|nll_detached|nll_detached_full|gradient_route_full|gradient_route_smoke]" >&2
+    echo "usage: $0 [gate001|gate010|both|nll_detached|nll_detached_full|gradient_route_full|gradient_route_smoke|h15_route_full|h15_route_smoke]" >&2
     exit 2
     ;;
 esac
@@ -28,6 +28,8 @@ elif [[ "$mode" == nll_detached_full ]]; then
   contract_config="$zeva_root/configs/robotwin_ztev2_nll_routing_full_20260915.json"
 elif [[ "$mode" == gradient_route_full || "$mode" == gradient_route_smoke ]]; then
   contract_config="$zeva_root/configs/robotwin_ztev2_gradient_route_full_20260916.json"
+elif [[ "$mode" == h15_route_full || "$mode" == h15_route_smoke ]]; then
+  contract_config="$zeva_root/configs/robotwin_ztev2_h15_route_20260916.json"
 fi
 
 handoff=${ROBOTWIN_HANDOFF:-/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1}
@@ -47,6 +49,11 @@ task_subset=${ROBOTWIN_TASK_SUBSET:-$zeva_root/configs/robotwin_zeva_advantage10
 base_checkpoint=${ROBOTWIN_TRAINED_BASE:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/advantage10-ztev2-schedulerfix-pair-20260911/baseline/004500}
 base_sha256=${ROBOTWIN_TRAINED_BASE_SHA256:-2f106633403e5f2146bf7cd4f56858cbfdb856e9b2966d1c724a79ac4948c84f}
 base_manifest_sha256=${ROBOTWIN_TRAINED_BASE_MANIFEST_SHA256:-b768c6ff917c94491970caae8a9f814f139b53a66cf7dc0fb9393a3333473750}
+if [[ "$mode" == h15_route_full || "$mode" == h15_route_smoke ]]; then
+  base_checkpoint=${ROBOTWIN_TRAINED_BASE:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/baseline/001000}
+  base_sha256=${ROBOTWIN_TRAINED_BASE_SHA256:-bcf1d4f5f3e77926b8b7f798bb983378ad096e3892eed1a66058c5d98ed9bc17}
+  base_manifest_sha256=${ROBOTWIN_TRAINED_BASE_MANIFEST_SHA256:-630d30646bf5a75d6d7207865b7bd572a784d370dec5b8037ebdbc6e9a26c3d0}
+fi
 stage1_root=${ROBOTWIN_STAGE1_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911}
 zte_checkpoint=${ROBOTWIN_ZTE_CHECKPOINT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-scheduler-repair-20260911i/zte_v2_step_004096.pth}
 causal_bank=${ROBOTWIN_CAUSAL_BANK:-$stage1_root/train_causal_bank.pt}
@@ -68,6 +75,8 @@ elif [[ "$mode" == gradient_route_full ]]; then
   run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gradient-route-full-20260916}
 elif [[ "$mode" == gradient_route_smoke ]]; then
   run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gradient-route-smoke-20260916}
+elif [[ "$mode" == h15_route_full || "$mode" == h15_route_smoke ]]; then
+  run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-20260916}
 fi
 
 # The mechanism check is deliberately short, but its optimization/data
@@ -83,6 +92,14 @@ elif [[ "$mode" == gradient_route_smoke ]]; then
   steps=1
   warmup_steps=1
   save_freq=1
+elif [[ "$mode" == h15_route_full ]]; then
+  steps=1000
+  warmup_steps=100
+  save_freq=500
+elif [[ "$mode" == h15_route_smoke ]]; then
+  steps=1
+  warmup_steps=1
+  save_freq=1
 fi
 batch_size=16
 gradient_accumulation_steps=4
@@ -90,6 +107,9 @@ num_processes=4
 num_workers=${NUM_WORKERS:-4}
 eval_batches=1000000
 action_expert_learning_rate=5e-6
+if [[ "$mode" == h15_route_full || "$mode" == h15_route_smoke ]]; then
+  action_expert_learning_rate=0
+fi
 zeva_learning_rate=5e-5
 prior_loss_weight=0.01
 preserve_loss_weight=1.0
@@ -114,6 +134,8 @@ case "$mode" in
   nll_detached_full) arms=(nll_detached_full) ;;
   gradient_route_full) arms=(gradient_route_full) ;;
   gradient_route_smoke) arms=(gradient_route_smoke) ;;
+  h15_route_full) arms=(h15_route_full) ;;
+  h15_route_smoke) arms=(h15_route_smoke) ;;
   both) arms=(gate001 gate010) ;;
 esac
 
@@ -271,12 +293,12 @@ actual_task_retrieval_sha256=$(sha256_file "$task_retrieval")
 
 # The selected 004500 artifact must be the ordinary prior Base, not a ZeVA
 # checkpoint.  Its manifest also pins the untouched foundation identity.
-"$python_bin" - "$base_checkpoint/../manifest.json" "$base_checkpoint" "$foundation_sha256" <<'PY'
+"$python_bin" - "$base_checkpoint/../manifest.json" "$base_checkpoint" "$foundation_sha256" "$mode" <<'PY'
 import json
 from pathlib import Path
 import sys
 
-manifest_path, checkpoint_path, expected_foundation = sys.argv[1:]
+manifest_path, checkpoint_path, expected_foundation, arm = sys.argv[1:]
 payload = json.loads(Path(manifest_path).read_text())
 if payload.get("training_variant") != "baseline":
     raise SystemExit("Base/004500 source manifest is not training_variant=baseline")
@@ -286,8 +308,9 @@ if not isinstance(train_args, dict) or train_args.get("training_variant") != "ba
 identity = payload.get("foundation_identity")
 if not isinstance(identity, dict) or identity.get("model_sha256") != expected_foundation:
     raise SystemExit("Base/004500 manifest foundation SHA256 does not match best-v1")
-if Path(checkpoint_path).name != "004500":
-    raise SystemExit("selected Base checkpoint directory must be named 004500")
+expected_step = "001000" if arm in ("h15_route_full", "h15_route_smoke") else "004500"
+if Path(checkpoint_path).name != expected_step:
+    raise SystemExit(f"selected Base checkpoint directory must be named {expected_step}")
 PY
 
 # This experiment is intentionally fresh.  Neither a resume state nor an old
@@ -373,6 +396,8 @@ port_for_arm() {
     nll_detached_full) printf '%s\n' "${NLL_FULL_MAIN_PROCESS_PORT:-29617}" ;;
     gradient_route_full) printf '%s\n' "${GRADIENT_ROUTE_MAIN_PROCESS_PORT:-29618}" ;;
     gradient_route_smoke) printf '%s\n' "${GRADIENT_SMOKE_MAIN_PROCESS_PORT:-29619}" ;;
+    h15_route_full) printf '%s\n' "${H15_ROUTE_MAIN_PROCESS_PORT:-29620}" ;;
+    h15_route_smoke) printf '%s\n' "${H15_SMOKE_MAIN_PROCESS_PORT:-29621}" ;;
     *) die "unknown gate arm: $1" ;;
   esac
 }
@@ -385,6 +410,7 @@ gate_probability_for_arm() {
     nll_detached_full) printf '%s\n' "0.01" ;;
     gradient_route_full) printf '%s\n' "0.01" ;;
     gradient_route_smoke) printf '%s\n' "0.01" ;;
+    h15_route_full|h15_route_smoke) printf '%s\n' "0.01" ;;
     *) die "unknown gate arm: $1" ;;
   esac
 }
@@ -410,7 +436,8 @@ write_launcher_manifest() {
     "$base_manifest_sha256" "$stage1_language" "$dataset_root" "$task_subset" "$zte_checkpoint" \
     "$zte_sha256" "$causal_bank" "$causal_bank_sha256" "$live_queries" "$live_queries_sha256" \
     "$task_retrieval" "$task_retrieval_sha256" "$dataset_adapter_sha256" "$steps" "$warmup_steps" \
-    "$save_freq" "$batch_size" "$gradient_accumulation_steps" "$num_processes" "$gpu_list" "$seed" <<'PY'
+    "$save_freq" "$batch_size" "$gradient_accumulation_steps" "$num_processes" "$gpu_list" "$seed" \
+    "$action_expert_learning_rate" <<'PY'
 
 import hashlib
 import json
@@ -425,7 +452,7 @@ import sys
     foundation, foundation_sha, base_checkpoint, base_sha, base_manifest_sha, stage1_language,
     dataset_root, task_subset, zte, zte_sha, bank, bank_sha, live_queries, live_queries_sha,
     retrieval, retrieval_sha, adapter_sha, steps, warmup_steps, save_freq, batch_size,
-    accumulation, processes, gpu_list, seed,
+    accumulation, processes, gpu_list, seed, action_expert_learning_rate,
 ) = sys.argv[1:]
 
 def digest(path: str) -> str:
@@ -456,15 +483,16 @@ payload = {
         "steps": int(steps), "warmup_steps": int(warmup_steps), "save_freq": int(save_freq),
         "batch_size_per_gpu": int(batch_size), "gradient_accumulation_steps": int(accumulation),
         "global_batch_size": int(batch_size) * int(accumulation) * int(processes),
-        "action_expert_learning_rate": 5e-6, "zeva_learning_rate": 5e-5,
+        "action_expert_learning_rate": float(action_expert_learning_rate), "zeva_learning_rate": 5e-5,
         "prior_loss_weight": 0.01, "prior_residual_dropout_probability": 0.4,
         "memory_dropout": 0.1, "prior_injection_horizon": 50,
         "action_output_horizon": 50, "executed_horizon": 15, "seed": int(seed),
         "same_seed_and_data_order": True, "fresh_optimizer": True,
         "zero_initialized_dual_residual_projectors": True,
-        "prior_nll_detach_context": arm in ("nll_detached", "nll_detached_full", "gradient_route_full", "gradient_route_smoke"),
-        "decouple_action_expert_gradient": arm in ("gradient_route_full", "gradient_route_smoke"),
-        "smoke_only_no_checkpoint": arm == "gradient_route_smoke",
+        "prior_nll_detach_context": arm in ("nll_detached", "nll_detached_full", "gradient_route_full", "gradient_route_smoke", "h15_route_full", "h15_route_smoke"),
+        "decouple_action_expert_gradient": arm in ("gradient_route_full", "gradient_route_smoke", "h15_route_full", "h15_route_smoke"),
+        "zeva_h15_flow_objective": arm in ("h15_route_full", "h15_route_smoke"),
+        "smoke_only_no_checkpoint": arm in ("gradient_route_smoke", "h15_route_smoke"),
     },
     "lineage": {
         "handoff_root": str(Path(handoff).resolve()), "runtime_root": str(Path(runtime).resolve()),
@@ -507,7 +535,7 @@ payload = {
         "split": "validation5", "full_validation": True, "eval_batches": 1000000,
         "diagnostic_eval_batches": 0,
         "fixed_checkpoint_step": int(steps),
-        "reports": ["H50 flow", "executed H15 flow", "current residual-off", "fixed Base/004500"],
+        "reports": ["H50 flow", "executed H15 flow", "current residual-off", "fixed trained Base"],
         "formal_success_labels_used": False,
         "larger_residual_norm_is_not_utility": True,
     },
@@ -598,13 +626,16 @@ run_arm() {
     --seed "$seed"
   )
 
-  if [[ "$arm" == nll_detached || "$arm" == nll_detached_full || "$arm" == gradient_route_full || "$arm" == gradient_route_smoke ]]; then
+  if [[ "$arm" == nll_detached || "$arm" == nll_detached_full || "$arm" == gradient_route_full || "$arm" == gradient_route_smoke || "$arm" == h15_route_full || "$arm" == h15_route_smoke ]]; then
     branch_args+=(--prior-nll-detach-context)
   fi
-  if [[ "$arm" == gradient_route_full || "$arm" == gradient_route_smoke ]]; then
+  if [[ "$arm" == gradient_route_full || "$arm" == gradient_route_smoke || "$arm" == h15_route_full || "$arm" == h15_route_smoke ]]; then
     branch_args+=(--decouple-action-expert-gradient)
   fi
-  if [[ "$arm" == gradient_route_smoke ]]; then
+  if [[ "$arm" == h15_route_full || "$arm" == h15_route_smoke ]]; then
+    branch_args+=(--zeva-h15-flow-objective)
+  fi
+  if [[ "$arm" == gradient_route_smoke || "$arm" == h15_route_smoke ]]; then
     branch_args+=(--no-save-checkpoints)
   fi
   "$python_bin" -c 'import torchcodec' >/dev/null 2>&1 || die "TorchCodec is unavailable in the selected runtime"
@@ -618,7 +649,7 @@ run_arm() {
     "${branch_args[@]}" \
     >> "$output/train.log" 2>&1
 
-  if [[ "$arm" == gradient_route_smoke ]]; then
+  if [[ "$arm" == gradient_route_smoke || "$arm" == h15_route_smoke ]]; then
     require_file "$output/manifest.json"
     printf '%s\n' "completed four-rank one-step gradient-route smoke $(date --iso-8601=seconds)" \
       | tee "$output/SMOKE_COMPLETE"

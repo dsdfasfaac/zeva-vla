@@ -47,6 +47,16 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 ## Zeva architecture
 
+New bounded experiment (2026-09-16): to test whether H50 training diluted
+the deployed H15 effect, a Base-locked H15 route has passed a real four-rank
+one-step smoke and started its fixed 1,000-step ZeVA-only run. It captures the
+connected PI05 raw flow from the same compiled forward and trains ZeVA on the
+executed H15 prefix; the ordinary trained Base1000 remains fixed at LR 0,
+while PI output stays H50 and execution stays H15. No new closed-loop success
+rate exists yet. The target is at least +8 successes in the frozen 200-episode
+paired protocol, with absolute Base rate and per-task results reported. See
+the [experiment record and decision rule](docs/ZTEV2_H15_ROUTE_20260916.md).
+
 Current experiment (2026-09-16): a separately preregistered gradient-route
 candidate gives the action expert only matched residual-off Base flow gradients
 and gives ZeVA modules the residual-on objective, with independent clipping.

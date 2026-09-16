@@ -44,7 +44,47 @@ from openpi.zeva.stage1_checkpoint import LEGACY_SCHEMAS
 from openpi.zeva.stage1_checkpoint import V2_SCHEMA
 from openpi.zeva.transition_encoder_v2 import TransitionEncoderV2Config
 from scripts.train_robotwin_stage2 import Args
+from scripts.train_robotwin_stage2 import _ConnectedRawFlowCapture
+from scripts.train_robotwin_stage2 import _connected_executed_flow_per_sample
 from scripts.train_robotwin_stage2 import _manifest
+
+
+class ConnectedH15FlowCaptureTest(unittest.TestCase):
+    def test_same_forward_h50_equivalence_and_h15_gradient(self):
+        class Core(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = torch.nn.Parameter(torch.tensor(2.0))
+                self.calls = 0
+
+            def forward(self, x):
+                self.calls += 1
+                return self.scale * x
+
+        core = Core()
+        capture = _ConnectedRawFlowCapture(core)
+        raw_input = torch.arange(2 * 50 * 32, dtype=torch.float32).reshape(2, 50, 32) / 1000
+        capture.begin()
+        ordinary = core.forward(raw_input)
+        connected = capture.take()
+        h15, h50 = _connected_executed_flow_per_sample(connected, expected_batch_size=2)
+        torch.testing.assert_close(h50, ordinary[:, :, :16].mean(dim=(1, 2)))
+        torch.testing.assert_close(h15, ordinary[:, :15, :16].mean(dim=(1, 2)))
+        h15.mean().backward()
+        torch.testing.assert_close(core.scale.grad, raw_input[:, :15, :16].mean())
+        self.assertEqual(core.calls, 1)
+        self.assertIsNone(capture._raw)
+
+    def test_capture_is_disabled_between_training_calls(self):
+        core = torch.nn.Linear(2, 2)
+        capture = _ConnectedRawFlowCapture(core)
+        core.forward(torch.ones(1, 2))
+        with self.assertRaisesRegex(RuntimeError, "did not invoke"):
+            capture.take()
+        capture.begin()
+        with self.assertRaisesRegex(RuntimeError, r"\[B,H,D\]"):
+            core.forward(torch.ones(1, 2))
+        capture.abort()
 
 
 class Stage2V2ManifestTest(unittest.TestCase):

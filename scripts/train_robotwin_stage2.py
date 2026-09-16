@@ -53,8 +53,8 @@ UNTOUCHED_BEST_V1_MODEL_SHA256 = (
 )
 
 # RoboTwin emits PI0.5 chunks of H50 and executes only the first H15 before
-# the recurrent replan.  Keep this diagnostic constant local to Stage 2: it
-# is deliberately not used by the training loss or any model configuration.
+# the recurrent replan.  The opt-in routed ZeVA objective below may use this
+# executed prefix; the PI0.5 output and ordinary Base loss remain H50.
 ROBOTWIN_EXECUTED_HORIZON = 15
 
 LIVE_QUERY_SCHEMAS = frozenset({
@@ -154,6 +154,10 @@ class Args:
     # because it changes the objective, while preserving the normal path when
     # false.
     decouple_action_expert_gradient: bool = False
+    # Only with gradient routing: optimize the ZeVA branch's flow on the
+    # deployed H15 prefix.  The current-student Base branch still trains on
+    # ordinary H50 flow, and inference still emits H50 chunks.
+    zeva_h15_flow_objective: bool = False
     # A v11 prior is applied only to the executed prefix.  Keep 50 for legacy
     # variants; the v11 launcher sets 15 to match RoboTwin's H15 replan loop.
     prior_injection_horizon: int = 50
@@ -426,6 +430,73 @@ def _restore_diagnostic_rng_state(
     torch.random.set_rng_state(state[0])
     if state[1] is not None:
         torch.cuda.set_rng_state(state[1], device)
+
+
+class _ConnectedRawFlowCapture:
+    """Capture the one connected PI05 core loss already used by a policy call.
+
+    The released PI05Policy invokes ``model.forward`` directly, so a PyTorch
+    module forward hook does not fire.  Wrap the callable *after* optional
+    torch.compile and before DDP instead.  The wrapper never replays the model,
+    never changes its return value, and holds the graph only until ``take``.
+    """
+
+    def __init__(self, core: nn.Module):
+        original_forward = core.forward
+        self._enabled = False
+        self._raw: torch.Tensor | None = None
+        self.h50_equivalence_verified = False
+
+        def capture_forward(*args, **kwargs):
+            output = original_forward(*args, **kwargs)
+            if self._enabled:
+                if self._raw is not None:
+                    raise RuntimeError("More than one PI05 core forward occurred during H15 capture.")
+                raw = output[0] if isinstance(output, tuple) else output
+                if not torch.is_tensor(raw) or raw.ndim != 3:
+                    raise RuntimeError("PI05 core did not return connected [B,H,D] flow errors.")
+                self._raw = raw
+            return output
+
+        core.forward = capture_forward
+
+    def begin(self) -> None:
+        if self._enabled or self._raw is not None:
+            raise RuntimeError("A previous PI05 raw-flow capture was not consumed.")
+        self._enabled = True
+
+    def take(self) -> torch.Tensor:
+        raw = self._raw
+        self._raw = None
+        self._enabled = False
+        if raw is None:
+            raise RuntimeError("PI05Policy did not invoke its core during H15 capture.")
+        return raw
+
+    def abort(self) -> None:
+        self._raw = None
+        self._enabled = False
+
+
+def _connected_executed_flow_per_sample(
+    raw: torch.Tensor,
+    *,
+    expected_batch_size: int,
+    horizon: int = ROBOTWIN_EXECUTED_HORIZON,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Reduce the deployed action prefix while preserving autograd edges."""
+    if raw.ndim != 3 or raw.shape[0] != expected_batch_size:
+        raise ValueError(f"Expected PI05 raw [B,H,D] with B={expected_batch_size}, got {tuple(raw.shape)}.")
+    if raw.shape[1] < horizon or raw.shape[2] < ROBOTWIN_ACTION_DIM:
+        raise ValueError(
+            "PI05 raw flow is smaller than RoboTwin's executed H15/EEF16 contract: "
+            f"{tuple(raw.shape)}."
+        )
+    action_flow = raw[:, :, :ROBOTWIN_ACTION_DIM]
+    return (
+        action_flow[:, :horizon].mean(dim=(1, 2)),
+        action_flow.mean(dim=(1, 2)),
+    )
 
 
 class _ActionExpertGradientRouter:
@@ -1516,6 +1587,7 @@ def _losses(
     return_diagnostics: bool = False,
     prior_nll_detach_context: bool = False,
     prior_residual_mask: torch.Tensor | None = None,
+    executed_flow_capture: _ConnectedRawFlowCapture | None = None,
 ) -> dict[str, torch.Tensor]:
     unwrapped = policy.module if hasattr(policy, "module") else policy
     if foundation_rng_state is not None:
@@ -1539,20 +1611,44 @@ def _losses(
             torch.rand(batch_size, device=processed["action"].device)
             >= prior_residual_dropout_probability
         ).to(processed["action"].dtype)
-    foundation_output, action_prior = policy(
-        processed,
-        bank_phase_token=bank_batch.phase_token,
-        bank_brief_signals=bank_batch.brief_signals,
-        bank_retrieved_signals=bank_batch.retrieved_signals,
-        bank_brief_mask=bank_batch.brief_mask,
-        bank_retrieved_mask=bank_batch.retrieved_mask,
-        injection_confidence=injection_confidence,
-        prior_residual_mask=prior_residual_mask,
-        foundation_reduction="none",
-        **({"prior_nll_detach_context": True} if prior_nll_detach_context else {}),
-    )
+    if executed_flow_capture is not None:
+        executed_flow_capture.begin()
+    try:
+        foundation_output, action_prior = policy(
+            processed,
+            bank_phase_token=bank_batch.phase_token,
+            bank_brief_signals=bank_batch.brief_signals,
+            bank_retrieved_signals=bank_batch.retrieved_signals,
+            bank_brief_mask=bank_batch.brief_mask,
+            bank_retrieved_mask=bank_batch.retrieved_mask,
+            injection_confidence=injection_confidence,
+            prior_residual_mask=prior_residual_mask,
+            foundation_reduction="none",
+            **({"prior_nll_detach_context": True} if prior_nll_detach_context else {}),
+        )
+    except BaseException:
+        if executed_flow_capture is not None:
+            executed_flow_capture.abort()
+        raise
     flow_per_sample = _foundation_loss(foundation_output, reduction="none")
     flow = flow_per_sample.mean()
+    executed_flow = None
+    if executed_flow_capture is not None:
+        raw = executed_flow_capture.take()
+        executed_per_sample, raw_h50_per_sample = _connected_executed_flow_per_sample(
+            raw,
+            expected_batch_size=flow_per_sample.shape[0],
+        )
+        if not executed_flow_capture.h50_equivalence_verified:
+            torch.testing.assert_close(
+                raw_h50_per_sample.detach(),
+                flow_per_sample.detach(),
+                rtol=1e-5,
+                atol=1e-7,
+                msg="Captured PI05 raw H50 differs from ordinary policy H50 loss.",
+            )
+            executed_flow_capture.h50_equivalence_verified = True
+        executed_flow = executed_per_sample.mean()
     target = processed["action"][..., :ROBOTWIN_ACTION_DIM].to(action_prior.mean.dtype)
     prior_horizon = min(int(prior_supervision_horizon), target.shape[1])
     if prior_horizon <= 0:
@@ -1602,7 +1698,10 @@ def _losses(
         if baseline_flow is None
         else F.relu(flow_per_sample - baseline_per_sample).mean()
     )
-    total = flow + prior_weight * prior + preserve_weight * preserve + gate_regularization_weight * gate
+    # The opt-in ZeVA branch is trained on the *deployed* prefix; matched Base
+    # and the historical H50 preserve hinge keep their existing definitions.
+    total_flow = executed_flow if executed_flow is not None else flow
+    total = total_flow + prior_weight * prior + preserve_weight * preserve + gate_regularization_weight * gate
     result = {
         "total": total,
         "flow": flow,
@@ -1623,6 +1722,8 @@ def _losses(
             else prior_residual_mask.detach().mean()
         ),
     }
+    if executed_flow is not None:
+        result["training_flow_h15"] = executed_flow
     if return_diagnostics:
         # ``policy.forward`` already built the exact context and Gaussian
         # prior used by the residual hook.  Expose detached copies only to the
@@ -1674,6 +1775,7 @@ def _gradient_routed_on_forward(
     paired_improvement_margin: float,
     preserve_scale: float,
     prior_supervision_horizon: int,
+    executed_flow_capture: _ConnectedRawFlowCapture | None = None,
 ) -> tuple[dict[str, torch.Tensor], tuple[torch.Tensor, torch.Tensor | None]]:
     """Build only the residual-on loss for opt-in action-expert routing.
 
@@ -1715,6 +1817,7 @@ def _gradient_routed_on_forward(
         prior_supervision_horizon=prior_supervision_horizon,
         prior_nll_detach_context=True,
         prior_residual_mask=prior_residual_mask,
+        executed_flow_capture=executed_flow_capture,
         training=True,
     )
     return on_losses, pair_rng_state
@@ -2481,6 +2584,13 @@ def _manifest(
         },
         "action_expert_gradient_routing": {
             "enabled": args.decouple_action_expert_gradient,
+            "zeva_flow_objective": (
+                "connected_raw_executed_h15"
+                if args.zeva_h15_flow_objective
+                else "ordinary_h50"
+            ),
+            "base_flow_objective": "ordinary_h50",
+            "preserve_hinge_objective": "ordinary_h50",
             "variant": "standard_zeva_only" if args.decouple_action_expert_gradient else None,
             "residual_on": "ZeVA-only total loss; action-expert parameter hooks return zero",
             "residual_off": "current student foundation-only flow; action-expert gradients pass through",
@@ -3032,6 +3142,8 @@ def main(args: Args) -> None:
         args.decouple_action_expert_gradient,
         args.prior_nll_detach_context,
     )
+    if args.zeva_h15_flow_objective and not args.decouple_action_expert_gradient:
+        raise ValueError("The ZeVA H15 objective requires protected action-expert gradient routing.")
     prior_only = args.training_variant in {"prior_adapter", "prior_zeva"}
     action_expert_control = args.training_variant == "action_expert_control"
     output_correction = args.training_variant == "output_correction"
@@ -3245,8 +3357,16 @@ def main(args: Args) -> None:
             "Formal Stage 2 requires global batch 256, got "
             f"{manifest['effective_global_batch_size']}."
         )
-    if not (0 < args.action_expert_learning_rate < args.learning_rate):
-        raise ValueError("Action-expert learning rate must be positive and smaller than the Zeva rate.")
+    valid_action_expert_lr = (
+        args.action_expert_learning_rate == 0
+        if args.zeva_h15_flow_objective
+        else 0 < args.action_expert_learning_rate < args.learning_rate
+    )
+    if not valid_action_expert_lr:
+        raise ValueError(
+            "Action-expert LR must be zero for the explicitly Base-locked H15 experiment, "
+            "or positive and below the ZeVA LR for ordinary Stage 2."
+        )
     if args.prior_loss_weight < 0 or (args.prior_loss_weight == 0 and not action_expert_control):
         raise ValueError(
             "Gaussian action-prior NLL weight must be positive except for "
@@ -3512,6 +3632,11 @@ def main(args: Args) -> None:
                 "Stage 2 resume checkpoint uses a different action-expert gradient-routing "
                 f"contract ({checkpoint_routing} versus {args.decouple_action_expert_gradient})."
             )
+        checkpoint_h15_objective = bool(
+            checkpoint["manifest"].get("train_args", {}).get("zeva_h15_flow_objective", False)
+        )
+        if checkpoint_h15_objective != args.zeva_h15_flow_objective:
+            raise ValueError("Stage 2 resume checkpoint uses a different ZeVA flow horizon objective.")
         load_model(policy.foundation, resume_dir / "model.safetensors", strict=True)
         if zeva_enabled:
             policy.load_adapter(resume_dir / "zeva_adapter.pth")
@@ -3526,6 +3651,13 @@ def main(args: Args) -> None:
         # residuals, rather than compiling the unmodified foundation first.
         torch.set_float32_matmul_precision("high")
         core.forward = torch.compile(core.forward, mode=args.compile_mode)
+
+    # PI05Policy calls core.forward directly, bypassing module forward hooks.
+    # Install this training-only capture outside the compiled callable so the
+    # connected H15 loss is from the *same* PI forward, noise, and timestep.
+    executed_flow_capture = (
+        _ConnectedRawFlowCapture(core) if args.zeva_h15_flow_objective else None
+    )
 
     policy, optimizer, scheduler, train_loader, validation_loader = accelerator.prepare(
         policy, optimizer, scheduler, train_loader, validation_loader
@@ -3718,6 +3850,7 @@ def main(args: Args) -> None:
                             if sample_baseline
                             else 1.0,
                             args.prior_injection_horizon,
+                            executed_flow_capture=executed_flow_capture,
                         )
                         # Complete the residual-on backward before constructing
                         # the second DDP forward.  Building two forwards first
@@ -3793,6 +3926,10 @@ def main(args: Args) -> None:
             progress_bar.set_postfix(
                 loss=f"{float(losses['total'].detach()):.4f}",
                 flow=f"{float(losses['flow'].detach()):.4f}",
+                h15=(
+                    f"{float(losses['training_flow_h15'].detach()):.4f}"
+                    if "training_flow_h15" in losses else "off"
+                ),
                 base=(f"{float(losses['baseline']):.4f}" if baseline_sampled else "skip"),
                 off=(f"{float(off_flow.detach()):.4f}" if off_flow is not None else "skip"),
                 prior=f"{float(losses['prior'].detach()):.4f}",
@@ -3851,6 +3988,10 @@ def main(args: Args) -> None:
                             "step": completed,
                             "train_loss": float(losses["total"]),
                             "train_flow": float(losses["flow"]),
+                            "train_flow_h15": (
+                                float(losses["training_flow_h15"])
+                                if "training_flow_h15" in losses else None
+                            ),
                             "train_residual_off_flow": (
                                 float(losses["residual_off_flow"])
                                 if "residual_off_flow" in losses
