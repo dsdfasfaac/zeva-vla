@@ -72,12 +72,15 @@ the same-budget trained Base, do not extend this routing or promote it to formal
 rollout. Latest completed formal success rates remain **Base55% / ZeVA55%**.
 See [results, fixed budget and launch evidence](docs/ZTEV2_NLL_ROUTING_BUDGET_20260916.md).
 
-The separate 1,000-step candidate has now completed all steps and 5,874
-validation decisions. Its H15 error is 0.0101641398 with residuals versus
-0.0101662474 without them, a 0.02073% internal improvement. This only clears
-the self-off part of the preregistered gate. A read-only, same-batch/noise
-comparison against trained Base1000 is running; no formal rollout has been
-promoted and no new success rate exists yet.
+The separate 1,000-step candidate and its final matched diagnostic have now
+completed. H15 error is 0.0101641398 with residuals versus 0.0101662474 without
+them, a 0.02073% internal improvement, but trained Base1000 is 0.0100931218.
+The candidate remains 0.70363% worse than the matched Base and therefore fails
+the preregistered utility gate. This routing will not receive more steps and is
+not promoted to formal rollout. No new success rate exists; completed formal
+rates remain Base55% / ZeVA55%. The next hypothesis must explicitly address the
+action-expert drift (the candidate residual-off path is 0.72451% worse than Base),
+not repeat the failed NLL-routing budget.
 
 Historical mechanism result (2026-09-15 19:19 CST): the preregistered **100-step
 gate-initialization comparison** (0.01 versus 0.10) completed both arms and all
