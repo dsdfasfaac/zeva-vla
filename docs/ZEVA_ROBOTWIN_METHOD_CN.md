@@ -1,5 +1,7 @@
 # ZeVA–RoboTwin：基于已训练 PI0.5 的因果记忆增强方法
 
+**最新执行状态（2026-09-16）：** aigc29上一次派发虽成功加载PI，但长TMPDIR导致DataLoader的Unix socket路径超限，在首批数据前阻塞；已停止该任务进程树并保留失败日志。短临时路径经过真实描述符传递、4-worker DataLoader及GPU传输验证后，11:19按原1000步设置重新派发，PID1199343，输出为`nll-routing-full-20260916-a29-socketfix/nll_detached_full`；现已确认至少完成2个optimizer steps，已越过首批数据及首次编译。同口径batch16/full对照已完成：旧coupled ZeVA1000的H15误差0.0101869181，训练Base1000为0.0100931218，ZeVA仍差0.92931%。这不是新候选结果，正式成功率仍为55%/55%。[故障、恢复和原始对照](ZTEV2_NLL_ROUTING_BUDGET_20260916.md)。
+
 **当前状态（2026-09-16）：** NLL-only共享输入stop-gradient的100步候选已完成，但未通过预设残差收益条件：H15 on=0.0102772070、off=0.0102754747，开启残差仍差0.01686%。另行预声明的1000步、约2.26 epochs预算检验在aigc24加载PI时遇CUDA timeout，未进入有效训练；保留失败记录后，以同一设置派发到新空闲的aigc29四卡，尚未确认optimizer进度。从Base004500新建optimizer/adapter，不从短轮续训；冻结范围、global256、AE5e-6/new5e-5、gate0.01、Gaussian NLL、双残差和H50/H15不变。aigc24副本已全量哈希核验，重派aigc29使用原数据；GPU均按物理UUID选择，未重置设备或终止其他任务。固定末步须优于自身off和同预算训练Base才考虑正式闭环；若失败不继续延长该路由。最新完整正式结果仍为Base55%、ZeVA55%，没有新成功率。[完整结果、预算与运行记录](ZTEV2_NLL_ROUTING_BUDGET_20260916.md)。
 
 以下较早进度段落是历史快照，不能将其中“运行中/尚未训练”当成当前状态。

@@ -1,5 +1,27 @@
 # NLL 梯度隔离：短轮失败与独立预算检验
 
+## 2026-09-16 11:15 更新：DataLoader 启动故障与对照完成
+
+aigc29 首次尝试已加载 PI 权重，但长 `TMPDIR=.../a29-preflight-cache/tmp` 导致 multiprocessing resource sharer 创建 Unix socket 时报 `AF_UNIX path too long`，DataLoader 在首批数据前阻塞；没有训练进度或 checkpoint。这是本次启动环境配置错误，不是 ZTE/优化目标的实测失败。已核验控制器1155621及其子进程归属，仅对该训练进程树发送 SIGTERM，确认退出；失败输出目录和日志保留。
+
+改用 `mktemp -d /tmp/zv.XXXXXXXX` 创建的短临时路径。远端实际 `resource_sharer.DupFd` 往返、4-worker Torch DataLoader 256个样本及 GPU 传输全部通过，日志 `short-tmp-dataloader-preflight.log`。模型/compile/cache/checkpoint等长期输出仍在共享盘，不向已满的 `/data1` 写入缓存。新的训练重启状态将依据实际日志记录，不将预检通过写成训练已完成。
+
+11:19以同一个未改动的隔离源码快照重新派发，控制器 **PID1199343**，新根目录 `.../zeva-runs/robotwin-v5-h15-tasklang/nll-routing-full-20260916-a29-socketfix/nll_detached_full`；日志 `train-nll-detached-full-a29-socketfix-launch.log`。仅改变临时目录和输出目录，仍是预声明的1000步fresh初始化，不加载失败尝试的optimizer。[重启记录](results/robotwin-nll-routing-full-20260916/launch-a29-socketfix.json)。
+
+**恢复已验证：日志出现1/1000和2/1000，至少两个optimizer steps完成，越过首批数据及首次compile。** 首步含编译耗时约210秒，不能把此时tqdm的累计ETA当成稳定训练速度。[实际训练manifest](results/robotwin-nll-routing-full-20260916/socketfix-manifest.json)确认global256、4卡×batch16×累积4、1000步/warmup100、AE5e-6/new5e-5、TorchCodec/compile和NLL输入隔离；基础权重和Stage1/bank沿袭未变。未完成终检，未产生新成功率。
+
+Luna完成了后续启动器的fail-fast防护：在大模型SHA核验之前，实际执行临时目录下的文件系统Unix socket及`DupFd`管道往返，失败则明确退出，不静默改写TMPDIR。测试直接提取启动器中的探针，而不是复制实现；短路径通过、长路径拒绝。14项标准库测试在本地和aigc29隔离目录`tmpdir-guard-20260916-Pxrelv`通过。没有覆盖当前运行中的旧源码快照；本轮重启依赖已单独完成的实际DataLoader预检，新防护用于后续启动。
+
+同机只读 coupled ZeVA1000 对训练 Base1000 的诊断已完成全部368批、5874决策，batch16/full/seed1000，complete=true、模型哈希和冻结权重核验通过：
+
+| 前H15 flow error | 实测 |
+|---|---:|
+| 原coupled ZeVA1000，残差开启 | 0.01018691808 |
+| 同一ZeVA权重，残差关闭 | 0.01018862426 |
+| 同预算普通训练Base1000 | 0.01009312179 |
+
+残差开启相对自身关闭改善0.01675%，但仍比训练Base差0.92931%。这不是新候选的结果，也不是成功率。相比旧batch8报告，批次形状改变会改变验证随机噪声；不能混用两份报告来声称模型变好或退化。后续新候选须同batch16、样本顺序、seed和同一Base权重重测。[原始报告](results/robotwin-nll-routing-full-20260916/coupled1000-vs-base1000-b16-a29.json)。以下11:15之前的派发状态为历史记录。
+
 ## 已完成的 100 步结果
 
 2026-09-15 23:10（北京时间），`nll-routing-20260915/nll_detached/000100` 完成训练和全部 5,874 个 validation5 决策的只读诊断。模型 SHA256 为 `51d430698504d6abad6a1e8fd4cacc10a8b25d781db6f5161838b9747b1aaf9e`。该候选**没有满足预声明的残差收益条件**，不能将其标为通过。

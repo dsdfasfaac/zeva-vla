@@ -55,7 +55,15 @@ dispatched from Base004500 with a fresh optimizer/adapter, not resumed from the
 short trial. The aigc24 attempt failed with CUDA timeouts while loading PI, before
 optimizer progress; its logs are retained. The same configuration was dispatched
 to newly idle aigc29 GPUs0–3 after host-to-device transfer/CUDA/decoder checks.
-Optimizer progress is not yet confirmed. Frozen modules, LR5e-6/5e-5, global256
+That attempt loaded PI but stalled before its first batch because the supplied
+TMPDIR made multiprocessing socket paths too long. Its owned process tree was
+stopped and logs retained. A short temporary path passed actual descriptor-sharing,
+four-worker DataLoader and GPU-transfer checks; the unchanged training was
+redispatched at 11:19 CST (PID1199343). **At least two optimizer steps are now
+confirmed**, past the first-batch/initial-compile startup boundary.
+The batch16/full matched control diagnostic completed: coupled ZeVA H15 error
+is 0.0101869181 versus trained Base1000 0.0100931218 (0.92931% worse).
+Frozen modules, LR5e-6/5e-5, global256
 and H50/H15 are unchanged.
 The relocated dataset passed full content-hash checks. GPU selection now resolves
 physical UUIDs because CUDA and nvidia-smi ordinals differ on this host.

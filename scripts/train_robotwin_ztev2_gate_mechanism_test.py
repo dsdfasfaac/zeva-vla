@@ -8,6 +8,7 @@ Accelerate, start diagnostics, or launch training.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import re
@@ -37,6 +38,37 @@ class GateMechanismContractTest(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_tmpdir_resource_sharing_probe_accepts_short_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="zeva-tmpdir-", dir="/tmp") as tmpdir:
+            result = self._run_tmpdir_resource_sharing_probe(tmpdir)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_tmpdir_resource_sharing_probe_rejects_overlong_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="zeva-tmpdir-", dir="/tmp") as parent:
+            overlong = Path(parent) / ("x" * 100)
+            overlong.mkdir()
+            result = self._run_tmpdir_resource_sharing_probe(str(overlong))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("TMPDIR resource-sharing preflight failed", result.stderr)
+        self.assertIn("AF_UNIX path too long", result.stderr)
+
+    def _run_tmpdir_resource_sharing_probe(self, tmpdir: str) -> subprocess.CompletedProcess[str]:
+        environment = dict(os.environ)
+        environment["TMPDIR"] = tmpdir
+        return subprocess.run(
+            [sys.executable, "-c", self._tmpdir_resource_sharing_probe_source()],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+            timeout=10,
+        )
+
+    def _tmpdir_resource_sharing_probe_source(self) -> str:
+        marker = 'if ! "$python_bin" - <<\'PY\'\n'
+        probe = self.source.split(marker, 1)[1].split("\nPY\n", 1)[0]
+        return probe
 
     def test_gpu_selectors_resolve_to_unique_physical_uuids(self) -> None:
         block = self.source.split('resolved_gpu_ids=()', 1)[1].split('torch_version=$(', 1)[0]

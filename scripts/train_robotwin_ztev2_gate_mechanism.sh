@@ -163,6 +163,63 @@ export TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-8}
 
+check_tmpdir_resource_sharing() {
+  local supplied_tmpdir=${TMPDIR:-<unset>}
+  if ! "$python_bin" - <<'PY'
+import multiprocessing.resource_sharer as resource_sharer
+import multiprocessing.util as multiprocessing_util
+import os
+import sys
+import tempfile
+
+
+read_fd = write_fd = shared_fd = None
+try:
+    supplied_tmpdir = os.environ.get("TMPDIR")
+    actual_tmpdir = tempfile.gettempdir()
+    if supplied_tmpdir is not None and os.path.realpath(actual_tmpdir) != os.path.realpath(supplied_tmpdir):
+        raise RuntimeError(
+            f"Python resolved TMPDIR={actual_tmpdir!r} instead of supplied "
+            f"TMPDIR={supplied_tmpdir!r}"
+        )
+
+    # Linux may prefer abstract sockets, which do not exercise the filesystem
+    # AF_UNIX path used by runtimes where the long-TMPDIR failure occurs.
+    # This assignment is confined to this probe subprocess; training workers
+    # inherit the caller's TMPDIR and Python configuration unchanged.
+    multiprocessing_util.abstract_sockets_supported = False
+
+    read_fd, write_fd = os.pipe()
+    shared_fd = resource_sharer.DupFd(write_fd).detach()
+    payload = b"zeva-tmpdir-resource-sharer-preflight"
+    os.write(shared_fd, payload)
+    received = os.read(read_fd, len(payload))
+    if received != payload:
+        raise RuntimeError(f"pipe payload mismatch: received {received!r}")
+except BaseException as error:
+    tmpdir = os.environ.get("TMPDIR") or tempfile.gettempdir()
+    print(
+        "TMPDIR resource-sharing preflight failed "
+        f"(TMPDIR={tmpdir!r}): {type(error).__name__}: {error}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+finally:
+    for fd in (shared_fd, write_fd, read_fd):
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    resource_sharer.stop()
+PY
+  then
+    die "TMPDIR=$supplied_tmpdir cannot support multiprocessing.resource_sharer.DupFd; choose a shorter existing directory"
+  fi
+}
+
+check_tmpdir_resource_sharing
+
 require_file "$foundation/model.safetensors"
 require_file "$base_checkpoint/model.safetensors"
 require_file "$base_checkpoint/training_state.pt"
