@@ -1,5 +1,19 @@
 # NLL 梯度隔离：短轮失败与独立预算检验
 
+## 2026-09-16 12:35：1000步完成，匹配Base终检中
+
+候选已完成1000/1000步、保存`001000` checkpoint，随后完成batch16、seed1000的全368批/5874决策诊断；`complete=true`，样本顺序SHA仍为`a9c6a8e30aa3f7ecbfcb9ce81d6a141ef563300d41e339a22d06fb75a0418ac1`。训练控制器正常退出，`COMPLETE`已写入。
+
+| 前H15 flow error | 实测 |
+|---|---:|
+| NLL-detached1000，residual-on | 0.01016413979 |
+| 同一候选，residual-off | 0.01016624738 |
+| 固定训练起点Base004500 | 0.01025113650 |
+
+开启残差相对自身off改善约0.02073%，同时优于起点Base004500约0.84865%。但预注册门槛是同时优于自身off与同预算普通训练Base1000；Base004500不能替代后者。[候选原始诊断](results/robotwin-nll-routing-full-20260916/candidate/validation_diagnostics.json)。
+
+已在aigc29 GPU0启动最后的只读匹配诊断，PID **1287584**，直接将新候选`001000`与已训练Base1000权重在同batch16/full/seed1000下比较；无optimizer、无checkpoint写入、无正式测试标签。[启动记录](results/robotwin-nll-routing-full-20260916/candidate-base1000-launch-a29.json)。未得到该报告前，不声称预注册门槛通过，不启动正式闭环。
+
 ## 2026-09-16 11:15 更新：DataLoader 启动故障与对照完成
 
 aigc29 首次尝试已加载 PI 权重，但长 `TMPDIR=.../a29-preflight-cache/tmp` 导致 multiprocessing resource sharer 创建 Unix socket 时报 `AF_UNIX path too long`，DataLoader 在首批数据前阻塞；没有训练进度或 checkpoint。这是本次启动环境配置错误，不是 ZTE/优化目标的实测失败。已核验控制器1155621及其子进程归属，仅对该训练进程树发送 SIGTERM，确认退出；失败输出目录和日志保留。
