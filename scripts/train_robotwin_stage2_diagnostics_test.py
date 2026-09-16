@@ -45,9 +45,17 @@ _install_accelerate_import_shim()
 
 from openpi.zeva.robotwin_policy import RobotWinGaussianActionPrior
 from scripts.train_robotwin_stage2 import Args
+from scripts.train_robotwin_stage2 import _ActionExpertGradientRouter
+from scripts.train_robotwin_stage2 import _clip_stage2_gradients
 from scripts.train_robotwin_stage2 import _diagnostic_action_valid_mask
+from scripts.train_robotwin_stage2 import _diagnostic_rng_state
 from scripts.train_robotwin_stage2 import _finalize_validation_diagnostics
+from scripts.train_robotwin_stage2 import _gradient_routed_off_forward
+from scripts.train_robotwin_stage2 import _gradient_routed_on_forward
 from scripts.train_robotwin_stage2 import _losses
+from scripts.train_robotwin_stage2 import _restore_diagnostic_rng_state
+from scripts.train_robotwin_stage2 import _validate_action_expert_gradient_routing_contract
+from scripts.train_robotwin_stage2 import _zero_parameter_gradient_link
 from scripts.train_robotwin_stage2 import evaluate
 
 
@@ -198,3 +206,179 @@ def test_diagnostics_default_off_preserves_existing_loss_math_and_keys():
     assert set(old) == set(explicit_off)
     for name in old:
         torch.testing.assert_close(old[name], explicit_off[name], equal_nan=True)
+
+
+def test_action_expert_gradient_router_masks_on_and_passes_off():
+    parameter = nn.Parameter(torch.tensor(2.0))
+    router = _ActionExpertGradientRouter([parameter])
+    try:
+        router.begin_first_step_audit()
+        router.set_phase("residual_on")
+        (parameter * 3.0).backward()
+        assert parameter.grad is not None
+        assert parameter.grad.item() == 0.0
+
+        router.set_phase("residual_off")
+        (parameter * 4.0).backward()
+        assert parameter.grad is not None
+        assert parameter.grad.item() == 4.0
+        router.assert_first_step_audit()
+        audit = router.first_step_audit()
+        assert audit["on_input_nonzero"]
+        assert not audit["on_output_nonzero"]
+        assert audit["off_input_nonzero"]
+    finally:
+        router.close()
+
+
+def test_gradient_clipping_is_independent_only_for_opt_in_route():
+    action_expert = nn.Parameter(torch.zeros(2))
+    zeva = nn.Parameter(torch.zeros(2))
+    action_expert.grad = torch.tensor([3.0, 4.0])
+    zeva.grad = torch.tensor([30.0, 40.0])
+
+    class _RecordingAccelerator:
+        def __init__(self):
+            self.calls = []
+
+        def clip_grad_norm_(self, parameters, max_norm):
+            parameters = tuple(parameters)
+            self.calls.append((parameters, max_norm))
+            return torch.nn.utils.clip_grad_norm_(parameters, max_norm)
+
+    accelerator = _RecordingAccelerator()
+    _clip_stage2_gradients(
+        accelerator,
+        [action_expert, zeva],
+        action_expert_parameters=[action_expert],
+        zeva_parameters=[zeva],
+        decouple_action_expert_gradient=True,
+    )
+    assert accelerator.calls == [
+        ((action_expert,), 1.0),
+        ((zeva,), 1.0),
+    ]
+    torch.testing.assert_close(action_expert.grad, torch.tensor([0.6, 0.8]))
+    torch.testing.assert_close(zeva.grad, torch.tensor([0.6, 0.8]))
+
+    action_expert.grad = torch.tensor([3.0, 4.0])
+    zeva.grad = torch.tensor([30.0, 40.0])
+    accelerator = _RecordingAccelerator()
+    _clip_stage2_gradients(
+        accelerator,
+        [action_expert, zeva],
+        action_expert_parameters=[action_expert],
+        zeva_parameters=[zeva],
+        decouple_action_expert_gradient=False,
+    )
+    assert accelerator.calls == [
+        ((action_expert, zeva), 1.0),
+    ]
+    torch.testing.assert_close(
+        action_expert.grad,
+        torch.tensor([3.0, 4.0]) / torch.sqrt(torch.tensor(2525.0)),
+    )
+    torch.testing.assert_close(
+        zeva.grad,
+        torch.tensor([30.0, 40.0]) / torch.sqrt(torch.tensor(2525.0)),
+    )
+
+
+def test_action_expert_gradient_routing_contract_is_opt_in_and_unambiguous():
+    assert Args().decouple_action_expert_gradient is False
+    _validate_action_expert_gradient_routing_contract("zeva", False, False)
+    _validate_action_expert_gradient_routing_contract("zeva", True, True)
+    with pytest.raises(ValueError, match="standard zeva"):
+        _validate_action_expert_gradient_routing_contract("baseline", True, True)
+    with pytest.raises(ValueError, match="prior-nll-detach-context"):
+        _validate_action_expert_gradient_routing_contract("zeva", True, False)
+
+
+def test_zero_parameter_gradient_link_marks_zeva_without_changing_off_loss():
+    parameters = [nn.Parameter(torch.tensor(1.0)), nn.Parameter(torch.tensor(-2.0))]
+    reference = torch.tensor(3.5, requires_grad=True)
+    linked = reference + _zero_parameter_gradient_link(parameters, reference)
+    linked.backward()
+    assert linked.item() == reference.item()
+    assert reference.grad is not None
+    assert reference.grad.item() == 1.0
+    for parameter in parameters:
+        assert parameter.grad is not None
+        assert parameter.grad.item() == 0.0
+
+
+def test_gradient_routed_on_off_forwards_replay_foundation_rng_and_leave_one_draw():
+    class FakePolicy(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.action = nn.Parameter(torch.tensor(2.0))
+            self.zeva = nn.Parameter(torch.tensor(5.0))
+            self.events = []
+            self.draws = []
+
+        def set_foundation_rng_state(self, cpu_state, cuda_state):
+            assert cuda_state is None
+            torch.random.set_rng_state(cpu_state)
+
+        def _task_schema(self, _processed):
+            return torch.zeros((2, 3))
+
+        def injection_gate_regularizer(self, _task_schema, _phase):
+            return self.zeva.square()
+
+        def forward(self, processed, *, foundation_only=False, **_kwargs):
+            self.events.append("off_forward" if foundation_only else "on_forward")
+            draw = torch.rand(processed["action"].shape[0])
+            self.draws.append(draw.detach())
+            if foundation_only:
+                return draw + self.action
+            prior = RobotWinGaussianActionPrior(
+                mean=torch.zeros((2, 50, 16)) + self.zeva,
+                log_std=torch.zeros((2, 50, 16)),
+            )
+            return draw + self.action + self.zeva, prior
+
+    policy = FakePolicy()
+    processed = {"action": torch.zeros((2, 50, 16))}
+    bank_batch = _fake_bank_batch()
+    start = _diagnostic_rng_state(torch.device("cpu"))
+    router = _ActionExpertGradientRouter([policy.action])
+    try:
+        router.set_phase("residual_on")
+        on_losses, pair_rng_state = _gradient_routed_on_forward(
+            policy,
+            processed,
+            bank_batch,
+            torch.ones(2),
+            None,
+            start,
+            0.01,
+            1.0,
+            1e-3,
+            0.4,
+            0.0,
+            1.0,
+            50,
+        )
+        assert policy.events == ["on_forward"]
+        on_losses["total"].backward()
+        # The off forward must not be built before the residual-on backward.
+        assert policy.action.grad is not None and policy.action.grad.item() == 0.0
+        router.set_phase("residual_off")
+        off_total, off_flow = _gradient_routed_off_forward(
+            policy,
+            processed,
+            pair_rng_state,
+            [policy.zeva],
+        )
+        assert policy.events == ["on_forward", "off_forward"]
+        torch.testing.assert_close(policy.draws[0], policy.draws[1])
+        off_total.backward()
+    finally:
+        router.close()
+    assert off_total.item() == off_flow.item()
+    after_pair = _diagnostic_rng_state(torch.device("cpu"))
+    _restore_diagnostic_rng_state(start, torch.device("cpu"))
+    torch.rand(2)
+    expected_after_one_base = _diagnostic_rng_state(torch.device("cpu"))
+    assert torch.equal(after_pair[0], expected_after_one_base[0])

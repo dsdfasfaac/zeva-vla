@@ -95,9 +95,9 @@ nvidia-smi() {
                     self.assertEqual(result.stdout.strip(), 'GPU-11111111-1111-1111-1111-111111111111,GPU-55555555-5555-5555-5555-555555555555')
 
     def test_nll_routing_is_separate_opt_in_experiment(self) -> None:
-        self.assertIn('if [[ "$arm" == nll_detached || "$arm" == nll_detached_full ]]; then\n    branch_args+=(--prior-nll-detach-context)', self.source)
+        self.assertIn('if [[ "$arm" == nll_detached || "$arm" == nll_detached_full || "$arm" == gradient_route_full || "$arm" == gradient_route_smoke ]]; then\n    branch_args+=(--prior-nll-detach-context)', self.source)
         self.assertIn('nll_detached) arms=(nll_detached)', self.source)
-        self.assertIn('"prior_nll_detach_context": arm in ("nll_detached", "nll_detached_full")', self.source)
+        self.assertIn('"prior_nll_detach_context": arm in ("nll_detached", "nll_detached_full", "gradient_route_full", "gradient_route_smoke")', self.source)
         self.assertIn('nll-routing-20260915}', self.source)
         config = json.loads((ROOT / 'configs/robotwin_ztev2_nll_routing_20260915.json').read_text())
         self.assertTrue(config['prior_nll_detach_context'])
@@ -112,6 +112,19 @@ nvidia-smi() {
         self.assertFalse(config['short_trial_accepted'])
         self.assertIn('nll_detached_full) arms=(nll_detached_full)', self.source)
         self.assertIn('"fixed_checkpoint_step": int(steps)', self.source)
+
+    def test_gradient_route_has_separate_full_budget_and_one_step_smoke(self) -> None:
+        config = json.loads((ROOT / 'configs/robotwin_ztev2_gradient_route_full_20260916.json').read_text())
+        self.assertEqual((config['steps'], config['warmup_steps'], config['save_freq']), (1000, 100, 250))
+        self.assertEqual(config['global_batch'], 256)
+        self.assertTrue(config['decouple_action_expert_gradient'])
+        self.assertTrue(config['prior_nll_detach_context'])
+        self.assertFalse(config['resume_failed_candidate'])
+        self.assertIn('gradient_route_full) arms=(gradient_route_full)', self.source)
+        self.assertIn('gradient_route_smoke) arms=(gradient_route_smoke)', self.source)
+        self.assertIn('branch_args+=(--decouple-action-expert-gradient)', self.source)
+        self.assertIn('branch_args+=(--no-save-checkpoints)', self.source)
+        self.assertIn('"smoke_only_no_checkpoint": arm == "gradient_route_smoke"', self.source)
 
     def test_diagnostic_uses_uncapped_full_validation_api(self) -> None:
         diagnostic = self.source.split('"$zeva_root/scripts/eval_robotwin_stage2_diagnostics.py"', 1)[1]

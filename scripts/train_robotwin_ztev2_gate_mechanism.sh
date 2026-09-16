@@ -13,9 +13,9 @@ set -euo pipefail
 mode=${1:-both}
 case "$mode" in
   gate001|gate010|both) ;;
-  nll_detached|nll_detached_full) ;;
+  nll_detached|nll_detached_full|gradient_route_full|gradient_route_smoke) ;;
   *)
-    echo "usage: $0 [gate001|gate010|both|nll_detached|nll_detached_full]" >&2
+    echo "usage: $0 [gate001|gate010|both|nll_detached|nll_detached_full|gradient_route_full|gradient_route_smoke]" >&2
     exit 2
     ;;
 esac
@@ -26,6 +26,8 @@ if [[ "$mode" == nll_detached ]]; then
   contract_config="$zeva_root/configs/robotwin_ztev2_nll_routing_20260915.json"
 elif [[ "$mode" == nll_detached_full ]]; then
   contract_config="$zeva_root/configs/robotwin_ztev2_nll_routing_full_20260915.json"
+elif [[ "$mode" == gradient_route_full || "$mode" == gradient_route_smoke ]]; then
+  contract_config="$zeva_root/configs/robotwin_ztev2_gradient_route_full_20260916.json"
 fi
 
 handoff=${ROBOTWIN_HANDOFF:-/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1}
@@ -62,6 +64,10 @@ if [[ "$mode" == nll_detached ]]; then
   run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/nll-routing-20260915}
 elif [[ "$mode" == nll_detached_full ]]; then
   run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/nll-routing-full-20260915}
+elif [[ "$mode" == gradient_route_full ]]; then
+  run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gradient-route-full-20260916}
+elif [[ "$mode" == gradient_route_smoke ]]; then
+  run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gradient-route-smoke-20260916}
 fi
 
 # The mechanism check is deliberately short, but its optimization/data
@@ -69,10 +75,14 @@ fi
 steps=100
 warmup_steps=10
 save_freq=100
-if [[ "$mode" == nll_detached_full ]]; then
+if [[ "$mode" == nll_detached_full || "$mode" == gradient_route_full ]]; then
   steps=1000
   warmup_steps=100
   save_freq=250
+elif [[ "$mode" == gradient_route_smoke ]]; then
+  steps=1
+  warmup_steps=1
+  save_freq=1
 fi
 batch_size=16
 gradient_accumulation_steps=4
@@ -102,6 +112,8 @@ case "$mode" in
   gate010) arms=(gate010) ;;
   nll_detached) arms=(nll_detached) ;;
   nll_detached_full) arms=(nll_detached_full) ;;
+  gradient_route_full) arms=(gradient_route_full) ;;
+  gradient_route_smoke) arms=(gradient_route_smoke) ;;
   both) arms=(gate001 gate010) ;;
 esac
 
@@ -359,6 +371,8 @@ port_for_arm() {
     gate010) printf '%s\n' "${GATE010_MAIN_PROCESS_PORT:-29615}" ;;
     nll_detached) printf '%s\n' "${NLL_ROUTING_MAIN_PROCESS_PORT:-29616}" ;;
     nll_detached_full) printf '%s\n' "${NLL_FULL_MAIN_PROCESS_PORT:-29617}" ;;
+    gradient_route_full) printf '%s\n' "${GRADIENT_ROUTE_MAIN_PROCESS_PORT:-29618}" ;;
+    gradient_route_smoke) printf '%s\n' "${GRADIENT_SMOKE_MAIN_PROCESS_PORT:-29619}" ;;
     *) die "unknown gate arm: $1" ;;
   esac
 }
@@ -369,6 +383,8 @@ gate_probability_for_arm() {
     gate010) printf '%s\n' "0.10" ;;
     nll_detached) printf '%s\n' "0.01" ;;
     nll_detached_full) printf '%s\n' "0.01" ;;
+    gradient_route_full) printf '%s\n' "0.01" ;;
+    gradient_route_smoke) printf '%s\n' "0.01" ;;
     *) die "unknown gate arm: $1" ;;
   esac
 }
@@ -446,7 +462,9 @@ payload = {
         "action_output_horizon": 50, "executed_horizon": 15, "seed": int(seed),
         "same_seed_and_data_order": True, "fresh_optimizer": True,
         "zero_initialized_dual_residual_projectors": True,
-        "prior_nll_detach_context": arm in ("nll_detached", "nll_detached_full"),
+        "prior_nll_detach_context": arm in ("nll_detached", "nll_detached_full", "gradient_route_full", "gradient_route_smoke"),
+        "decouple_action_expert_gradient": arm in ("gradient_route_full", "gradient_route_smoke"),
+        "smoke_only_no_checkpoint": arm == "gradient_route_smoke",
     },
     "lineage": {
         "handoff_root": str(Path(handoff).resolve()), "runtime_root": str(Path(runtime).resolve()),
@@ -580,8 +598,14 @@ run_arm() {
     --seed "$seed"
   )
 
-  if [[ "$arm" == nll_detached || "$arm" == nll_detached_full ]]; then
+  if [[ "$arm" == nll_detached || "$arm" == nll_detached_full || "$arm" == gradient_route_full || "$arm" == gradient_route_smoke ]]; then
     branch_args+=(--prior-nll-detach-context)
+  fi
+  if [[ "$arm" == gradient_route_full || "$arm" == gradient_route_smoke ]]; then
+    branch_args+=(--decouple-action-expert-gradient)
+  fi
+  if [[ "$arm" == gradient_route_smoke ]]; then
+    branch_args+=(--no-save-checkpoints)
   fi
   "$python_bin" -c 'import torchcodec' >/dev/null 2>&1 || die "TorchCodec is unavailable in the selected runtime"
   "$python_bin" -m accelerate.commands.launch \
@@ -593,6 +617,13 @@ run_arm() {
     "$zeva_root/scripts/train_robotwin_stage2.py" \
     "${branch_args[@]}" \
     >> "$output/train.log" 2>&1
+
+  if [[ "$arm" == gradient_route_smoke ]]; then
+    require_file "$output/manifest.json"
+    printf '%s\n' "completed four-rank one-step gradient-route smoke $(date --iso-8601=seconds)" \
+      | tee "$output/SMOKE_COMPLETE"
+    return
+  fi
 
   step_dir="$output/$(printf '%06d' "$steps")"
   require_file "$step_dir/model.safetensors"

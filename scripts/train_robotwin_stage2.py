@@ -148,6 +148,12 @@ class Args:
     # This matches BehaviorVLA's Bernoulli keep probability of 0.6 and is
     # intentionally stronger than the separate 10% whole-memory dropout.
     prior_residual_dropout_probability: float = 0.4
+    # Optional gradient routing experiment for the standard joint ZeVA path.
+    # The residual-on forward updates only ZeVA; a matched residual-off forward
+    # updates only the current PI0.5 action expert.  It is deliberately opt-in
+    # because it changes the objective, while preserving the normal path when
+    # false.
+    decouple_action_expert_gradient: bool = False
     # A v11 prior is applied only to the executed prefix.  Keep 50 for legacy
     # variants; the v11 launcher sets 15 to match RoboTwin's H15 replan loop.
     prior_injection_horizon: int = 50
@@ -420,6 +426,186 @@ def _restore_diagnostic_rng_state(
     torch.random.set_rng_state(state[0])
     if state[1] is not None:
         torch.cuda.set_rng_state(state[1], device)
+
+
+class _ActionExpertGradientRouter:
+    """Mask action-expert gradients on the residual-on branch.
+
+    Hooks are installed on the unwrapped parameters before Accelerate wraps
+    the policy.  This ordering makes the zero returned by the hook visible to
+    DDP's reducer while retaining the parameter in the residual-on graph.  A
+    residual-off backward switches the hook to pass-through, so accumulated
+    action-expert gradients are exactly those from that current-student flow
+    forward.  The manager is intentionally tiny and DDP-free; the training
+    loop owns synchronization via its existing ``no_sync`` context.
+    """
+
+    _VALID_PHASES = frozenset({"residual_on", "residual_off"})
+
+    def __init__(self, parameters: list[nn.Parameter] | tuple[nn.Parameter, ...]):
+        self.parameters = tuple(parameter for parameter in parameters if parameter.requires_grad)
+        if not self.parameters:
+            raise ValueError("Action-expert gradient routing requires trainable parameters.")
+        self._phase = "residual_off"
+        self._audit_enabled = False
+        self._audit: dict[str, Any] = {}
+        self._handles = [
+            parameter.register_hook(self._make_hook(parameter))
+            for parameter in self.parameters
+        ]
+
+    @property
+    def phase(self) -> str:
+        return self._phase
+
+    def set_phase(self, phase: str) -> None:
+        phase = str(phase)
+        if phase not in self._VALID_PHASES:
+            raise ValueError(f"Unknown action-expert gradient-routing phase: {phase!r}.")
+        self._phase = phase
+
+    def begin_first_step_audit(self) -> None:
+        self._audit_enabled = True
+        self._audit = {
+            "expected_parameters": len(self.parameters),
+            "on_hook_parameters": set(),
+            "off_hook_parameters": set(),
+            "on_input_nonzero": False,
+            "on_output_nonzero": False,
+            "off_input_nonzero": False,
+        }
+
+    def first_step_audit(self) -> dict[str, Any]:
+        audit = dict(self._audit)
+        for name in ("on_hook_parameters", "off_hook_parameters"):
+            audit[name] = len(audit.get(name, ()))
+        return audit
+
+    def end_first_step_audit(self) -> None:
+        self._audit_enabled = False
+
+    def assert_first_step_audit(self) -> None:
+        audit = self.first_step_audit()
+        expected = audit.get("expected_parameters", 0)
+        if audit.get("on_hook_parameters") != expected:
+            raise RuntimeError(
+                "Gradient-routing invariant failed: residual-on did not mark every "
+                f"action-expert parameter used ({audit.get('on_hook_parameters')}/{expected})."
+            )
+        if audit.get("off_hook_parameters") != expected:
+            raise RuntimeError(
+                "Gradient-routing invariant failed: residual-off did not produce a "
+                f"gradient for every action-expert parameter ({audit.get('off_hook_parameters')}/{expected})."
+            )
+        if audit.get("on_output_nonzero"):
+            raise RuntimeError(
+                "Gradient-routing invariant failed: residual-on action-expert gradient "
+                "was not masked to zero."
+            )
+        if not audit.get("on_input_nonzero"):
+            raise RuntimeError(
+                "Gradient-routing invariant failed: residual-on did not produce an "
+                "action-expert gradient to mask."
+            )
+        if not audit.get("off_input_nonzero"):
+            raise RuntimeError(
+                "Gradient-routing invariant failed: residual-off action-expert gradient "
+                "was entirely zero."
+            )
+
+    def _make_hook(self, parameter: nn.Parameter):
+        parameter_id = id(parameter)
+
+        def route(gradient: torch.Tensor) -> torch.Tensor:
+            if self._audit_enabled:
+                if self._phase == "residual_on":
+                    self._audit["on_hook_parameters"].add(parameter_id)
+                    self._audit["on_input_nonzero"] |= bool(torch.any(gradient.detach() != 0).item())
+                else:
+                    self._audit["off_hook_parameters"].add(parameter_id)
+                    self._audit["off_input_nonzero"] |= bool(torch.any(gradient.detach() != 0).item())
+            if self._phase == "residual_on":
+                # Returning a fresh zero preserves DDP's used-parameter mark
+                # and prevents any residual-on contribution from accumulating.
+                result = torch.zeros_like(gradient)
+                if self._audit_enabled:
+                    self._audit["on_output_nonzero"] |= bool(torch.any(result != 0).item())
+                return result
+            return gradient
+
+        return route
+
+    def close(self) -> None:
+        for handle in self._handles:
+            handle.remove()
+        self._handles.clear()
+        self._audit_enabled = False
+
+
+def _validate_action_expert_gradient_routing_contract(
+    training_variant: str,
+    enabled: bool,
+    prior_nll_detach_context: bool,
+) -> None:
+    """Reject routing combinations whose gradients have ambiguous ownership."""
+    if not enabled:
+        return
+    if training_variant != "zeva":
+        raise ValueError(
+            "Action-expert gradient routing is restricted to the standard zeva variant."
+        )
+    if not prior_nll_detach_context:
+        raise ValueError(
+            "Action-expert gradient routing requires --prior-nll-detach-context so "
+            "shared task/context features are not updated by the auxiliary NLL path."
+        )
+
+
+def _zero_parameter_gradient_link(
+    parameters: list[nn.Parameter] | tuple[nn.Parameter, ...],
+    reference: torch.Tensor,
+) -> torch.Tensor:
+    """Attach a zero-valued graph edge to every parameter in an off forward.
+
+    DDP is configured with ``find_unused_parameters=False``.  The current
+    foundation-only forward does not reference ZeVA parameters, so this
+    explicit zero edge keeps every ZeVA reducer bucket marked as used without
+    changing its gradient or the off-flow value.  One scalar per parameter is
+    enough; reducing an entire large tensor would add needless work.
+    """
+    links = [
+        parameter.reshape(-1)[0] * reference.new_zeros(())
+        for parameter in parameters
+        if parameter.requires_grad and parameter.numel()
+    ]
+    if not links:
+        return reference.new_zeros(())
+    return torch.stack(links).sum()
+
+
+def _clip_stage2_gradients(
+    accelerator: Accelerator,
+    trainable: list[nn.Parameter] | tuple[nn.Parameter, ...],
+    *,
+    action_expert_parameters: list[nn.Parameter] | tuple[nn.Parameter, ...],
+    zeva_parameters: list[nn.Parameter] | tuple[nn.Parameter, ...],
+    decouple_action_expert_gradient: bool,
+    max_norm: float = 1.0,
+) -> None:
+    """Clip the Stage 2 optimizer gradients using the configured contract.
+
+    The ordinary Base action-expert path clips only its action-expert
+    parameters because that is the complete ``trainable`` set for the Base
+    optimizer.  When gradient routing is enabled, preserve that same action-
+    expert-only norm while clipping the ZeVA adapter group independently.  A
+    disabled route deliberately retains the historical one-call clip over
+    the complete trainable set.
+    """
+    if decouple_action_expert_gradient:
+        accelerator.clip_grad_norm_(action_expert_parameters, max_norm)
+        accelerator.clip_grad_norm_(zeva_parameters, max_norm)
+    else:
+        accelerator.clip_grad_norm_(trainable, max_norm)
 
 
 def _diagnostic_action_valid_mask(
@@ -916,7 +1102,7 @@ def _collect_validation_diagnostics(
     processed: dict[str, torch.Tensor],
     losses: dict[str, torch.Tensor],
     *,
-    foundation_rng_state: tuple[torch.Tensor, torch.Tensor] | None,
+    foundation_rng_state: tuple[torch.Tensor, torch.Tensor | None] | None,
     injection_confidence: torch.Tensor | None,
     phase_token: torch.Tensor | None,
     training_variant: str,
@@ -1317,7 +1503,7 @@ def _losses(
     bank_batch,
     injection_confidence: torch.Tensor,
     baseline_flow: torch.Tensor | None,
-    foundation_rng_state: tuple[torch.Tensor, torch.Tensor] | None,
+    foundation_rng_state: tuple[torch.Tensor, torch.Tensor | None] | None,
     prior_weight: float,
     preserve_weight: float,
     gate_regularization_weight: float,
@@ -1329,12 +1515,25 @@ def _losses(
     training: bool,
     return_diagnostics: bool = False,
     prior_nll_detach_context: bool = False,
+    prior_residual_mask: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     unwrapped = policy.module if hasattr(policy, "module") else policy
     if foundation_rng_state is not None:
         unwrapped.set_foundation_rng_state(*foundation_rng_state)
-    prior_residual_mask = None
-    if training and prior_residual_dropout_probability > 0:
+    if prior_residual_mask is not None:
+        expected_shape = (processed["action"].shape[0],)
+        if tuple(prior_residual_mask.shape) != expected_shape:
+            raise ValueError(
+                "Provided prior residual mask must have one value per example, got "
+                f"{tuple(prior_residual_mask.shape)} versus {expected_shape}."
+            )
+        if prior_residual_mask.device != processed["action"].device:
+            raise ValueError("Provided prior residual mask must be on the processed batch device.")
+        prior_residual_mask = prior_residual_mask.to(
+            device=processed["action"].device,
+            dtype=processed["action"].dtype,
+        )
+    elif training and prior_residual_dropout_probability > 0:
         batch_size = processed["action"].shape[0]
         prior_residual_mask = (
             torch.rand(batch_size, device=processed["action"].device)
@@ -1445,6 +1644,104 @@ def _losses(
             }
         )
     return result
+
+
+def _sample_prior_residual_mask(
+    processed: dict[str, torch.Tensor],
+    *,
+    probability: float,
+) -> torch.Tensor | None:
+    """Sample the ZeVA-only prior mask once for a routed forward pair."""
+    if probability <= 0:
+        return None
+    batch_size = processed["action"].shape[0]
+    return (
+        torch.rand(batch_size, device=processed["action"].device) >= probability
+    ).to(processed["action"].dtype)
+
+
+def _gradient_routed_on_forward(
+    policy: nn.Module,
+    processed: dict[str, torch.Tensor],
+    bank_batch,
+    injection_confidence: torch.Tensor,
+    baseline_flow: torch.Tensor | None,
+    foundation_rng_state: tuple[torch.Tensor, torch.Tensor | None] | None,
+    prior_weight: float,
+    preserve_weight: float,
+    gate_regularization_weight: float,
+    prior_residual_dropout_probability: float,
+    paired_improvement_margin: float,
+    preserve_scale: float,
+    prior_supervision_horizon: int,
+) -> tuple[dict[str, torch.Tensor], tuple[torch.Tensor, torch.Tensor | None]]:
+    """Build only the residual-on loss for opt-in action-expert routing.
+
+    The caller must complete this loss's backward before invoking
+    :func:`_gradient_routed_off_forward`.  The prior residual dropout mask is
+    sampled exactly once here and the foundation RNG state is returned for the
+    later residual-off forward.  Retrieval and memory dropout are intentionally
+    done by the caller before this helper and are not repeated here.
+    """
+    if foundation_rng_state is None:
+        device = processed["action"].device
+        # CPU doubles are useful for unit tests; the policy's production path
+        # always supplies a CUDA state through the PI0.5 runtime.
+        pair_rng_state = _diagnostic_rng_state(device)
+    else:
+        pair_rng_state = foundation_rng_state
+
+    # Draw ZeVA-only dropout before restoring the foundation stream.  This
+    # keeps the subsequent foundation calls independent of this extra branch.
+    prior_residual_mask = _sample_prior_residual_mask(
+        processed,
+        probability=prior_residual_dropout_probability,
+    )
+    device = processed["action"].device
+    _restore_diagnostic_rng_state(pair_rng_state, device)
+    on_losses = _losses(
+        policy,
+        processed,
+        bank_batch,
+        injection_confidence,
+        baseline_flow,
+        pair_rng_state,
+        prior_weight,
+        preserve_weight,
+        gate_regularization_weight,
+        prior_residual_dropout_probability,
+        paired_improvement_margin=paired_improvement_margin,
+        preserve_scale=preserve_scale,
+        prior_supervision_horizon=prior_supervision_horizon,
+        prior_nll_detach_context=True,
+        prior_residual_mask=prior_residual_mask,
+        training=True,
+    )
+    return on_losses, pair_rng_state
+
+
+def _gradient_routed_off_forward(
+    policy: nn.Module,
+    processed: dict[str, torch.Tensor],
+    foundation_rng_state: tuple[torch.Tensor, torch.Tensor | None],
+    zeva_parameters: list[nn.Parameter] | tuple[nn.Parameter, ...],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build the residual-off loss after the residual-on backward completes.
+
+    ``foundation_only`` is the current student foundation, not the optional
+    immutable anchor used by the preserve hinge.  The zero edge marks ZeVA
+    parameters used for DDP while contributing no off-branch gradient.  This
+    helper deliberately performs no work until the caller has finished the
+    residual-on backward; two DDP forwards before the first backward leave
+    reducer buckets rank-local.
+    """
+    device = processed["action"].device
+    _restore_diagnostic_rng_state(foundation_rng_state, device)
+    off_output = policy(processed, foundation_only=True, foundation_reduction="none")
+    off_flow_per_sample = _foundation_loss(off_output, reduction="none")
+    off_flow = off_flow_per_sample.mean()
+    off_total = off_flow + _zero_parameter_gradient_link(zeva_parameters, off_flow)
+    return off_total, off_flow
 
 
 def _baseline_losses(policy: nn.Module, processed: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -1796,6 +2093,31 @@ def _assert_action_expert_finetune_gradients(
         for parameter in module.parameters()
     ) or policy.context_gate_logit.grad is not None or policy.prior_gate_logit.grad is not None:
         raise RuntimeError("Matched PI baseline unexpectedly received Zeva gradients.")
+
+
+def _assert_gradient_routed_zeva_gradients(policy: RobotWinZevaPolicy) -> None:
+    """Check ZeVA gradients immediately after the residual-on backward.
+
+    This guard runs before the residual-off backward can add its explicit DDP
+    zero links.  It therefore proves that the ZeVA optimizer group is sourced
+    by the residual-on objective rather than merely being marked used for DDP.
+    """
+    modules = (
+        policy.task_token_projector,
+        policy.memory_context_encoder,
+        policy.action_prior,
+        policy.causal_action_projector,
+        policy.prior_action_projector,
+        policy.residual_gate_router,
+    )
+    if any(not any(parameter.grad is not None for parameter in module.parameters()) for module in modules):
+        raise RuntimeError(
+            "Gradient-routing invariant failed: a ZeVA module received no residual-on gradient."
+        )
+    if policy.context_gate_logit.grad is None or policy.prior_gate_logit.grad is None:
+        raise RuntimeError(
+            "Gradient-routing invariant failed: residual-on scalar gates received no gradient."
+        )
 
 
 _ACTION_EXPERT_PARAMETER_PREFIXES = (
@@ -2156,6 +2478,39 @@ def _manifest(
             "injection_before_vlm": False,
             "torch_compile": args.compile_model,
             "torch_compile_mode": args.compile_mode,
+        },
+        "action_expert_gradient_routing": {
+            "enabled": args.decouple_action_expert_gradient,
+            "variant": "standard_zeva_only" if args.decouple_action_expert_gradient else None,
+            "residual_on": "ZeVA-only total loss; action-expert parameter hooks return zero",
+            "residual_off": "current student foundation-only flow; action-expert gradients pass through",
+            "nll_shared_input_gradient": (
+                "detached" if args.decouple_action_expert_gradient else "configured_by_prior_nll_detach_context"
+            ),
+            "same_processed_batch": True,
+            "same_foundation_rng_noise_time": True,
+            "post_pair_rng": "one ordinary current-student residual-off foundation forward",
+            "ddp_zero_link_for_zeva": args.decouple_action_expert_gradient,
+            "hooks_registered_before_accelerator_prepare": args.decouple_action_expert_gradient,
+            "gradient_clipping": {
+                "max_norm": 1.0,
+                "scope": (
+                    "independent_optimizer_groups"
+                    if args.decouple_action_expert_gradient
+                    else "all_trainable_parameters"
+                ),
+                "action_expert": (
+                    "independent_global_norm"
+                    if args.decouple_action_expert_gradient
+                    else "shared_global_norm"
+                ),
+                "zeva": (
+                    "independent_global_norm"
+                    if args.decouple_action_expert_gradient
+                    else "shared_global_norm"
+                ),
+                "matches_ordinary_base_action_expert_clip": args.decouple_action_expert_gradient,
+            },
         },
         "video_decode": {
             "backend": args.video_backend,
@@ -2672,6 +3027,11 @@ def main(args: Args) -> None:
     }
     if args.prior_nll_detach_context and args.training_variant != "zeva":
         raise ValueError("NLL context detachment is restricted to the standard zeva variant")
+    _validate_action_expert_gradient_routing_contract(
+        args.training_variant,
+        args.decouple_action_expert_gradient,
+        args.prior_nll_detach_context,
+    )
     prior_only = args.training_variant in {"prior_adapter", "prior_zeva"}
     action_expert_control = args.training_variant == "action_expert_control"
     output_correction = args.training_variant == "output_correction"
@@ -3030,6 +3390,7 @@ def main(args: Args) -> None:
     zeva_parameters = [
         parameter for parameter in trainable if id(parameter) not in action_expert_parameter_ids
     ]
+    action_expert_gradient_router: _ActionExpertGradientRouter | None = None
     if args.training_variant not in {
         "adapter",
         "prior_adapter",
@@ -3041,6 +3402,14 @@ def main(args: Args) -> None:
         raise RuntimeError("Zeva Stage 2 requires a non-empty Zeva optimizer group.")
     if args.training_variant == "baseline" and zeva_parameters:
         raise RuntimeError("Matched PI baseline must not contain trainable Zeva parameters.")
+    if args.decouple_action_expert_gradient:
+        # Register on the unwrapped parameters before ``accelerator.prepare``
+        # adds DDP's reducer hooks.  This ordering is part of the routing
+        # contract: DDP observes the action expert as used, but receives zero
+        # from the residual-on backward.
+        action_expert_gradient_router = _ActionExpertGradientRouter(
+            action_expert_parameters
+        )
     if action_expert_control:
         if zeva_parameters:
             raise RuntimeError(
@@ -3133,6 +3502,16 @@ def main(args: Args) -> None:
             raise ValueError(
                 "Stage 2 resume checkpoint uses a different immutable foundation anchor."
             )
+        checkpoint_routing = bool(
+            checkpoint["manifest"].get("train_args", {}).get(
+                "decouple_action_expert_gradient", False
+            )
+        )
+        if checkpoint_routing != args.decouple_action_expert_gradient:
+            raise ValueError(
+                "Stage 2 resume checkpoint uses a different action-expert gradient-routing "
+                f"contract ({checkpoint_routing} versus {args.decouple_action_expert_gradient})."
+            )
         load_model(policy.foundation, resume_dir / "model.safetensors", strict=True)
         if zeva_enabled:
             policy.load_adapter(resume_dir / "zeva_adapter.pth")
@@ -3167,6 +3546,8 @@ def main(args: Args) -> None:
     for step in progress_bar:
         policy.train()
         unwrapped_policy = accelerator.unwrap_model(policy)
+        if action_expert_gradient_router is not None and step == start_step:
+            action_expert_gradient_router.begin_first_step_audit()
         unwrapped_policy.enforce_action_expert_stage2_mode()
         if args.training_variant in {"adapter", "prior_adapter"}:
             # ``policy.train()`` recursively flips the frozen foundation back
@@ -3198,6 +3579,14 @@ def main(args: Args) -> None:
             else:
                 processed = _preprocess_with_task_only_goal(policy, preprocessor, raw_batch)
                 cached_base_actions = target_actions = task_goal_embedding = None
+            # Capture before Stage-1 phase/memory dropout.  The routed pair
+            # restores this state before each foundation call and leaves the
+            # global stream after exactly one current-student Base forward.
+            routing_rng_state = (
+                _diagnostic_rng_state(processed["action"].device)
+                if action_expert_gradient_router is not None
+                else None
+            )
             if zeva_enabled:
                 bank_batch, confidence, retrieval_accuracy = _retrieve(
                     policy,
@@ -3215,10 +3604,17 @@ def main(args: Args) -> None:
                 )
             else:
                 retrieval_accuracy = processed["action"].detach().new_full((), float("nan"))
-            # Skip the redundant DDP all-reduce for all but the final micro-batch.
+            # Routed residual-on backward must never synchronize: the matching
+            # residual-off backward is the one that performs the final DDP
+            # reduction for this micro-step (and any accumulated micro-steps).
+            # The ordinary path keeps the historical final-micro-step sync.
             sync_context = (
                 policy.no_sync()
-                if micro_step + 1 < args.gradient_accumulation_steps and hasattr(policy, "no_sync")
+                if hasattr(policy, "no_sync")
+                and (
+                    action_expert_gradient_router is not None
+                    or micro_step + 1 < args.gradient_accumulation_steps
+                )
                 else nullcontext()
             )
             with sync_context:
@@ -3276,30 +3672,87 @@ def main(args: Args) -> None:
                     )
                 else:
                     if sample_baseline:
+                        if routing_rng_state is not None:
+                            _restore_diagnostic_rng_state(
+                                routing_rng_state, processed["action"].device
+                            )
                         baseline_flow, foundation_rng_state = _matched_baseline_flow(policy, processed)
                     else:
-                        baseline_flow, foundation_rng_state = None, None
-                    micro_losses = _losses(
+                        baseline_flow, foundation_rng_state = None, routing_rng_state
+                    if action_expert_gradient_router is None:
+                        micro_losses = _losses(
+                            policy,
+                            processed,
+                            bank_batch,
+                            confidence,
+                            baseline_flow,
+                            foundation_rng_state,
+                            args.prior_loss_weight,
+                            args.preserve_loss_weight,
+                            args.gate_regularization_weight,
+                            args.prior_residual_dropout_probability,
+                            paired_improvement_margin=args.paired_improvement_margin,
+                            preserve_scale=(
+                                float(args.baseline_preserve_interval) if sample_baseline else 1.0
+                            ),
+                            prior_supervision_horizon=args.prior_injection_horizon,
+                            prior_nll_detach_context=args.prior_nll_detach_context,
+                            training=True,
+                        )
+                        accelerator.backward(micro_losses["total"] / args.gradient_accumulation_steps)
+                    else:
+                        action_expert_gradient_router.set_phase("residual_on")
+                        micro_losses, _pair_rng_state = _gradient_routed_on_forward(
+                            policy,
+                            processed,
+                            bank_batch,
+                            confidence,
+                            baseline_flow,
+                            foundation_rng_state,
+                            args.prior_loss_weight,
+                            args.preserve_loss_weight,
+                            args.gate_regularization_weight,
+                            args.prior_residual_dropout_probability,
+                            args.paired_improvement_margin,
+                            float(args.baseline_preserve_interval)
+                            if sample_baseline
+                            else 1.0,
+                            args.prior_injection_horizon,
+                        )
+                        # Complete the residual-on backward before constructing
+                        # the second DDP forward.  Building two forwards first
+                        # leaves reducer buckets rank-local under NCCL.
+                        accelerator.backward(
+                            micro_losses["total"] / args.gradient_accumulation_steps
+                        )
+                        if step == start_step and micro_step == 0:
+                            _assert_gradient_routed_zeva_gradients(
+                                accelerator.unwrap_model(policy)
+                            )
+            if action_expert_gradient_router is not None:
+                action_expert_gradient_router.set_phase("residual_off")
+                # Only the final off backward synchronizes.  Its zero-valued
+                # ZeVA links mark the parameters as used while preserving the
+                # ZeVA gradients accumulated by the residual-on backward.
+                off_sync_context = (
+                    policy.no_sync()
+                    if micro_step + 1 < args.gradient_accumulation_steps
+                    and hasattr(policy, "no_sync")
+                    else nullcontext()
+                )
+                with off_sync_context:
+                    off_total, off_flow = _gradient_routed_off_forward(
                         policy,
                         processed,
-                        bank_batch,
-                        confidence,
-                        baseline_flow,
-                        foundation_rng_state,
-                        args.prior_loss_weight,
-                        args.preserve_loss_weight,
-                        args.gate_regularization_weight,
-                        args.prior_residual_dropout_probability,
-                        paired_improvement_margin=args.paired_improvement_margin,
-                        preserve_scale=(
-                            float(args.baseline_preserve_interval) if sample_baseline else 1.0
-                        ),
-                        prior_supervision_horizon=args.prior_injection_horizon,
-                        prior_nll_detach_context=args.prior_nll_detach_context,
-                        training=True,
+                        _pair_rng_state,
+                        zeva_parameters,
                     )
-                accelerator.backward(micro_losses["total"] / args.gradient_accumulation_steps)
+                    accelerator.backward(off_total / args.gradient_accumulation_steps)
+                micro_losses["residual_off_flow"] = off_flow.detach()
             if step == start_step and micro_step == 0:
+                if action_expert_gradient_router is not None:
+                    action_expert_gradient_router.assert_first_step_audit()
+                    action_expert_gradient_router.end_first_step_audit()
                 if args.training_variant == "output_correction":
                     _assert_output_correction_gradients(accelerator.unwrap_model(policy))
                 elif args.training_variant == "output_residual":
@@ -3317,7 +3770,13 @@ def main(args: Args) -> None:
             retrieval_accuracies.append(retrieval_accuracy.detach())
         losses = {name: torch.stack(values).mean() for name, values in accumulated_losses.items()}
         retrieval_accuracy = torch.stack(retrieval_accuracies).mean()
-        accelerator.clip_grad_norm_(trainable, 1.0)
+        _clip_stage2_gradients(
+            accelerator,
+            trainable,
+            action_expert_parameters=action_expert_parameters,
+            zeva_parameters=zeva_parameters,
+            decouple_action_expert_gradient=args.decouple_action_expert_gradient,
+        )
         optimizer.step()
         scheduler.step()
         completed = step + 1
@@ -3330,10 +3789,12 @@ def main(args: Args) -> None:
             )
         if completed % args.log_freq == 0:
             baseline_sampled = bool(float(losses["baseline_sampled"]))
+            off_flow = losses.get("residual_off_flow")
             progress_bar.set_postfix(
                 loss=f"{float(losses['total'].detach()):.4f}",
                 flow=f"{float(losses['flow'].detach()):.4f}",
                 base=(f"{float(losses['baseline']):.4f}" if baseline_sampled else "skip"),
+                off=(f"{float(off_flow.detach()):.4f}" if off_flow is not None else "skip"),
                 prior=f"{float(losses['prior'].detach()):.4f}",
                 pstd=f"{float(losses['prior_std']):.3f}",
                 pkeep=f"{float(losses['prior_residual_keep']):.2f}",
@@ -3390,6 +3851,11 @@ def main(args: Args) -> None:
                             "step": completed,
                             "train_loss": float(losses["total"]),
                             "train_flow": float(losses["flow"]),
+                            "train_residual_off_flow": (
+                                float(losses["residual_off_flow"])
+                                if "residual_off_flow" in losses
+                                else None
+                            ),
                             "train_baseline_flow": (
                                 float(losses["baseline"])
                                 if bool(float(losses["baseline_sampled"]))
@@ -3421,6 +3887,8 @@ def main(args: Args) -> None:
                     + "\n"
                 )
             accelerator.wait_for_everyone()
+    if action_expert_gradient_router is not None:
+        action_expert_gradient_router.close()
     accelerator.end_training()
 
 
