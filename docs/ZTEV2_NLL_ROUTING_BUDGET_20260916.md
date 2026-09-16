@@ -21,6 +21,12 @@
 
 这仍是训练/验证集离线指标，不是新成功率。最新完整正式结果仍为Base110/200=55%、ZeVA110/200=55%。
 
+### action expert 权重漂移审计
+
+为避免将“比Base差”简单解释为“权重动得太多”，只读比较了Base004500起点、普通Base1000与新候选1000的208个action-expert张量，共430,098,464个元素。普通Base更新RMS为5.1379e-5，候选为4.4577e-5；候选幅度反而小13.24%，但两条更新向量的总体cosine仅0.53855。[完整分组数值](results/robotwin-nll-routing-full-20260916/action-expert-weight-drift.json)。
+
+因此，单纯增加参数L2让action expert“少动”没有证据支持；当前更具体的问题是联合残差目标改变了AE更新方向。下一假设将检验梯度分路：AE只接收与普通Base同样的residual-off flow梯度，ZeVA模块只接收residual-on目标；首步必须先证明AE梯度与普通Base同噪声等价，再允许训练。这是新机制假设，不是继续延长失败的NLL路线。
+
 ## 2026-09-16 12:35：1000步完成，匹配Base终检中
 
 候选已完成1000/1000步、保存`001000` checkpoint，随后完成batch16、seed1000的全368批/5874决策诊断；`complete=true`，样本顺序SHA仍为`a9c6a8e30aa3f7ecbfcb9ce81d6a141ef563300d41e339a22d06fb75a0418ac1`。训练控制器正常退出，`COMPLETE`已写入。
