@@ -5,7 +5,7 @@
 | 节点 | 只读资源检查与小型渲染检查 | 当前判定 |
 |---|---|---|
 | aigc28 | 8 卡均由他人的 PI 训练 PID943637 占用约76 GiB、100% util；先前曾完整完成同协议600视频评测 | 暂不可用，不中断他人训练 |
-| aigc29 | GPU4/5/7 当前空闲，GPU6 有他人 RLBench 采集 PID1740656。GPU7 使用正式 `/etc/vulkan/icd.d/nvidia_icd.json`、显式 `cuda:0`、固定 UUID 的一帧 smoke 报 `failed to find a rendering device`。加入隔离复制的 Vulkan loader 后仍同样失败 | GPU7 不可用；不干扰占用中的 GPU6 |
+| aigc29 | GPU4/5/7 当前空闲，GPU6 有他人 RLBench 采集 PID1740656。GPU7 使用正式 `/etc/vulkan/icd.d/nvidia_icd.json`、显式 `cuda:0`、固定 UUID 的一帧 smoke 报 `failed to find a rendering device`。加入隔离复制的 Vulkan loader 后仍同样失败；同设置在空闲 GPU5/PCI `AB:00.0` 也同样失败 | GPU5/7 不可用；不干扰占用中的 GPU6，也不再无目标地换卡尝试 |
 | aigc24 | GPU6 UUID `GPU-2e145d56-…`、PCI `BA:00.0`、仅 Xorg；正式 ICD 和显式 `cuda:0` 可生成 finite 640×480×4 帧，**但进程退出码255，析构时 `vk::DeviceLostError`** | 不可用；帧级结果不能冒充完整健康证明 |
 | aigc31 | 全卡约3.8 GiB不可归属残留；既有健康阻断记录对 PID2369486 的所有权/可用性无法确证 | 不绕过健康阻断，不用于正式测试 |
 
