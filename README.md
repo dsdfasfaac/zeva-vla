@@ -47,16 +47,17 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 ## Zeva architecture
 
-Current experiment (2026-09-16): the prior NLL-detached 1,000-step candidate
-failed the same-budget Base comparison because its residual-off action expert
-drifted. A new, independently preregistered gradient-route candidate gives the
-action expert only the matched residual-off Base flow gradient and gives ZeVA
-modules the residual-on objective, with independent gradient clipping. The
-two-rank DDP smoke, real PI0.5/Stage1 fixed-batch gradient equivalence check,
-and four-rank one-step `torch.compile` smoke passed. The bounded 1,000-step run
-has started on aigc29; no final validation or new success rate exists yet.
-Stage1/bank/VLM, task-language/H15 recurrence, global batch 256 and the H50/H15
-RoboTwin protocol remain unchanged. See the
+Current experiment (2026-09-16): a separately preregistered gradient-route
+candidate gives the action expert only matched residual-off Base flow gradients
+and gives ZeVA modules the residual-on objective, with independent clipping.
+Two-rank DDP, real PI0.5/Stage1 gradient-equivalence, and four-rank one-step
+smokes passed. The 1,000-step training completed, but its full 5,874-decision
+H15 validation **failed the first utility condition**: residual-on error
+`0.0100957537` versus its own off `0.0100944676` (0.01274% worse). It will
+not enter formal rollout. A same-noise comparison with the trained Base1000
+is running to diagnose the action-expert path, not to overturn this failure;
+there is no new success rate. Stage1/bank/VLM, task-language/H15 recurrence,
+global batch 256 and the H50/H15 RoboTwin protocol remain unchanged. See the
 [design, raw checks and fixed decision rule](docs/ZTEV2_GRADIENT_ROUTE_20260916.md).
 
 Latest development status (2026-09-16): the **100-step NLL-detached trial
