@@ -8,8 +8,17 @@ run_root=${H15_ROUTE_RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5
 base=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/baseline/001000
 checkpoint=$run_root/000500
 manifest=$run_root/manifest.json
-report=$run_root/validation_diagnostics_000500.json
-log=$run_root/validation_diagnostics_000500.log
+context_gate_scale=${H15_CONTEXT_GATE_SCALE:-1}
+prior_gate_scale=${H15_PRIOR_GATE_SCALE:-1}
+[[ "$context_gate_scale" =~ ^(1|2|4)$ && "$prior_gate_scale" =~ ^(1|10|50)$ ]] || {
+  echo "Gate sensitivity supports only fixed context {1,2,4}, prior {1,10,50}" >&2; exit 2;
+}
+suffix=""
+if [[ "$context_gate_scale" != 1 || "$prior_gate_scale" != 1 ]]; then
+  suffix="_ctx${context_gate_scale}_prior${prior_gate_scale}"
+fi
+report=$run_root/validation_diagnostics_000500${suffix}.json
+log=$run_root/validation_diagnostics_000500${suffix}.log
 expected_uuid=GPU-23cf0ed2-0f7a-f425-7457-781b444b2811
 python_bin=${PI05_PYTHON:-/usr/bin/python3}
 handoff=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1
@@ -70,6 +79,8 @@ export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
   --video-backend torchcodec \
   --decoder-threads 1 \
   --seed 1000 \
+  --context-gate-scale "$context_gate_scale" \
+  --prior-gate-scale "$prior_gate_scale" \
   > "$log" 2>&1
 
 "$python_bin" - "$report" <<'PY'
