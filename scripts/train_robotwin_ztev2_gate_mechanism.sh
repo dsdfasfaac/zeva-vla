@@ -13,9 +13,9 @@ set -euo pipefail
 mode=${1:-both}
 case "$mode" in
   gate001|gate010|both) ;;
-  nll_detached) ;;
+  nll_detached|nll_detached_full) ;;
   *)
-    echo "usage: $0 [gate001|gate010|both|nll_detached]" >&2
+    echo "usage: $0 [gate001|gate010|both|nll_detached|nll_detached_full]" >&2
     exit 2
     ;;
 esac
@@ -24,6 +24,8 @@ zeva_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 contract_config="$zeva_root/configs/robotwin_ztev2_gate_mechanism_20260915.json"
 if [[ "$mode" == nll_detached ]]; then
   contract_config="$zeva_root/configs/robotwin_ztev2_nll_routing_20260915.json"
+elif [[ "$mode" == nll_detached_full ]]; then
+  contract_config="$zeva_root/configs/robotwin_ztev2_nll_routing_full_20260915.json"
 fi
 
 handoff=${ROBOTWIN_HANDOFF:-/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1}
@@ -58,6 +60,8 @@ task_retrieval_sha256=${ROBOTWIN_TASK_RETRIEVAL_SHA256:-c54b3275af4b15999a5d849f
 run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/gate-mechanism-20260915}
 if [[ "$mode" == nll_detached ]]; then
   run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/nll-routing-20260915}
+elif [[ "$mode" == nll_detached_full ]]; then
+  run_root=${RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/nll-routing-full-20260915}
 fi
 
 # The mechanism check is deliberately short, but its optimization/data
@@ -65,6 +69,11 @@ fi
 steps=100
 warmup_steps=10
 save_freq=100
+if [[ "$mode" == nll_detached_full ]]; then
+  steps=1000
+  warmup_steps=100
+  save_freq=250
+fi
 batch_size=16
 gradient_accumulation_steps=4
 num_processes=4
@@ -92,6 +101,7 @@ case "$mode" in
   gate001) arms=(gate001) ;;
   gate010) arms=(gate010) ;;
   nll_detached) arms=(nll_detached) ;;
+  nll_detached_full) arms=(nll_detached_full) ;;
   both) arms=(gate001 gate010) ;;
 esac
 
@@ -221,9 +231,20 @@ IFS=',' read -r -a gpu_ids <<< "$gpu_list"
   "CUDA_VISIBLE_DEVICES=$gpu_list must list exactly $num_processes GPUs"
 [[ "$gpu_memory_limit_mib" =~ ^[0-9]+$ ]] || die "GPU_MEMORY_LIMIT_MIB must be an integer"
 [[ "$gpu_utilization_limit_pct" =~ ^[0-9]+$ ]] || die "GPU_UTILIZATION_LIMIT_PCT must be an integer"
+# Resolve nvidia-smi indices to UUIDs before CUDA import. A failed physical GPU
+# can make CUDA ordinal numbering differ from nvidia-smi numbering.
+resolved_gpu_ids=()
 for gpu_id in "${gpu_ids[@]}"; do
-  [[ "$gpu_id" =~ ^[0-9]+$ ]] || die "GPU id must be numeric: $gpu_id"
+  [[ "$gpu_id" =~ ^[0-9]+$ || "$gpu_id" =~ ^GPU-[0-9a-fA-F-]{36}$ ]] || die "invalid GPU selector: $gpu_id"
+  gpu_uuid=$(nvidia-smi -i "$gpu_id" --query-gpu=uuid --format=csv,noheader)
+  [[ "$gpu_uuid" =~ ^GPU-[0-9a-fA-F-]{36}$ ]] || die "could not resolve a single GPU UUID: $gpu_id"
+  for resolved_gpu_id in ${resolved_gpu_ids[@]+"${resolved_gpu_ids[@]}"}; do
+    [[ "$resolved_gpu_id" != "$gpu_uuid" ]] || die "duplicate GPU UUID: $gpu_uuid"
+  done
+  resolved_gpu_ids+=("$gpu_uuid")
 done
+gpu_ids=("${resolved_gpu_ids[@]}")
+gpu_list=$(IFS=,; echo "${gpu_ids[*]}")
 export CUDA_VISIBLE_DEVICES="$gpu_list"
 
 torch_version=$(
@@ -280,6 +301,7 @@ port_for_arm() {
     gate001) printf '%s\n' "${GATE001_MAIN_PROCESS_PORT:-29614}" ;;
     gate010) printf '%s\n' "${GATE010_MAIN_PROCESS_PORT:-29615}" ;;
     nll_detached) printf '%s\n' "${NLL_ROUTING_MAIN_PROCESS_PORT:-29616}" ;;
+    nll_detached_full) printf '%s\n' "${NLL_FULL_MAIN_PROCESS_PORT:-29617}" ;;
     *) die "unknown gate arm: $1" ;;
   esac
 }
@@ -289,6 +311,7 @@ gate_probability_for_arm() {
     gate001) printf '%s\n' "0.01" ;;
     gate010) printf '%s\n' "0.10" ;;
     nll_detached) printf '%s\n' "0.01" ;;
+    nll_detached_full) printf '%s\n' "0.01" ;;
     *) die "unknown gate arm: $1" ;;
   esac
 }
@@ -366,7 +389,7 @@ payload = {
         "action_output_horizon": 50, "executed_horizon": 15, "seed": int(seed),
         "same_seed_and_data_order": True, "fresh_optimizer": True,
         "zero_initialized_dual_residual_projectors": True,
-        "prior_nll_detach_context": arm == "nll_detached",
+        "prior_nll_detach_context": arm in ("nll_detached", "nll_detached_full"),
     },
     "lineage": {
         "handoff_root": str(Path(handoff).resolve()), "runtime_root": str(Path(runtime).resolve()),
@@ -408,7 +431,7 @@ payload = {
     "validation": {
         "split": "validation5", "full_validation": True, "eval_batches": 1000000,
         "diagnostic_eval_batches": 0,
-        "fixed_checkpoint_step": 100,
+        "fixed_checkpoint_step": int(steps),
         "reports": ["H50 flow", "executed H15 flow", "current residual-off", "fixed Base/004500"],
         "formal_success_labels_used": False,
         "larger_residual_norm_is_not_utility": True,
@@ -500,7 +523,7 @@ run_arm() {
     --seed "$seed"
   )
 
-  if [[ "$arm" == nll_detached ]]; then
+  if [[ "$arm" == nll_detached || "$arm" == nll_detached_full ]]; then
     branch_args+=(--prior-nll-detach-context)
   fi
   "$python_bin" -c 'import torchcodec' >/dev/null 2>&1 || die "TorchCodec is unavailable in the selected runtime"

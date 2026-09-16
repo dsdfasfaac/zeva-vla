@@ -1,6 +1,8 @@
 # ZeVA–RoboTwin：基于已训练 PI0.5 的因果记忆增强方法
 
-**当前训练候选（2026-09-15）：** NLL-only共享输入stop-gradient已通过真实模型的32样本路由检查：flow/NLL值和flow梯度范数不变，共享task/context的NLL梯度为0，prior head的NLL梯度范数保留。固定100步候选已在aigc29四卡启动，global256、AE5e-6/new5e-5、gate0.01、Gaussian NLL和H50/H15等不变；新建optimizer/adapter，不从旧ZeVA续训。尚未确认optimizer进度，无收益结论。完成后对照原coupled gate001末步及各自off/fixed Base；这不是正式成功率交付。[合同、测试与执行记录](ZTEV2_OBJECTIVE_GRADIENTS_20260915.md)。
+**当前状态（2026-09-16）：** NLL-only共享输入stop-gradient的100步候选已完成，但未通过预设残差收益条件：H15 on=0.0102772070、off=0.0102754747，开启残差仍差0.01686%。另行预声明的1000步、约2.26 epochs预算检验在aigc24加载PI时遇CUDA timeout，未进入有效训练；保留失败记录后，以同一设置派发到新空闲的aigc29四卡，尚未确认optimizer进度。从Base004500新建optimizer/adapter，不从短轮续训；冻结范围、global256、AE5e-6/new5e-5、gate0.01、Gaussian NLL、双残差和H50/H15不变。aigc24副本已全量哈希核验，重派aigc29使用原数据；GPU均按物理UUID选择，未重置设备或终止其他任务。固定末步须优于自身off和同预算训练Base才考虑正式闭环；若失败不继续延长该路由。最新完整正式结果仍为Base55%、ZeVA55%，没有新成功率。[完整结果、预算与运行记录](ZTEV2_NLL_ROUTING_BUDGET_20260916.md)。
+
+以下较早进度段落是历史快照，不能将其中“运行中/尚未训练”当成当前状态。
 
 **梯度诊断结果与改动（2026-09-15）：** 两臂32条同训练样本的检查均完成exit0。加权NLL对memory encoder的梯度范数为flow的50–1014倍，两臂各3/4批次方向冲突；不将小样本原始梯度比外推为Adam更新或闭环因果结论。已实现默认关闭的NLL-only输入stop-gradient：NLL继续训练prior head，但不回传共享task/context；flow的两条残差路径保持连通。新路由正在隔离验证，尚未训练。[完整证据与边界](ZTEV2_OBJECTIVE_GRADIENTS_20260915.md)。
 

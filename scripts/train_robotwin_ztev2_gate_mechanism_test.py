@@ -38,16 +38,48 @@ class GateMechanismContractTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_gpu_selectors_resolve_to_unique_physical_uuids(self) -> None:
+        block = self.source.split('resolved_gpu_ids=()', 1)[1].split('torch_version=$(', 1)[0]
+        block = 'resolved_gpu_ids=()' + block
+        mock = '''
+die() { echo "$*" >&2; exit 3; }
+nvidia-smi() {
+  case "$2" in
+    1|GPU-11111111-1111-1111-1111-111111111111) echo GPU-11111111-1111-1111-1111-111111111111 ;;
+    5) echo GPU-55555555-5555-5555-5555-555555555555 ;;
+    *) echo invalid ;;
+  esac
+}
+'''
+        cases = [('1 5', True), ('GPU-11111111-1111-1111-1111-111111111111 5', True),
+                 ('1 1', False), ('1 GPU-11111111-1111-1111-1111-111111111111', False),
+                 ('1 99', False), ('1 invalid', False)]
+        for selectors, expected in cases:
+            command = mock + f'gpu_ids=({selectors})\n' + block + '\necho "$CUDA_VISIBLE_DEVICES"\n'
+            result = subprocess.run(['bash', '-eu', '-c', command], capture_output=True, text=True)
+            with self.subTest(selectors=selectors):
+                self.assertEqual(result.returncode == 0, expected, result.stderr)
+                if expected:
+                    self.assertEqual(result.stdout.strip(), 'GPU-11111111-1111-1111-1111-111111111111,GPU-55555555-5555-5555-5555-555555555555')
+
     def test_nll_routing_is_separate_opt_in_experiment(self) -> None:
-        self.assertIn('if [[ "$arm" == nll_detached ]]; then\n    branch_args+=(--prior-nll-detach-context)', self.source)
+        self.assertIn('if [[ "$arm" == nll_detached || "$arm" == nll_detached_full ]]; then\n    branch_args+=(--prior-nll-detach-context)', self.source)
         self.assertIn('nll_detached) arms=(nll_detached)', self.source)
-        self.assertIn('"prior_nll_detach_context": arm == "nll_detached"', self.source)
+        self.assertIn('"prior_nll_detach_context": arm in ("nll_detached", "nll_detached_full")', self.source)
         self.assertIn('nll-routing-20260915}', self.source)
         config = json.loads((ROOT / 'configs/robotwin_ztev2_nll_routing_20260915.json').read_text())
         self.assertTrue(config['prior_nll_detach_context'])
         self.assertEqual(config['steps'], 100)
         self.assertEqual(config['global_batch'], 256)
         self.assertEqual(config['initial_residual_gate_probability'], 0.01)
+
+    def test_full_routing_budget_is_explicit_and_short_trial_is_not_relabelled(self) -> None:
+        config = json.loads((ROOT / 'configs/robotwin_ztev2_nll_routing_full_20260915.json').read_text())
+        self.assertEqual((config['steps'], config['warmup_steps'], config['save_freq']), (1000, 100, 250))
+        self.assertFalse(config['resume_short_checkpoint'])
+        self.assertFalse(config['short_trial_accepted'])
+        self.assertIn('nll_detached_full) arms=(nll_detached_full)', self.source)
+        self.assertIn('"fixed_checkpoint_step": int(steps)', self.source)
 
     def test_diagnostic_uses_uncapped_full_validation_api(self) -> None:
         diagnostic = self.source.split('"$zeva_root/scripts/eval_robotwin_stage2_diagnostics.py"', 1)[1]

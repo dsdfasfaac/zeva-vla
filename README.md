@@ -47,22 +47,39 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 ## Zeva architecture
 
-Development update (2026-09-15 19:19 CST): the preregistered **100-step
+Latest development status (2026-09-16): the **100-step NLL-detached trial
+completed but failed its declared residual-utility condition**. H15 error was
+0.0102772070 with residuals and 0.0102754747 without them: a 0.01686% worsening.
+A separate, preregistered 1,000-step budget check (~2.26 epochs) has been
+dispatched from Base004500 with a fresh optimizer/adapter, not resumed from the
+short trial. The aigc24 attempt failed with CUDA timeouts while loading PI, before
+optimizer progress; its logs are retained. The same configuration was dispatched
+to newly idle aigc29 GPUs0–3 after host-to-device transfer/CUDA/decoder checks.
+Optimizer progress is not yet confirmed. Frozen modules, LR5e-6/5e-5, global256
+and H50/H15 are unchanged.
+The relocated dataset passed full content-hash checks. GPU selection now resolves
+physical UUIDs because CUDA and nvidia-smi ordinals differ on this host.
+If fixed step1000 does not improve H15 over both its own residual-off path and
+the same-budget trained Base, do not extend this routing or promote it to formal
+rollout. Latest completed formal success rates remain **Base55% / ZeVA55%**.
+See [results, fixed budget and launch evidence](docs/ZTEV2_NLL_ROUTING_BUDGET_20260916.md).
+
+Historical mechanism result (2026-09-15 19:19 CST): the preregistered **100-step
 gate-initialization comparison** (0.01 versus 0.10) completed both arms and all
 5,874 validation decisions. The stronger gate increased context/prior residual
 norms 7.62x/8.45x but did not improve H15: error rose 0.10341% versus the 0.01
 arm, and both residual-on paths were slightly worse than their own off paths.
 This does not support extending the stronger-gate run; it is not a significance
 claim or evidence that ZTE cannot work. No new full training or formal rollout
-has started. The read-only gradient check completed on 32 fixed training
+had started at that point. The read-only gradient check completed on 32 fixed training
 decisions: weighted NLL gradients in the shared memory encoder were 50–1,014x
 the flow gradients, with negative alignment in three of four batches in each
 arm. These are local raw-gradient observations, not Adam-update ratios or
 causal proof of rollout failures. An opt-in NLL-only input-stop-gradient route
 passed direct Torch and real-weight routing checks: flow/NLL values and flow
 gradient norms were unchanged, while NLL-to-shared-feature gradients became
-zero. A preregistered 100-step candidate using this routing has now been
-dispatched; optimizer progress and validation benefit are not yet confirmed.
+zero. The subsequent 100-step candidate completed without establishing residual
+utility; its separate full-budget follow-up is described above.
 See the [gradient evidence and routing scope](docs/ZTEV2_OBJECTIVE_GRADIENTS_20260915.md).
 This is not a new matched-Base
 performance result or a test-label gate sweep. See the

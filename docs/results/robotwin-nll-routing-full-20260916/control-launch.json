@@ -1,0 +1,32 @@
+{
+  "pid": 3669736,
+  "host": "aigc24",
+  "gpu_uuid": "GPU-2f6acfc8-de5a-3830-cf47-ad1ab02988e5",
+  "command": [
+    "python3",
+    "-u",
+    "/mnt/100T/users/dingxin/VLA/nll-routing-full-20260915-YLzLnA/scripts/eval_robotwin_stage2_diagnostics.py",
+    "--checkpoint",
+    "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/zeva/001000",
+    "--manifest",
+    "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/zeva/manifest.json",
+    "--output",
+    "/mnt/100T/users/dingxin/VLA/nll-routing-full-20260915-YLzLnA/coupled1000-vs-base1000-b16.json",
+    "--fixed-teacher-checkpoint",
+    "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/baseline/001000",
+    "--dataset-root",
+    "/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/data",
+    "--batch-size",
+    "16",
+    "--eval-batches",
+    "0",
+    "--video-backend",
+    "torchcodec",
+    "--decoder-threads",
+    "1",
+    "--seed",
+    "1000"
+  ],
+  "started_at_utc": "2026-09-16T02:38:15.763997+00:00",
+  "gpu6_probe_failed": "CUDA launch timed out before control start; not used or reset"
+}
