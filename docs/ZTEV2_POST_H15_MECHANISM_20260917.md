@@ -21,8 +21,8 @@
 
 旧 Stage1 probe 在 validation5 显示 phase/causal 组合能比 task-only 更好预测**专家动作**，但那不是 Base 的动作残差，也没有闭环鲁棒性结论。现针对当前已评测 checkpoint 增加一个只读、全 5874 条 validation5 的对照：保持 checkpoint、语言检索、gate、Base、样本顺序与同噪声不变，仅把每个 batch 内**由任务语言推断出的同一任务**的 phase/causal/mask 整组循环错位；不使用 oracle task ID、episode index 或测试集。若原始对齐状态确有针对当前观测的增量作用，原始 H15 flow 应优于错位条件；否则须重新设计表征目标／注入，而不是继续盲目增大 gate 或加训练步数。
 
-两批 32 条决策的只读 smoke 已通过，32/32 条确实被错位；正式全量只读诊断在 aigc29 GPU4 运行，PID `2690047`，输出 `.../h15_route_full/validation_diagnostics_000500_zte_within_task_roll.json`。此测试是机制诊断，不是闭环成功率，也不会写 checkpoint。原始对齐的全量报告已在[上一轮验证记录](results/robotwin-h15-route-20260916/validation_diagnostics_000500.json)固定。
+两批 32 条决策的只读 smoke 已通过，32/32 条确实被错位。全量 5874 条验证已完成，[一步错位报告](results/robotwin-h15-route-20260916/validation_diagnostics_000500_zte_within_task_roll.json)显示 5871/5874 条实际重排，样本顺序 SHA 与原始报告完全相同；原始对齐 H15 flow 为 `0.01006796956`，一步错位为 `0.01006785687`，后者甚至低约 `1.13e-7`（约 0.0011%）。这**没有证据表明当前注入需要精确的逐状态 ZTE 对齐**；但相邻 H15 决策的 phase/causal 可能高度相关，一步错位不够强，不能据此断言 ZTE 没信息。现追加同一语言任务内半个 batch 的更远确定性错位作为第二个机制检查。原始对齐的全量报告已在[上一轮验证记录](results/robotwin-h15-route-20260916/validation_diagnostics_000500.json)固定。两种错位都是验证诊断，不是闭环成功率，也不会写 checkpoint。
 
 ## 决策边界
 
-不因这次正式测试各任务的涨跌选择任务或 seed。全量错位对照完成前，不启动新的训练。完成后先判断 ZTE 状态对 H15 改错是否有实质而非微弱的增量；若没有，应改 Stage1/Stage2 目标或条件接入；若有，再分析为何专家轨迹离线优势无法转化为 on-policy 闭环优势，优先用独立开发 split 的闭环证据检验，而不是继续把正式测试集当调参集。
+不因这次正式测试各任务的涨跌选择任务或 seed。更远错位对照完成前，不启动新的训练。完成后先判断 ZTE 状态对 H15 改错是否有实质而非微弱的增量；若没有，应改 Stage1/Stage2 目标或条件接入；若有，再分析为何专家轨迹离线优势无法转化为 on-policy 闭环优势，优先用独立开发 split 的闭环证据检验，而不是继续把正式测试集当调参集。

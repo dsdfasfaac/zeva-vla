@@ -1,0 +1,364 @@
+{
+  "checkpoint": {
+    "adapter": {
+      "bytes": 13672885,
+      "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/000500/zeva_adapter.pth",
+      "sha256": "166dcd45125d95e441b35cb82ea6718fa6238ed8482777707f2c1ada9e30353f"
+    },
+    "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/000500/model.safetensors",
+    "model_bytes": 9354050752,
+    "model_sha256": "bcf1d4f5f3e77926b8b7f798bb983378ad096e3892eed1a66058c5d98ed9bc17",
+    "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/000500"
+  },
+  "diagnostic_source_sha256": {
+    "entrypoint": "5f354fb72cc0f2b7aac612a378f0d75471633e534f22eb7482407f5fc8e91e37",
+    "trainer": "c4fdf84bcdb0866d7cb516fab02b612d6182eec85168ac419447ea9c154a992f"
+  },
+  "fixed_teacher": {
+    "available": true,
+    "model": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/baseline/001000/model.safetensors",
+    "model_bytes": 9354050752,
+    "model_sha256": "bcf1d4f5f3e77926b8b7f798bb983378ad096e3892eed1a66058c5d98ed9bc17",
+    "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/baseline/001000",
+    "shared_frozen_weights_verified": true
+  },
+  "legacy_unmasked_flow_equivalence": {
+    "available": false,
+    "diagnostic_h50_mean": 0.01870926469564438,
+    "equal_batch_weighting": false,
+    "legacy_unmasked_flow": 0.01866571232676506,
+    "padding_free": true,
+    "raw_replay": "same-noise raw.mean((1,2)) versus existing evaluate(flow)",
+    "reason": "ordinary evaluate(flow) averages batch means; the final batch was partial",
+    "valid_examples": 5874,
+    "valid_steps": 293700
+  },
+  "lineage": {
+    "causal_bank": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/train_causal_bank.pt",
+    "causal_bank_sha256": "33b11b41992d07890a798602cb8cadebc0f798b8959adfc3b8cf5b660bf14ad9",
+    "live_queries": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/live_queries_h15.pt",
+    "live_queries_sha256": "c39e3c6565c438b9496133833a7288a08a81a7985fc1723bf8a39d6ad2d47de6",
+    "stage1_schema": "zeva-robotwin-zte-stage1-v2-checkpoint",
+    "stage1_step": 4096,
+    "statistics_sha256": "9747c46391f6ac2e868b6c4bab62a3be6028aca4995dea48790bee275e16b7d1",
+    "task_retrieval": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/task_retrieval.pth",
+    "task_retrieval_sha256": "c54b3275af4b15999a5d849f476c19ff3d01c76150a487679e9bbe61928798b7",
+    "task_retrieval_validation_accuracy": 0.982962965965271,
+    "trainer_manifest_schema": "zeva-robotwin-stage2-action-expert-manifest-v11",
+    "transition_horizon": 15,
+    "zte_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-scheduler-repair-20260911i/zte_v2_step_004096.pth",
+    "zte_checkpoint_sha256": "ce9402981b8e2f1ce597e2cb150b795ae246f84fb81b3bb72fae023a3decf899"
+  },
+  "protocol": {
+    "available_validation_batches": 368,
+    "batch_size": 16,
+    "checkpoint_written": false,
+    "complete": true,
+    "dataset_adapter": "/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data/adapter.json",
+    "dataset_adapter_sha256": "8ac54abcec7704b0111b7c28be3fb3a18e27e0ebe8e3dcf8ddff948b36100f8f",
+    "dataset_root": "/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data",
+    "decoder_threads": 1,
+    "evaluated_batches": 368,
+    "executed_horizon": 15,
+    "optimizer_created": false,
+    "ordered_validation_samples_sha256": "a9c6a8e30aa3f7ecbfcb9ce81d6a141ef563300d41e339a22d06fb75a0418ac1",
+    "policy_horizon": 50,
+    "requested_eval_batches": 0,
+    "seed": 1000,
+    "single_process": true,
+    "torch_compile": false,
+    "training_variant": "zeva",
+    "validation_decision_samples": 5874,
+    "validation_diagnostics": true,
+    "validation_only_intervention": {
+      "context_gate_scale": 1.0,
+      "deployment_or_checkpoint_modified": false,
+      "prior_gate_scale": 1.0,
+      "zte_ablation": "within_language_task_roll",
+      "zte_ablation_stats": {
+        "batches": 368,
+        "rows_permuted": 5871,
+        "rows_seen": 5874
+      }
+    },
+    "validation_split": "validation5",
+    "video_backend": "torchcodec"
+  },
+  "result": {
+    "baseline": 0.018685102462768555,
+    "flow": 0.01866571232676506,
+    "minimum_task_paired_improvement": 4.223250300583459e-07,
+    "paired_degradation": 4.001064007752575e-05,
+    "paired_improvement": 1.939020148711279e-05,
+    "paired_win_fraction": 0.5526494383811951,
+    "per_task_paired": {
+      "beat_block_hammer": {
+        "count": 220,
+        "paired_degradation": 2.4272674636449665e-05,
+        "paired_improvement": 4.261687081452692e-06,
+        "paired_win_fraction": 0.5636363625526428
+      },
+      "blocks_ranking_rgb": {
+        "count": 839,
+        "paired_degradation": 4.175927460892126e-05,
+        "paired_improvement": 1.549385160615202e-05,
+        "paired_win_fraction": 0.5446960926055908
+      },
+      "blocks_ranking_size": {
+        "count": 839,
+        "paired_degradation": 5.154779501026496e-05,
+        "paired_improvement": 2.446728467475623e-05,
+        "paired_win_fraction": 0.5542312264442444
+      },
+      "handover_block": {
+        "count": 531,
+        "paired_degradation": 2.932257848442532e-05,
+        "paired_improvement": 1.939396679517813e-05,
+        "paired_win_fraction": 0.5480226278305054
+      },
+      "hanging_mug": {
+        "count": 619,
+        "paired_degradation": 4.554587576421909e-05,
+        "paired_improvement": 2.9481185265467502e-05,
+        "paired_win_fraction": 0.5751211643218994
+      },
+      "pick_dual_bottles": {
+        "count": 233,
+        "paired_degradation": 3.635580651462078e-05,
+        "paired_improvement": 3.1113588192965835e-05,
+        "paired_win_fraction": 0.6008583903312683
+      },
+      "put_bottles_dustbin": {
+        "count": 1145,
+        "paired_degradation": 4.013039142591879e-05,
+        "paired_improvement": 2.035036050074268e-05,
+        "paired_win_fraction": 0.5432314276695251
+      },
+      "scan_object": {
+        "count": 313,
+        "paired_degradation": 6.294346530921757e-05,
+        "paired_improvement": 4.223250300583459e-07,
+        "paired_win_fraction": 0.5367411971092224
+      },
+      "stack_bowls_three": {
+        "count": 866,
+        "paired_degradation": 3.11492221953813e-05,
+        "paired_improvement": 1.6726562535041012e-05,
+        "paired_win_fraction": 0.550808310508728
+      },
+      "stamp_seal": {
+        "count": 269,
+        "paired_degradation": 2.637772195157595e-05,
+        "paired_improvement": 2.1880079657421447e-05,
+        "paired_win_fraction": 0.5464683771133423
+      }
+    },
+    "prior": 18.42934799194336,
+    "prior_std": 0.935267984867096,
+    "residual_abs": null,
+    "residual_regression": null,
+    "retrieval_accuracy": 0.9984714984893799,
+    "total": 0.2029993236064911,
+    "trust_region": null,
+    "validation_diagnostics": {
+      "available": true,
+      "enabled": true,
+      "executed_horizon": 15,
+      "flow": {
+        "current_residual_off_executed_h15": {
+          "available": true,
+          "max": 0.7919493317604065,
+          "mean": 0.01009312178939581,
+          "min": 0.0001434437435818836,
+          "valid_examples": 5874,
+          "valid_steps": 88110
+        },
+        "current_residual_off_h50": {
+          "available": true,
+          "max": 2.3518316745758057,
+          "mean": 0.01872868463397026,
+          "min": 0.0001452342257834971,
+          "valid_examples": 5874,
+          "valid_steps": 293700
+        },
+        "zeva_residual_on_executed_h15": {
+          "available": true,
+          "max": 0.7909440994262695,
+          "mean": 0.01006785687059164,
+          "min": 0.00014023463882040232,
+          "valid_examples": 5874,
+          "valid_steps": 88110
+        },
+        "zeva_residual_on_h50": {
+          "available": true,
+          "max": 2.351409673690796,
+          "mean": 0.01870926469564438,
+          "min": 0.00014290478429757059,
+          "valid_examples": 5874,
+          "valid_steps": 293700
+        }
+      },
+      "injected_residual_norms": {
+        "available": true,
+        "h15": {
+          "available": true,
+          "context_delta_norm": {
+            "available": true,
+            "max": 0.6006220579147339,
+            "mean": 0.5417136549949646,
+            "min": 0.384264200925827,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "context_relative_norm": {
+            "available": true,
+            "max": 0.021097179502248764,
+            "mean": 0.0067545268684625626,
+            "min": 0.0026916160713881254,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "horizon": 15,
+          "prior_delta_norm": {
+            "available": true,
+            "max": 0.0015114196576178074,
+            "mean": 0.001319696195423603,
+            "min": 0.000886638998053968,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "prior_relative_norm": {
+            "available": true,
+            "max": 4.908882692689076e-05,
+            "mean": 1.6445988876512274e-05,
+            "min": 6.388405836332822e-06,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "reference": "pre_injection_noisy_action_embedding",
+          "reference_norm": {
+            "available": true,
+            "max": 155.60916137695312,
+            "mean": 92.45570373535156,
+            "min": 24.269514083862305,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "total_delta_norm": {
+            "available": true,
+            "max": 0.6018263101577759,
+            "mean": 0.5428063869476318,
+            "min": 0.38505232334136963,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          },
+          "total_relative_norm": {
+            "available": true,
+            "max": 0.021137796342372894,
+            "mean": 0.006768145598471165,
+            "min": 0.0026971830520778894,
+            "valid_examples": 5874,
+            "valid_steps": 88110
+          }
+        },
+        "h50": {
+          "available": true,
+          "context_delta_norm": {
+            "available": true,
+            "max": 1.0965808629989624,
+            "mean": 0.9890292882919312,
+            "min": 0.7015672326087952,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "context_relative_norm": {
+            "available": true,
+            "max": 0.019102711230516434,
+            "mean": 0.005910132545977831,
+            "min": 0.0024555905256420374,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "horizon": 50,
+          "prior_delta_norm": {
+            "available": true,
+            "max": 0.0020113990176469088,
+            "mean": 0.001767141162417829,
+            "min": 0.0012060452718287706,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "prior_relative_norm": {
+            "available": true,
+            "max": 3.456912963883951e-05,
+            "mean": 1.0551305422268342e-05,
+            "min": 4.484300916374195e-06,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "reference": "pre_injection_noisy_action_embedding",
+          "reference_norm": {
+            "available": true,
+            "max": 416.1342468261719,
+            "mean": 184.7342987060547,
+            "min": 55.09054946899414,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "total_delta_norm": {
+            "available": true,
+            "max": 1.098054051399231,
+            "mean": 0.9903627038002014,
+            "min": 0.7025151252746582,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          },
+          "total_relative_norm": {
+            "available": true,
+            "max": 0.019128326326608658,
+            "mean": 0.005918096750974655,
+            "min": 0.0024589449167251587,
+            "valid_examples": 5874,
+            "valid_steps": 293700
+          }
+        },
+        "measurement": "projected gated context/prior tensors divided by the measured pre-injection noisy action-embedding norm"
+      },
+      "mask_source": [
+        "implicit_all_action_steps_valid"
+      ],
+      "paired": {
+        "current_residual_off": {
+          "available": true,
+          "degradation": 3.695930354297161e-05,
+          "improvement": 2.5263678253395483e-05,
+          "label": "current_residual_off",
+          "student_flow": 0.01006785687059164,
+          "teacher_flow": 0.01009312178939581,
+          "valid_examples": 5874,
+          "valid_steps": 88110,
+          "win_fraction": 0.5362614989280701
+        },
+        "fixed_teacher": {
+          "available": true,
+          "degradation": 3.695930354297161e-05,
+          "improvement": 2.5263678253395483e-05,
+          "label": "fixed_teacher",
+          "student_flow": 0.01006785687059164,
+          "teacher_flow": 0.01009312178939581,
+          "valid_examples": 5874,
+          "valid_steps": 88110,
+          "win_fraction": 0.5362614989280701
+        }
+      },
+      "policy_horizon": 50,
+      "preprocessing_contract": "same processed batch, PI0.5 image preprocessing, action preparation, and normalization path as the ordinary H50 validation",
+      "raw_flow_source": "PI05Pytorch.forward unreduced [B,H,D] flow errors"
+    }
+  },
+  "schema": "zeva-robotwin-stage2-validation-diagnostics-v1",
+  "source_manifest": {
+    "path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/manifest.json",
+    "sha256": "e3036fba891d7d9a417b36bfc9ffc8ac8d83304e68850fedc9233e48fbed3564"
+  }
+}

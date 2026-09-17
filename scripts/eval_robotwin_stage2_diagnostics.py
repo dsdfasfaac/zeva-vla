@@ -135,7 +135,7 @@ def _validation_zte_ablation(policy, mode: str):
     if mode == "none":
         yield stats
         return
-    if mode != "within_language_task_roll":
+    if mode not in {"within_language_task_roll", "within_language_task_half_roll"}:
         raise ValueError(f"Unsupported validation ZTE ablation: {mode}")
     original = stage2_train._retrieve  # noqa: SLF001
 
@@ -150,7 +150,8 @@ def _validation_zte_ablation(policy, mode: str):
             for task_id in predicted_ids.unique():
                 positions = torch.nonzero(predicted_ids == task_id, as_tuple=False).flatten()
                 if len(positions) > 1:
-                    source[positions] = positions.roll(1)
+                    shift = 1 if mode == "within_language_task_roll" else max(1, len(positions) // 2)
+                    source[positions] = positions.roll(shift)
             stats["batches"] += 1
             stats["rows_seen"] += len(source)
             stats["rows_permuted"] += int((source != torch.arange(len(source), device=source.device)).sum())

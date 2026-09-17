@@ -6,7 +6,8 @@ zeva_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 run_root=${H15_ROUTE_RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full}
 checkpoint=$run_root/000500
 eval_batches=${H15_ZTE_EVAL_BATCHES:-0}
-report=${H15_ZTE_ALIGNMENT_REPORT:-$run_root/validation_diagnostics_000500_zte_within_task_roll.json}
+ablation_mode=${H15_ZTE_ABLATION_MODE:-within_language_task_roll}
+report=${H15_ZTE_ALIGNMENT_REPORT:-$run_root/validation_diagnostics_000500_zte_${ablation_mode}.json}
 handoff=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1
 runtime=$handoff/runtime
 overlay=/mnt/100T/users/dingxin/VLA/runtime/zeva-model-runtime-a31-torch271-cu126-20260914
@@ -17,6 +18,7 @@ expected_uuid=GPU-23cf0ed2-0f7a-f425-7457-781b444b2811
 
 [[ $(hostname -s) == aigc29 ]] || { echo "This diagnostic is pinned to aigc29" >&2; exit 2; }
 [[ "$eval_batches" =~ ^[0-9]+$ ]] || exit 2
+[[ "$ablation_mode" == within_language_task_roll || "$ablation_mode" == within_language_task_half_roll ]] || exit 2
 [[ -s "$checkpoint/model.safetensors" && -s "$checkpoint/zeva_adapter.pth" && -s "$run_root/manifest.json" ]] || exit 2
 [[ ! -e "$report" ]] || { echo "Refusing to overwrite $report" >&2; exit 2; }
 actual_uuid=$(nvidia-smi -i 4 --query-gpu=uuid --format=csv,noheader)
@@ -41,4 +43,4 @@ exec "$python_bin" -u "$zeva_root/scripts/eval_robotwin_stage2_diagnostics.py" \
   --fixed-teacher-checkpoint /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/baseline/001000 \
   --batch-size 16 --eval-batches "$eval_batches" \
   --video-backend torchcodec --decoder-threads 1 --seed 1000 \
-  --zte-ablation within_language_task_roll
+  --zte-ablation "$ablation_mode"
