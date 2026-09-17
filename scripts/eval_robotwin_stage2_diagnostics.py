@@ -25,6 +25,7 @@ import tyro
 import tqdm
 
 try:
+    from scripts import train_robotwin_stage2 as stage2_train
     from openpi.zeva.causal_bank import RobotWinCausalBank
     from openpi.zeva.robotwin_contract import RobotWinHandoff
     from openpi.zeva.robotwin_policy import RobotWinZevaPolicy
@@ -41,6 +42,7 @@ try:
     from scripts.train_robotwin_stage2 import _validated_runtime_versions
     from scripts.train_robotwin_stage2 import evaluate
 except ModuleNotFoundError:  # Direct ``python scripts/...py`` execution.
+    import train_robotwin_stage2 as stage2_train
     from train_robotwin_stage2 import Args as Stage2Args
     from train_robotwin_stage2 import RobotWinStage2Dataset
     from train_robotwin_stage2 import _load_task_subset
@@ -87,6 +89,7 @@ class EvalArgs:
     seed: int | None = None
     context_gate_scale: float = 1.0
     prior_gate_scale: float = 1.0
+    zte_ablation: str = "none"
 
 
 @contextmanager
@@ -117,6 +120,55 @@ def _validation_gate_intervention(policy, context_scale: float, prior_scale: flo
             setattr(policy, method_name, previous_override)
         else:
             delattr(policy, method_name)
+
+
+@contextmanager
+def _validation_zte_ablation(policy, mode: str):
+    """Break within-task ZTE/causal alignment on validation only.
+
+    The group key is inferred from the same task language as the deployed
+    policy; it never reads task_id or episode_index.  The deterministic roll
+    preserves each batch's marginal features and masks while changing which
+    observation receives them.  It is a diagnostic, not a deployable policy.
+    """
+    stats = {"batches": 0, "rows_seen": 0, "rows_permuted": 0}
+    if mode == "none":
+        yield stats
+        return
+    if mode != "within_language_task_roll":
+        raise ValueError(f"Unsupported validation ZTE ablation: {mode}")
+    original = stage2_train._retrieve  # noqa: SLF001
+
+    def retrieve(*args, **kwargs):
+        if kwargs.get("training") is not False:
+            raise RuntimeError("ZTE ablation is validation-only")
+        bank_batch, confidence, accuracy = original(*args, **kwargs)
+        processed = args[1]
+        with torch.no_grad():
+            predicted_ids, _ = policy.retrieve_task_ids_from_language(processed)
+            source = torch.arange(len(predicted_ids), device=predicted_ids.device)
+            for task_id in predicted_ids.unique():
+                positions = torch.nonzero(predicted_ids == task_id, as_tuple=False).flatten()
+                if len(positions) > 1:
+                    source[positions] = positions.roll(1)
+            stats["batches"] += 1
+            stats["rows_seen"] += len(source)
+            stats["rows_permuted"] += int((source != torch.arange(len(source), device=source.device)).sum())
+            bank_batch = dataclasses.replace(
+                bank_batch,
+                phase_token=bank_batch.phase_token[source],
+                brief_signals=bank_batch.brief_signals[source],
+                retrieved_signals=bank_batch.retrieved_signals[source],
+                brief_mask=(None if bank_batch.brief_mask is None else bank_batch.brief_mask[source]),
+                retrieved_mask=(None if bank_batch.retrieved_mask is None else bank_batch.retrieved_mask[source]),
+            )
+        return bank_batch, confidence, accuracy
+
+    stage2_train._retrieve = retrieve  # noqa: SLF001
+    try:
+        yield stats
+    finally:
+        stage2_train._retrieve = original  # noqa: SLF001
 
 
 def _read_json(path: str | Path) -> dict[str, Any]:
@@ -679,7 +731,8 @@ def main(cli: EvalArgs) -> None:
 
     policy, validation_loader = accelerator.prepare(policy, validation_loader)
     policy.eval()
-    with _validation_gate_intervention(policy, cli.context_gate_scale, cli.prior_gate_scale):
+    with _validation_gate_intervention(policy, cli.context_gate_scale, cli.prior_gate_scale), \
+            _validation_zte_ablation(policy, cli.zte_ablation) as zte_ablation_stats:
         result = evaluate(
             policy,
             tqdm.tqdm(validation_loader, total=min(args.eval_batches, len(validation_loader)), desc="Read-only validation"),
@@ -707,6 +760,8 @@ def main(cli: EvalArgs) -> None:
             "validation_only_intervention": {
                 "context_gate_scale": cli.context_gate_scale,
                 "prior_gate_scale": cli.prior_gate_scale,
+                "zte_ablation": cli.zte_ablation,
+                "zte_ablation_stats": zte_ablation_stats,
                 "deployment_or_checkpoint_modified": False,
             },
             "seed": seed,

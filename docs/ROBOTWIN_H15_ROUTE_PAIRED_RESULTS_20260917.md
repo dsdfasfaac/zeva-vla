@@ -28,4 +28,4 @@ Base 55.5% 略高于上轮 Base1000 的 55%，仍低于历史非同轮的 57% �
 
 ## 下一轮决策边界
 
-这轮提示「H15 离线 flow 微弱改善」不足以作为闭环 +4pp 的代理指标；直接加大 context gate 的开发集检查反而使 H15 flow 变差。因此先在训练/验证数据上做机制诊断：量化被裁剪后的 context/prior 两支梯度和更新、ZTE 条件特征对 Base 动作残差是否有**增量预测力**，再决定是否修改表征或注入。旧 v14 **直接 output residual** 已在另一个 10×8 开发 split 得到 Base 43/80、ZeVA 38/80（远端 `eval/advantage10-output-residual-v14/step-001500/split-j/paired_report.json`），不能当作未试过的自然下一步原样重跑。不得依照本表的任务/seed 成败来筛任务、选 checkpoint、定 gate 或宣称新方案成功。若再有候选，须先通过不使用正式测试标签的独立验证门槛，再按相同冻结协议做新的配对闭环，并完整公布失败轮次。
+这轮提示「H15 离线 flow 微弱改善」不足以作为闭环 +4pp 的代理指标；直接加大 context gate 的开发集检查反而使 H15 flow 变差。[后续机制诊断](ZTEV2_POST_H15_MECHANISM_20260917.md)已开始用 train95/validation5 检查有效梯度和 ZTE 的条件信息量；四个固定微批次的梯度结果**不支持 NLL 抢占裁剪预算**，全量 ZTE 错位对照仍在运行。旧 v14 **直接 output residual** 已在另一个 10×8 开发 split 得到 Base 43/80、ZeVA 38/80（远端 `eval/advantage10-output-residual-v14/step-001500/split-j/paired_report.json`），不能当作未试过的自然下一步原样重跑。不得依照本表的任务/seed 成败来筛任务、选 checkpoint、定 gate 或宣称新方案成功。若再有候选，须先通过不使用正式测试标签的独立验证门槛，再按相同冻结协议做新的配对闭环，并完整公布失败轮次。

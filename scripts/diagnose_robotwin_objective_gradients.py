@@ -5,6 +5,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import torch
@@ -17,6 +18,55 @@ from scripts import train_robotwin_stage2 as train
 
 GROUPS = ("task_token_projector", "memory_context_encoder", "action_prior",
           "causal_action_projector", "prior_action_projector", "residual_gate_router")
+
+
+def _gradient_norm(values) -> float:
+    return math.sqrt(sum(float(value.detach().double().square().sum())
+                         for value in values if value is not None))
+
+
+def _summed_gradients(*groups):
+    return [_sum_optional(group[index] for group in groups)
+            for index in range(len(groups[0]))]
+
+
+def _sum_optional(values):
+    result = None
+    for value in values:
+        if value is not None:
+            result = value if result is None else result + value
+    return result
+
+
+def clip_attribution(flow, prior, gate, max_norm: float = 1.0) -> dict:
+    """Estimate exact global-norm clipping scales from objective gradients.
+
+    This is not an Adam update audit; it isolates whether the NLL head makes
+    the *already separated* ZeVA group clip the useful H15 flow component.
+    """
+    if not (len(flow) == len(prior) == len(gate)):
+        raise ValueError("Objective gradient lists must have equal length")
+    with_nll = _summed_gradients(flow, prior, gate)
+    without_nll = _summed_gradients(flow, gate)
+    actual_norm = _gradient_norm(with_nll)
+    no_nll_norm = _gradient_norm(without_nll)
+    flow_norm = _gradient_norm(flow)
+    actual_scale = min(1.0, max_norm / (actual_norm + 1e-6))
+    no_nll_scale = min(1.0, max_norm / (no_nll_norm + 1e-6))
+    return {
+        "flow_norm": flow_norm,
+        "weighted_nll_norm": _gradient_norm(prior),
+        "weighted_gate_norm": _gradient_norm(gate),
+        "actual_combined_norm": actual_norm,
+        "without_nll_combined_norm": no_nll_norm,
+        "actual_clip_scale": actual_scale,
+        "without_nll_clip_scale": no_nll_scale,
+        "flow_norm_after_actual_clip": flow_norm * actual_scale,
+        "flow_norm_after_no_nll_clip": flow_norm * no_nll_scale,
+        "flow_suppression_from_nll": (
+            actual_scale / no_nll_scale if no_nll_scale > 0 else None
+        ),
+    }
 
 
 def gradient_stats(left, right) -> dict:
@@ -43,6 +93,8 @@ def main() -> None:
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--detach-nll-context", action="store_true")
+    parser.add_argument("--h15-clip-audit", action="store_true",
+                        help="Audit the deployed H15 objective and ZeVA-group clipping.")
     cli = parser.parse_args()
     if cli.output.exists():
         raise FileExistsError(cli.output)
@@ -72,6 +124,13 @@ def main() -> None:
     # autograd.grad is incompatible with reentrant checkpointing. This changes
     # memory/recomputation only; training flags and stochastic masks stay intact.
     policy.foundation.model.gradient_checkpointing_disable()
+    capture = (train._ConnectedRawFlowCapture(policy.foundation.model)
+               if cli.h15_clip_audit else None)
+    if cli.h15_clip_audit:
+        if not args.zeva_h15_flow_objective or not args.decouple_action_expert_gradient:
+            raise ValueError("H15 clip audit requires the H15 routed training contract")
+        if not cli.detach_nll_context or not args.prior_nll_detach_context:
+            raise ValueError("H15 clip audit requires the actual detached-NLL route")
     if any(p.requires_grad for p in policy.causal_transition_encoder.parameters()):
         raise AssertionError("Stage1 unexpectedly trainable")
     if any(p.requires_grad for p in policy.foundation.model.paligemma_with_expert.paligemma.parameters()):
@@ -107,9 +166,15 @@ def main() -> None:
             args.prior_loss_weight, args.preserve_loss_weight, args.gate_regularization_weight,
             args.prior_residual_dropout_probability,
             prior_nll_detach_context=cli.detach_nll_context,
-            prior_supervision_horizon=args.prior_injection_horizon, training=True)
-        flow = torch.autograd.grad(losses["flow"], parameters, retain_graph=True, allow_unused=True)
-        prior = torch.autograd.grad(args.prior_loss_weight * losses["prior"], parameters, allow_unused=True)
+            prior_supervision_horizon=args.prior_injection_horizon, training=True,
+            executed_flow_capture=capture)
+        flow_objective = losses["training_flow_h15"] if cli.h15_clip_audit else losses["flow"]
+        flow = torch.autograd.grad(flow_objective, parameters, retain_graph=True, allow_unused=True)
+        prior = torch.autograd.grad(args.prior_loss_weight * losses["prior"], parameters,
+                                    retain_graph=cli.h15_clip_audit, allow_unused=True)
+        gate = (torch.autograd.grad(args.gate_regularization_weight * losses["gate"],
+                                    parameters, allow_unused=True)
+                if cli.h15_clip_audit else None)
         groups = {}
         for group in GROUPS:
             positions = [i for i, (g, _, _) in enumerate(named) if g == group]
@@ -118,6 +183,16 @@ def main() -> None:
                "flow": float(losses["flow"].detach()),
                "weighted_nll": float((args.prior_loss_weight * losses["prior"]).detach()),
                "groups": groups}
+        if cli.h15_clip_audit:
+            row["executed_h15_flow"] = float(flow_objective.detach())
+            row["clip_attribution"] = clip_attribution(flow, prior, gate)
+            row["clip_attribution_by_module"] = {
+                group: clip_attribution(
+                    [flow[i] for i in range(len(named)) if named[i][0] == group],
+                    [prior[i] for i in range(len(named)) if named[i][0] == group],
+                    [gate[i] for i in range(len(named)) if named[i][0] == group],
+                ) for group in GROUPS
+            }
         observations.append(row)
         print(json.dumps(row, allow_nan=False), flush=True)
         del flow, prior, losses, processed, bank_batch
@@ -132,10 +207,13 @@ def main() -> None:
               "optimizer_created": False, "checkpoint_written": False,
               "audited_parameters_unchanged": True, "torch_compile": False,
               "gradient_checkpointing": False, "training_masks_enabled": True,
-              "objective_horizon": 50, "prior_weight": args.prior_loss_weight,
+              "objective_horizon": 15 if cli.h15_clip_audit else 50,
+              "prior_weight": args.prior_loss_weight,
               "prior_nll_detach_context": cli.detach_nll_context,
-              "excluded_from_attribution": ["preserve hinge", "gate regularizer", "clipping", "Adam state"],
-              "caveat": "32 fixed training decisions; local raw-gradient attribution, not optimizer-update or generalization proof",
+              "excluded_from_attribution": (["sampled preserve hinge", "Adam state"]
+                                            if cli.h15_clip_audit else
+                                            ["preserve hinge", "gate regularizer", "clipping", "Adam state"]),
+              "caveat": "32 fixed training decisions; clipping scale is computed from gradients but no optimizer step or generalization proof",
               "observations": observations}
     cli.output.parent.mkdir(parents=True, exist_ok=True)
     with cli.output.open("x") as handle:
