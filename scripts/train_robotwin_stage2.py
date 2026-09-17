@@ -99,6 +99,13 @@ class Args:
     # the frozen diffusion model is evaluated once per observation, not once
     # per training epoch.
     base_action_cache: str | None = None
+    # Only for a content-verified host replica of the cache's source dataset.
+    # The reports must agree on every content hash and normalized adapter key.
+    dataset_identity_source_report: str | None = None
+    dataset_identity_replica_report: str | None = None
+    # A cached-output run may train on a host with only the action/Joint/stats
+    # indices, provided they are rehashed against a full source replica proof.
+    cache_only_dataset_replica: bool = False
     save_dir: str = (
         "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/"
         "stage2-action-expert-v8-accelerated"
@@ -227,6 +234,69 @@ def _initial_stage2_identity(path: str | Path | None) -> dict[str, Any] | None:
         "source_manifest": str(run_manifest),
         "source_manifest_sha256": _sha256(run_manifest),
     }
+
+
+def _verify_cached_dataset_replica(
+    *,
+    cache_adapter_sha256: str,
+    current_adapter: Path,
+    source_report: str | None,
+    replica_report: str | None,
+    cache_only: bool = False,
+) -> dict[str, str] | None:
+    """Accept only a previously fully hashed, semantic-equivalent copy."""
+    current_sha = _sha256(current_adapter)
+    if current_sha == cache_adapter_sha256:
+        if source_report is not None or replica_report is not None:
+            raise ValueError("Replica reports are unnecessary for an exact adapter match.")
+        return None
+    if not source_report or not replica_report:
+        raise ValueError("Base cache adapter differs; both dataset identity reports are required.")
+    source_path = Path(source_report).resolve()
+    replica_path = Path(replica_report).resolve()
+    source = json.loads(source_path.read_text())
+    replica = json.loads(replica_path.read_text())
+    if source.get("schema") != "robotwin-dataset-content-identity-v1" or replica.get(
+        "schema"
+    ) != "robotwin-dataset-content-identity-v1":
+        raise ValueError("Unsupported dataset identity report schema.")
+    if source.get("adapter_sha256") != cache_adapter_sha256:
+        raise ValueError("Source identity report does not match the Base action cache.")
+    if replica.get("adapter_sha256") != current_sha:
+        raise ValueError("Replica identity report does not match the training adapter.")
+    if Path(replica.get("dataset_root", "")).resolve() != current_adapter.parent.resolve():
+        raise ValueError("Replica identity report names another dataset root.")
+    if source.get("components") != replica.get("components") or source.get(
+        "semantic_adapter"
+    ) != replica.get("semantic_adapter"):
+        raise ValueError("Dataset replicas differ in content or normalized adapter semantics.")
+    if set(source["components"]) != {"source", "eef-index", "joint14-index", "stats"}:
+        raise ValueError("Dataset identity report lacks a required content component.")
+    proof = {
+        "source_report": str(source_path),
+        "source_report_sha256": _sha256(source_path),
+        "replica_report": str(replica_path),
+        "replica_report_sha256": _sha256(replica_path),
+        "replica_adapter_sha256": current_sha,
+    }
+    if cache_only:
+        try:
+            from scripts.audit_robotwin_dataset_identity import component  # noqa: PLC0415
+        except ModuleNotFoundError:
+            from audit_robotwin_dataset_identity import component  # noqa: PLC0415
+
+        adapter = json.loads(current_adapter.read_text())
+        for field, name in (
+            ("eef_cache_root", "eef-index"),
+            ("joint_cache_root", "joint14-index"),
+            ("stats_path", "stats"),
+        ):
+            actual = component(Path(adapter[field]))
+            if actual != replica["components"][name]:
+                raise ValueError(f"Runtime cache-only dataset component {name} differs from proof.")
+        proof["runtime_cache_only_components_verified"] = "eef-index,joint14-index,stats"
+        proof["runtime_source_video_used"] = "false"
+    return proof
 
 
 def _validated_runtime_versions() -> dict[str, str]:
@@ -2317,19 +2387,30 @@ def _assert_output_correction_gradients(policy: RobotWinZevaPolicy) -> None:
         raise RuntimeError("v13 output correction leaked gradients into a frozen/token path.")
 
 
-def _assert_output_residual_gradients(policy: RobotWinZevaPolicy) -> None:
-    """Fail closed unless v14 trains only the direct residual path."""
-    required = (
-        policy.task_token_projector,
-        policy.memory_context_encoder,
-        policy.action_prior,
-        policy.output_residual_corrector,
+def _assert_output_residual_gradients(
+    policy: RobotWinZevaPolicy, *, allow_zero_init_delay: bool = False
+) -> None:
+    """Audit corrector on step one and all upstream paths after zero-init lifts."""
+    required = {
+        "task_token_projector": policy.task_token_projector,
+        "memory_context_encoder": policy.memory_context_encoder,
+        "action_prior": policy.action_prior,
+        "output_residual_corrector": policy.output_residual_corrector,
+    }
+    names_to_check = (
+        ("output_residual_corrector",)
+        if allow_zero_init_delay else tuple(required)
     )
-    if any(
-        not any(parameter.grad is not None for parameter in module.parameters())
-        for module in required
-    ):
-        raise RuntimeError("v14 output residual omitted gradients from a required module.")
+    missing = [
+        name for name, module in required.items()
+        if name in names_to_check
+        if not any(parameter.grad is not None for parameter in module.parameters())
+    ]
+    if missing:
+        raise RuntimeError(
+            f"v14 output residual omitted gradients from required modules: {missing}; "
+            f"allow_zero_init_delay={allow_zero_init_delay}."
+        )
     forbidden = (
         policy.foundation,
         policy.causal_transition_encoder,
@@ -3377,10 +3458,12 @@ def main(args: Args) -> None:
             "Action-expert LR must be zero for the explicitly Base-locked H15 experiment, "
             "or positive and below the ZeVA LR for ordinary Stage 2."
         )
-    if args.prior_loss_weight < 0 or (args.prior_loss_weight == 0 and not action_expert_control):
+    if not math.isfinite(args.prior_loss_weight) or args.prior_loss_weight < 0 or (
+        args.prior_loss_weight == 0 and not (action_expert_control or output_residual)
+    ):
         raise ValueError(
-            "Gaussian action-prior NLL weight must be positive except for "
-            "action_expert_control, where it must be zero."
+            "Gaussian action-prior NLL weight must be non-negative and may be zero "
+            "only for action_expert_control or direct output_residual."
         )
     if not math.isfinite(args.paired_improvement_margin) or args.paired_improvement_margin < 0:
         raise ValueError("Paired improvement margin must be finite and non-negative.")
@@ -3441,10 +3524,15 @@ def main(args: Args) -> None:
                 handoff.checkpoint / "model.safetensors"
             ):
                 raise ValueError("Stage2 Base cache task language differs from deployed Base.")
-            if base_cache.get("dataset_adapter_sha256") != _sha256(
-                Path(args.dataset_root) / "adapter.json"
-            ):
-                raise ValueError("Stage2 Base action cache dataset adapter differs from training.")
+            manifest["dataset_replica_proof"] = _verify_cached_dataset_replica(
+                cache_adapter_sha256=base_cache.get("dataset_adapter_sha256", ""),
+                current_adapter=Path(args.dataset_root) / "adapter.json",
+                source_report=args.dataset_identity_source_report,
+                replica_report=args.dataset_identity_replica_report,
+                cache_only=args.cache_only_dataset_replica,
+            )
+        elif args.dataset_identity_source_report or args.dataset_identity_replica_report:
+            raise ValueError("Dataset replica identity reports require the Stage2 Base action cache.")
         if base_cache.get("live_queries_sha256") != _sha256(args.live_queries):
             raise ValueError("v13 Base action cache uses different Stage1 live queries.")
         if args.task_subset is None or base_cache.get("task_subset_sha256") != _sha256(args.task_subset):
@@ -3895,6 +3983,18 @@ def main(args: Args) -> None:
                             _assert_gradient_routed_zeva_gradients(
                                 accelerator.unwrap_model(policy)
                             )
+                if args.training_variant in {
+                    "baseline",
+                    "action_expert_control",
+                    "output_correction",
+                    "output_residual",
+                }:
+                    # These direct-loss branches do not call backward inside
+                    # their own branch.  Without this, optimizer.step() is a
+                    # silent no-op and the output corrector never trains.
+                    accelerator.backward(
+                        micro_losses["total"] / args.gradient_accumulation_steps
+                    )
             if action_expert_gradient_router is not None:
                 action_expert_gradient_router.set_phase("residual_off")
                 # Only the final off backward synchronizes.  Its zero-valued
@@ -3922,7 +4022,12 @@ def main(args: Args) -> None:
                 if args.training_variant == "output_correction":
                     _assert_output_correction_gradients(accelerator.unwrap_model(policy))
                 elif args.training_variant == "output_residual":
-                    _assert_output_residual_gradients(accelerator.unwrap_model(policy))
+                    # The delta head starts exactly zero; its first update may
+                    # be the only connected nonzero path into the corrector.
+                    # Require every upstream ZTE-conditioned module at step 2.
+                    _assert_output_residual_gradients(
+                        accelerator.unwrap_model(policy), allow_zero_init_delay=True
+                    )
                 else:
                     _assert_action_expert_finetune_gradients(
                         accelerator.unwrap_model(policy),
@@ -3931,6 +4036,8 @@ def main(args: Args) -> None:
                         not in {"adapter", "prior_adapter"},
                         prior_only=args.training_variant in {"prior_adapter", "prior_zeva"},
                     )
+            elif step == start_step + 1 and micro_step == 0 and args.training_variant == "output_residual":
+                _assert_output_residual_gradients(accelerator.unwrap_model(policy))
             for name, value in micro_losses.items():
                 accumulated_losses.setdefault(name, []).append(value.detach())
             retrieval_accuracies.append(retrieval_accuracy.detach())

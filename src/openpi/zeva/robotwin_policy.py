@@ -2010,6 +2010,14 @@ class RobotWinZevaPolicy(nn.Module):
     def enforce_action_expert_stage2_mode(self) -> None:
         """Restore eval mode for frozen modules after the wrapper enters train mode."""
         if not getattr(self, "_action_expert_finetune", False):
+            if self._output_action_correction_enabled or self._output_residual_correction_enabled:
+                # The cached-output variants never train PI/ZTE/retrieval. A
+                # recursive policy.train() otherwise silently re-enables their
+                # stochastic training behavior on every optimizer step.
+                self.foundation.eval()
+                self.causal_transition_encoder.eval()
+                if self.retrieval_head is not None:
+                    self.retrieval_head.eval()
             return
         self.foundation.model.paligemma_with_expert.paligemma.eval()
         self.causal_transition_encoder.eval()

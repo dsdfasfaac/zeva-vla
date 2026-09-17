@@ -15,32 +15,61 @@ base=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor
 stage1_root=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911
 zte=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-phase-vector-mse-4096-20260911h-scheduler-repair-20260911i/zte_v2_step_004096.pth
 cache=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/base1000-residual-probe-20260917/base_action_cache.pt
-dataset=/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data
-expected_uuid=GPU-dc037006-cc5d-131d-9b69-cae335dcf41f
-
-[[ $(hostname -s) == aigc29 ]] || { echo "Pinned to aigc29" >&2; exit 2; }
+host=$(hostname -s)
+dataset_identity_root=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang
+replica_args=()
+cache_only_args=()
+case "$host" in
+  aigc29)
+    dataset=/data1/huangbingjia/robotwin-lerobot-sidney-eef16-v1/data
+    gpu_index=0
+    expected_uuid=GPU-dc037006-cc5d-131d-9b69-cae335dcf41f
+    max_used_mib=1024
+    ;;
+  aigc31)
+    # This cached-action path never decodes video.  The local EEF/Joint/stats
+    # indices were copied from the fully audited aigc24 replica and rehashed;
+    # source videos are intentionally absent from this host.
+    dataset=/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/data
+    gpu_index=0
+    expected_uuid=GPU-da0bafe1-add8-e332-399b-c2c50db124fe
+    # A pre-existing idle 3.8 GiB CUDA reservation spans all eight cards on
+    # this host.  Use one card only if >=60 GiB remains free and utilization
+    # is <=5%; do not stop or reset the reserving process.
+    max_used_mib=8192
+    source_identity=$dataset_identity_root/dataset-identity-aigc29-stage2-resume-20260912.json
+    replica_identity=$dataset_identity_root/dataset-identity-aigc24-stage2-resume-20260912.json
+    [[ $(sha256sum "$source_identity" | awk '{print $1}') == 3ba76d89295564cabb735aecc47ddb55cb039fe21f4072138a14d1f02fb20666 ]] || exit 2
+    [[ $(sha256sum "$replica_identity" | awk '{print $1}') == 73060be4ce82244631def725e8a05a1216aafd52550fa295221f79bc61f511d5 ]] || exit 2
+    replica_args=(--dataset-identity-source-report "$source_identity" --dataset-identity-replica-report "$replica_identity")
+    cache_only_args=(--cache-only-dataset-replica)
+    ;;
+  *) echo "Only content-verified aigc29/aigc31 are supported (aigc24 CUDA timeout)" >&2; exit 2 ;;
+esac
 [[ "$mode" == smoke || "$mode" == full ]] || { echo "Usage: $0 [smoke|full]" >&2; exit 2; }
 for required in "$base/model.safetensors" "$zte" "$cache" "$dataset/adapter.json" \
   "$stage1_root/train_causal_bank.pt" "$stage1_root/live_queries_h15.pt" \
   "$stage1_root/task_retrieval.pth" "$zeva_root/configs/robotwin_zeva_advantage10.json"; do
   [[ -s "$required" ]] || { echo "Missing $required" >&2; exit 2; }
 done
-actual_uuid=$(nvidia-smi -i 0 --query-gpu=uuid --format=csv,noheader)
-[[ "$actual_uuid" == "$expected_uuid" ]] || { echo "GPU0 UUID changed" >&2; exit 2; }
-gpu_row=$(nvidia-smi -i 0 --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits)
-IFS=, read -r used_mib utilization <<< "$gpu_row"
+actual_uuid=$(nvidia-smi -i "$gpu_index" --query-gpu=uuid --format=csv,noheader)
+[[ "$actual_uuid" == "$expected_uuid" ]] || { echo "GPU UUID changed" >&2; exit 2; }
+gpu_row=$(nvidia-smi -i "$gpu_index" --query-gpu=memory.used,memory.free,utilization.gpu --format=csv,noheader,nounits)
+IFS=, read -r used_mib free_mib utilization <<< "$gpu_row"
 used_mib=${used_mib//[[:space:]]/}
+free_mib=${free_mib//[[:space:]]/}
 utilization=${utilization//[[:space:]]/}
-(( used_mib < 1024 && utilization <= 5 )) || { echo "GPU0 is busy" >&2; exit 2; }
+(( used_mib < max_used_mib && free_mib > 60000 && utilization <= 5 )) || { echo "Selected GPU is busy" >&2; exit 2; }
 
 output=$run_root/$mode
 [[ ! -e "$output/manifest.json" ]] || { echo "Refusing to overwrite $output" >&2; exit 2; }
 mkdir -p "$output"
+exec > "$output/launcher.log" 2>&1
 steps=500
 save_freq=250
 extra_args=()
 if [[ "$mode" == smoke ]]; then
-  steps=1
+  steps=2
   save_freq=1
   extra_args=(--no-save-checkpoints)
 fi
@@ -53,13 +82,15 @@ export CUDA_VISIBLE_DEVICES="$expected_uuid"
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
 
-exec "$python_bin" -u "$zeva_root/scripts/train_robotwin_stage2.py" \
+"$python_bin" -u "$zeva_root/scripts/train_robotwin_stage2.py" \
   --handoff-root "$handoff" \
   --foundation-checkpoint "$handoff/checkpoint/pretrained_model-best-v1" \
   --initial-stage2-checkpoint "$base" \
   --goal-embedding-checkpoint "$handoff/checkpoint/pretrained_model" \
   --training-variant output_residual \
   --dataset-root "$dataset" \
+  "${replica_args[@]}" \
+  "${cache_only_args[@]}" \
   --task-subset "$zeva_root/configs/robotwin_zeva_advantage10.json" \
   --zte-checkpoint "$zte" \
   --causal-bank "$stage1_root/train_causal_bank.pt" \
@@ -78,3 +109,5 @@ exec "$python_bin" -u "$zeva_root/scripts/train_robotwin_stage2.py" \
   --learning-rate 5e-5 --warmup-steps 50 \
   --eval-batches 1000000 --log-freq 10 --no-compile-model \
   "${extra_args[@]}"
+
+printf 'completed %s\n' "$(date --iso-8601=seconds)" > "$output/COMPLETED"

@@ -33,8 +33,10 @@
 
 为排除“只是增加了输入维度或任务先验”而非状态对齐的解释，在第一份探针报告之后追加了[同任务 ZTE 乱序负对照](results/robotwin-base1000-zte-residual-probe-20260917/base1000_zte_residual_probe_shuffled_control.json)：训练和验证分别独立、确定性地在同任务内打乱 ZTE 特征，Base 动作和任务坐标保持原样；train `8182/8190`、validation `3485/3489` 条实际错位。同容量、同初始化和同采样序列下，乱序 ZTE 的 MSE 为 `0.01225184`，**真实对齐 ZTE 低 14.41%，10/10 任务均优于乱序**。该对照是在初次结果后设计的机制检验，不冒充预注册选模条件，也没有使用正式测试标签。这说明 ZTE v2 **确实含有可用于纠正 Base 动作的状态信息**；当前 H15 token 双残差不能利用它，不能据此说 ZTE 表征本身不 work。
 
-## 下一候选与当前阻塞
+## 下一候选与执行状态
 
 按[训练前固定的配置](../configs/robotwin_base1000_ztev2_output_residual_20260917.json)，下一候选冻结已训练的 Base1000、Stage1 v2、causal bank 和语言检索，把经身份核验的 Base H50 动作作为输入，只对实际执行的 H15 预测有界输出残差；不用先前占主要梯度的 Gaussian NLL 辅助项。训练 500 optimizer steps、global batch256，在 250/500 保存。只允许使用 train95/validation5；[选择器](../scripts/select_base1000_ztev2_residual_checkpoint.py)按全量 validation5 的样本加权 H15 MSE 至少降低 3%、至少 8/10 任务不退化且残差/门控有限值，选第一个达标点。专家状态离线门槛只是进入新独立开发 split 的必要条件，不是成功率声明。
 
-截至本次更新，训练代码和[单卡缓存训练入口](../scripts/train_robotwin_base1000_ztev2_output_residual.sh)已就位；本地语法与配置检查通过，但当前执行环境拒绝到 aigc29 的 SSH 连接（`Operation not permitted`），未能做远端 smoke 或启动 500 步训练。没有新 checkpoint、开发集结果或 +4pp 闭环结果。旧正式 200 episode 已在之前实验中被观察过；新候选不得用其任何成功标签、逐任务涨跌或 seed 结果选点。即使将来重复该固定评测，也必须透明披露这种历史暴露，不能将其称为全新盲测。
+SSH 后来恢复。aigc29 八卡被另一位用户占用，未抢占。aigc24 的数据副本此前已有完整 source/EEF/Joint/stats 内容证明，adapter 只因绝对路径不同而 SHA 不同；为此 Stage2 trainer 增加显式双报告语义与组件哈希校验。aigc24 GPU1、GPU7 的单步 smoke 均在加载完整 PI 权重时 CUDA timeout，未进入 optimizer，保留[GPU7 日志](results/robotwin-base1000-zte-residual-probe-20260917/smoke_a24_gpu7_failed.log)。
+
+于是将 cached-action 训练需要的 EEF index、Joint14 index 与 stats 复制到 aigc31，本机逐文件内容聚合哈希分别核对为 `4b0dcfd4…`、`44cccf65…`、`9747c463…`，与原 aigc29 和 a24 完整报告完全相同；源视频没有复制，也不会在已缓存动作的分支中解码。启动器只使用 aigc31 物理 GPU0，尊重其他作业。第一次 smoke 在 optimizer 前因原 trainer 不允许 output-residual 的 `prior_loss_weight=0` 退出，已修复并保留[日志](results/robotwin-base1000-zte-residual-probe-20260917/smoke_a31_initial_failed.log)；第二次 smoke 在第一步查出输出残差模块没有任何梯度，[日志](results/robotwin-base1000-zte-residual-probe-20260917/smoke_a31_zero_grad_failed.log)。代码审计定位到 Stage2 训练循环的 output-residual 分支**计算 loss 后没有调用 `accelerator.backward()`**；已补上该反向传播，并把审计改为首步查零初始化残差头、第二步查所有上游模块。第三次 smoke 已显示进度 `2/2` 且两次梯度审计均未报错，但旧 launcher 的 SSH/tee 会话未返回干净退出码；它没有保存 checkpoint。随后还修复了 `policy.train()` 在 frozen-output 分支每步将冻结 PI/ZTE/retrieval 重置成 train-mode 的问题，并改为保存明确的 `COMPLETED` 标记。**最终代码仍需在 GPU 空闲时做一次两步 smoke**，过关后才可启动 500 步。当前 aigc31 的 GPU 被其他用户的八卡训练占用，aigc29 亦满载；不抢占。没有新 checkpoint、开发集结果或 +4pp 闭环结果。旧正式 200 episode 已在之前实验中被观察过；新候选不得用其任何成功标签、逐任务涨跌或 seed 结果选点。即使将来重复该固定评测，也必须透明披露这种历史暴露，不能将其称为全新盲测。
