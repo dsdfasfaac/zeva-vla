@@ -1,4 +1,4 @@
-"""Cache untouched PI0.5 H50 actions for v13's direct output-correction training."""
+"""Cache frozen PI0.5 H50 actions, optionally from a Stage2 Base checkpoint."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from scripts.train_robotwin_stage2 import _preprocess_with_task_only_goal
 class Args:
     handoff_root: str = "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1"
     foundation_checkpoint: str = "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1"
+    stage2_checkpoint: str | None = None
     dataset_root: str = "/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/data"
     goal_embedding_checkpoint: str = "/mnt/100T/users/dingxin/VLA/runtime/pretrained_model-stage1-language-v1"
     zte_checkpoint: str = "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-artifacts-v1/stage1-zte/zte_best.pth"
@@ -128,6 +129,9 @@ def _cache_split(
 
 
 def main(args: Args) -> None:
+    output = Path(args.output)
+    if output.exists():
+        raise FileExistsError(f"Refusing to overwrite Base action cache: {output}")
     accelerator = Accelerator(dataloader_config=DataLoaderConfiguration(even_batches=False))
     torch.manual_seed(args.seed + accelerator.process_index)
     torch.cuda.manual_seed_all(args.seed + accelerator.process_index)
@@ -137,9 +141,9 @@ def main(args: Args) -> None:
         foundation_checkpoint=args.foundation_checkpoint,
         goal_embedding_checkpoint=args.goal_embedding_checkpoint,
         zte_checkpoint=args.zte_checkpoint,
+        stage2_checkpoint=args.stage2_checkpoint,
     )
     policy.requires_grad_(False).eval()
-    output = Path(args.output)
     shard_root = output.parent / f".{output.stem}-shards"
     if accelerator.is_main_process:
         shard_root.mkdir(parents=True, exist_ok=True)
@@ -163,10 +167,28 @@ def main(args: Args) -> None:
             if len(indices) != len(indices.unique()):
                 raise RuntimeError(f"{split} Base cache contains duplicate sample indices.")
             splits[split] = {"sample_indices": indices, "base_actions": actions}
+        selected_model = (
+            Path(args.stage2_checkpoint) / "model.safetensors"
+            if args.stage2_checkpoint is not None
+            else Path(args.foundation_checkpoint) / "model.safetensors"
+        )
         payload = {
-            "schema": "zeva-robotwin-untouched-base-action-cache-v1",
+            "schema": (
+                "zeva-robotwin-stage2-base-action-cache-v2"
+                if args.stage2_checkpoint is not None
+                else "zeva-robotwin-untouched-base-action-cache-v1"
+            ),
             "foundation_checkpoint": str(Path(args.foundation_checkpoint).resolve()),
             "foundation_model_sha256": _sha256(Path(args.foundation_checkpoint) / "model.safetensors"),
+            "goal_embedding_checkpoint": str(Path(args.goal_embedding_checkpoint).resolve()),
+            "goal_embedding_model_sha256": _sha256(
+                Path(args.goal_embedding_checkpoint) / "model.safetensors"
+            ),
+            "stage2_checkpoint": (
+                str(Path(args.stage2_checkpoint).resolve())
+                if args.stage2_checkpoint is not None else None
+            ),
+            "selected_model_sha256": _sha256(selected_model),
             "dataset_adapter": str((Path(args.dataset_root) / "adapter.json").resolve()),
             "dataset_adapter_sha256": _sha256(Path(args.dataset_root) / "adapter.json"),
             "live_queries_sha256": _sha256(args.live_queries),

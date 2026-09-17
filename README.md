@@ -47,6 +47,17 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 ## Zeva architecture
 
+Latest verified result (2026-09-17): the frozen 10-task × 20-episode paired
+H15-route evaluation is Base 111/200 (55.5%) versus ZeVA 106/200 (53.0%),
+so the +4 percentage-point goal is **not met**. A train95/validation5
+Base1000-residual probe finds useful state-aligned information in frozen ZTE v2,
+while shuffling the ZTE input to the earlier token-injection model does not
+hurt its validation error. The next, preregistered candidate freezes Base1000
+and Stage1 v2 and learns a bounded post-diffusion H15 residual. It has not yet
+been trained or evaluated in closed loop. See the [mechanism diagnosis](docs/ZTEV2_POST_H15_MECHANISM_20260917.md)
+and [fixed candidate configuration](configs/robotwin_base1000_ztev2_output_residual_20260917.json).
+The dated experiment notes below are historical snapshots.
+
 New bounded experiment (2026-09-16): to test whether H50 training diluted
 the deployed H15 effect, a Base-locked H15 route has passed a real four-rank
 one-step smoke and started its fixed 1,000-step ZeVA-only run. It captures the

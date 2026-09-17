@@ -1,5 +1,7 @@
 # ZeVA–RoboTwin：基于已训练 PI0.5 的因果记忆增强方法
 
+**当前有效状态（2026-09-17）：** 最新已完成的冻结 10 任务×20 配对闭环为 Base `111/200=55.5%`、ZeVA `106/200=53.0%`，差 `-2.5` 个百分点，**未达到** ZeVA 比 Base 高 4 个百分点的目标。[逐任务与审计](ROBOTWIN_H15_ROUTE_PAIRED_RESULTS_20260917.md)。后续只读诊断显示：现有 H15 双残差在 validation5 中把同任务 ZTE 错位后误差未变差；相反，在固定 Base1000 H15 动作的同容量残差探针中，真实对齐的 ZTE v2 相比 Base+任务输入使 held-out MSE 降低 `10.75%`，相比同任务乱序 ZTE 降低 `14.41%`。因此当前首要问题是**如何把已有的状态信息接入动作**，不能宣称 ZTE 不含信息，也不能把专家状态离线 MSE 当作成功率。[机制证据](ZTEV2_POST_H15_MECHANISM_20260917.md)。下一候选已预声明为冻结训练好的 Base1000/Stage1 v2，用语言检索和真实 H15 递归状态直接预测有界 H15 输出残差，500 步、global256、只以 train95/validation5 选点；[固定配置](../configs/robotwin_base1000_ztev2_output_residual_20260917.json)。截至本次更新，远程网络权限阻止 SSH 启动该训练，**没有新的 checkpoint 或成功率**。以下 9 月 16 日及更早的“当前/运行中”段落均为历史快照。
+
 **新一轮（2026-09-16）：** 用户目标为固定十任务×20配对成功率 ZeVA 至少比 Base 高4个百分点；允许ZeVA额外训练，但禁止测试标签选模。上一轮梯度分路未过H15门槛，本轮从已训练Base1000出发将AE LR设0，只训练ZTE条件化ZeVA；ZeVA flow主项取同一次compiled PI前向的真实执行H15，Base路径仍按原H50，输出仍H50/执行H15。单元测试与四卡真实单步已通过，固定1000步训练已启动，**尚无新成功率**。详见[新实验与预注册门槛](ZTEV2_H15_ROUTE_20260916.md)。
 
 **当前方法与执行状态（2026-09-16）：** 不再延长已失败的 NLL-only 路由。本轮在原有 action-expert 侧双残差/Gaussian prior 上采用默认关闭的梯度分路：AE 只用同批同噪声的当前 student residual-off flow 梯度，ZeVA 模块只用 residual-on 目标，分别裁剪。Stage1 ZTE/bank/检索及 VLM 仍冻结，保留真实 task-language/H15 recurrent state、H50 输出/H15 执行、global256、AE `5e-6`/新模块 `5e-5`。真实 PI 梯度检查、四卡单步及独立固定1000步训练均已完成，但全5874决策末步H15 **on=0.0100957537，高于自身off=0.0100944676**，预注册第一道门槛失败，不进入十任务正式闭环。同预算训练Base1000的严格同批同噪声诊断已完成：Base H15=0.0100931218，候选off高0.01333%，on高0.02608%；说明基础路径漂移较旧方案大幅收窄，但新残差仍未带来H15收益。差异极小，不作显著性或成功率结论；暂无新成功率。[新路线、原始证据与停止条件](ZTEV2_GRADIENT_ROUTE_20260916.md)。
@@ -853,7 +855,8 @@ v5 正式评测：
 | Stage1 ZTE | gate passed | 可保留 |
 | Stage1 causal bank/live queries | hash 与 H15 递归一致 | 当前 foundation 下可保留；PI-base 替换见第 16 节 |
 | Stage1.5 retrieval | validation 99.704% | 可保留；正式评测仍有 4/1000 episode 误检索 |
-| Stage2 v14 H15 direct output residual | 当前正式候选 | 完整 best-v1 与 Stage1 冻结；直接学习 `expert - Base`；step1500 离线 10/10 任务改善，正在同 seed/RNG 闭环验证 |
+| Stage2 Base1000 + ZTE v2 H15 direct output residual | 已预注册、未启动 | 冻结训练好的 Base1000 和 Stage1 v2，使用经身份核验的 Base 动作缓存；500 步 global256，先过 validation5 门槛，再考虑独立开发集闭环 |
+| 旧 Stage2 v14 best-v1 + legacy ZTE output residual | 已拒绝 | 独立开发 split-j Base 43/80、ZeVA 38/80；离线改善并未转化为闭环收益，不能原样重跑 |
 | Stage2 v13 Base/prior convex interpolation | 已拒绝 | gate 到 step1000 坍缩为 `8.5e-8`，最终等价于不用 ZeVA |
 | Stage2 v11 H15 prior/action-expert | 已拒绝 | split-j Base 43/80、ZeVA 41/80，token 注入闭环回退 |
 | Stage2 frozen-PI prior adapter v7 | 已拒绝 | 两个互斥 split 均为 -3/80，合计 -6/160；未进入 final |
@@ -972,9 +975,10 @@ scripts/eval_robotwin_stage1.py              Stage1 gate
 scripts/export_robotwin_causal_bank.py       causal bank export
 scripts/export_robotwin_live_queries.py      H15 live-query export
 scripts/train_robotwin_task_retrieval.py     Stage1.5 retrieval
-scripts/train_robotwin_stage2.py             多 variant Stage2 trainer；active 为 output_residual
+scripts/train_robotwin_stage2.py             多 variant Stage2 trainer；支持 Base1000 冻结输出残差与缓存身份核验
+scripts/train_robotwin_base1000_ztev2_output_residual.sh  预注册的新候选入口（尚未启动）
 scripts/cache_robotwin_base_actions_v13_8gpu.sh immutable Base action cache
-scripts/train_robotwin_advantage10_output_residual_v14.sh active v14 训练入口
+scripts/train_robotwin_advantage10_output_residual_v14.sh 旧 v14 历史入口；开发集失败
 scripts/audit_robotwin_v14_checkpoint.py     frozen PI 与 H15 direct residual 契约审计
 scripts/calibrate_robotwin_v14_task_scales.py development-only 二值安全路由
 scripts/train_robotwin_advantage10_prior_action_expert_v11.sh 历史失败 v11 入口

@@ -1,0 +1,51 @@
+{
+  "base_action_cache_sha256": "e127bf841f9668ba25ca6d7546217af799662cf4c4b8226e4243c83b703f6531",
+  "base_model_sha256": "bcf1d4f5f3e77926b8b7f798bb983378ad096e3892eed1a66058c5d98ed9bc17",
+  "base_uncorrected_mse": 0.01134641095995903,
+  "caveat": "Probe on expert states, not on-policy success; positive residual MSE gain cannot by itself justify deployment.",
+  "deployment_policy_changed": false,
+  "diagnostic_only": true,
+  "live_queries_sha256": "c39e3c6565c438b9496133833a7288a08a81a7985fc1723bf8a39d6ad2d47de6",
+  "oracle_task_identity_used_equally_in_both_arms": true,
+  "results": {
+    "base_action_and_task": {
+      "corrected_mse": 0.011749045923352242,
+      "per_task_mse": {
+        "beat_block_hammer": 0.0027393531054258347,
+        "blocks_ranking_rgb": 0.012685473076999187,
+        "blocks_ranking_size": 0.009258771315217018,
+        "handover_block": 0.0076282089576125145,
+        "hanging_mug": 0.014155843295156956,
+        "pick_dual_bottles": 0.008490307256579399,
+        "put_bottles_dustbin": 0.0091090751811862,
+        "scan_object": 0.040625933557748795,
+        "stack_bowls_three": 0.006563396658748388,
+        "stamp_seal": 0.005207028239965439
+      }
+    },
+    "base_action_task_and_zte": {
+      "corrected_mse": 0.010486063547432423,
+      "per_task_mse": {
+        "beat_block_hammer": 0.002621200866997242,
+        "blocks_ranking_rgb": 0.012380223721265793,
+        "blocks_ranking_size": 0.008800565265119076,
+        "handover_block": 0.007484202738851309,
+        "hanging_mug": 0.013410443440079689,
+        "pick_dual_bottles": 0.008472676388919353,
+        "put_bottles_dustbin": 0.00866951234638691,
+        "scan_object": 0.02936776913702488,
+        "stack_bowls_three": 0.006590959616005421,
+        "stamp_seal": 0.005176873411983252
+      }
+    }
+  },
+  "schema": "zeva-robotwin-base1000-residual-probe-v1",
+  "seed": 1000,
+  "split": "episode-heldout-validation5",
+  "task_subset_sha256": "0501e43192415f5e32de993866536e25a3c9a51c2622248402bc3b9cd8b157bd",
+  "train_samples": 8190,
+  "training_steps": 1000,
+  "validation_samples": 3489,
+  "zte_adds_base_residual_information": true,
+  "zte_incremental_relative_improvement_over_base_action_task": 0.10749659028990022
+}
