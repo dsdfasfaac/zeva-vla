@@ -1,0 +1,10 @@
+beat_block_hammer
+blocks_ranking_rgb
+blocks_ranking_size
+handover_block
+hanging_mug
+pick_dual_bottles
+put_bottles_dustbin
+scan_object
+stack_bowls_three
+stamp_seal

@@ -1,0 +1,230 @@
+{
+  "version": 1,
+  "identity": {
+    "task_name": "stack_bowls_three",
+    "task_config": "zeva_randomized",
+    "checkpoint": "h15-route-base-001000",
+    "use_ema": true,
+    "instruction_type": "seen",
+    "execute_horizon": 15,
+    "num_steps": 30,
+    "seed": 0,
+    "absolute_start_seed": 1000,
+    "fixed_seed_sequence": true,
+    "fixed_seed_values": [
+      1000,
+      1002,
+      1004,
+      1005,
+      1007,
+      1010,
+      1012,
+      1013,
+      1015,
+      1016,
+      1017,
+      1018,
+      1022,
+      1023,
+      1024,
+      1025,
+      1029,
+      1030,
+      1035,
+      1040
+    ],
+    "fixed_instructions": [
+      "Stack all three the bowl with shiny texture by placing one on top of another.",
+      "Arrange all three the bowl with shiny texture into a vertical stack.",
+      "Start with the bottom the blue bowl and finish stacking.",
+      "Align bowls the ceramic bowl in descending size, forming a stack.",
+      "Organize bowls the medium-sized bowl for holding food by stacking them in size order.",
+      "Arrange the medium-sized bowl for holding food one on top of another.",
+      "Grab the glazed bowl with curved sides, stack from largest at the base to the smallest.",
+      "Position the second the rounded bowl with light blue color over the first, then the third on top.",
+      "Lift each the ceramic bowl and stack it over the previous one.",
+      "Stack all three the small bowl with brown edge by placing one on top of another.",
+      "Arrange the blue bowl one on top of another.",
+      "Start with the first the curved bowl light blue shade, adding the next two in sequence.",
+      "Pick each the curved bowl light blue shade and stack them in order one on top of another.",
+      "Use arms to place each the rounded bowl with light blue color atop the previous one.",
+      "Grab a the blue bowl, set it down, and stack the rest on it.",
+      "Take each the curved bowl light blue shade and place them one by one on top.",
+      "Arrange all three the blue bowl with slightly rounded base into a vertical stack.",
+      "Take each the medium-sized bowl for holding food and place them one by one on top.",
+      "Grab the curved bowl light blue shade, stack from largest at the base to the smallest.",
+      "Align and stack the the small bowl with brown edge step by step using arms."
+    ],
+    "model_seed_policy": "continuous",
+    "target_episodes": 20
+  },
+  "complete": true,
+  "next_seed": 1041,
+  "completed_episodes": 20,
+  "successes": 13,
+  "episode_results": [
+    {
+      "episode_index": 0,
+      "seed": 1000,
+      "success": true,
+      "steps": 448,
+      "step_limit": 1200,
+      "instruction": "Stack all three the bowl with shiny texture by placing one on top of another."
+    },
+    {
+      "episode_index": 1,
+      "seed": 1002,
+      "success": true,
+      "steps": 528,
+      "step_limit": 1200,
+      "instruction": "Arrange all three the bowl with shiny texture into a vertical stack."
+    },
+    {
+      "episode_index": 2,
+      "seed": 1004,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Start with the bottom the blue bowl and finish stacking."
+    },
+    {
+      "episode_index": 3,
+      "seed": 1005,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Align bowls the ceramic bowl in descending size, forming a stack."
+    },
+    {
+      "episode_index": 4,
+      "seed": 1007,
+      "success": true,
+      "steps": 473,
+      "step_limit": 1200,
+      "instruction": "Organize bowls the medium-sized bowl for holding food by stacking them in size order."
+    },
+    {
+      "episode_index": 5,
+      "seed": 1010,
+      "success": true,
+      "steps": 454,
+      "step_limit": 1200,
+      "instruction": "Arrange the medium-sized bowl for holding food one on top of another."
+    },
+    {
+      "episode_index": 6,
+      "seed": 1012,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Grab the glazed bowl with curved sides, stack from largest at the base to the smallest."
+    },
+    {
+      "episode_index": 7,
+      "seed": 1013,
+      "success": true,
+      "steps": 513,
+      "step_limit": 1200,
+      "instruction": "Position the second the rounded bowl with light blue color over the first, then the third on top."
+    },
+    {
+      "episode_index": 8,
+      "seed": 1015,
+      "success": true,
+      "steps": 482,
+      "step_limit": 1200,
+      "instruction": "Lift each the ceramic bowl and stack it over the previous one."
+    },
+    {
+      "episode_index": 9,
+      "seed": 1016,
+      "success": true,
+      "steps": 436,
+      "step_limit": 1200,
+      "instruction": "Stack all three the small bowl with brown edge by placing one on top of another."
+    },
+    {
+      "episode_index": 10,
+      "seed": 1017,
+      "success": true,
+      "steps": 562,
+      "step_limit": 1200,
+      "instruction": "Arrange the blue bowl one on top of another."
+    },
+    {
+      "episode_index": 11,
+      "seed": 1018,
+      "success": true,
+      "steps": 459,
+      "step_limit": 1200,
+      "instruction": "Start with the first the curved bowl light blue shade, adding the next two in sequence."
+    },
+    {
+      "episode_index": 12,
+      "seed": 1022,
+      "success": true,
+      "steps": 442,
+      "step_limit": 1200,
+      "instruction": "Pick each the curved bowl light blue shade and stack them in order one on top of another."
+    },
+    {
+      "episode_index": 13,
+      "seed": 1023,
+      "success": true,
+      "steps": 474,
+      "step_limit": 1200,
+      "instruction": "Use arms to place each the rounded bowl with light blue color atop the previous one."
+    },
+    {
+      "episode_index": 14,
+      "seed": 1024,
+      "success": true,
+      "steps": 506,
+      "step_limit": 1200,
+      "instruction": "Grab a the blue bowl, set it down, and stack the rest on it."
+    },
+    {
+      "episode_index": 15,
+      "seed": 1025,
+      "success": true,
+      "steps": 473,
+      "step_limit": 1200,
+      "instruction": "Take each the curved bowl light blue shade and place them one by one on top."
+    },
+    {
+      "episode_index": 16,
+      "seed": 1029,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Arrange all three the blue bowl with slightly rounded base into a vertical stack."
+    },
+    {
+      "episode_index": 17,
+      "seed": 1030,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Take each the medium-sized bowl for holding food and place them one by one on top."
+    },
+    {
+      "episode_index": 18,
+      "seed": 1035,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Grab the curved bowl light blue shade, stack from largest at the base to the smallest."
+    },
+    {
+      "episode_index": 19,
+      "seed": 1040,
+      "success": false,
+      "steps": 1200,
+      "step_limit": 1200,
+      "instruction": "Align and stack the the small bowl with brown edge step by step using arms."
+    }
+  ],
+  "created_at": "2026-09-17T10:06:45",
+  "updated_at": "2026-09-17T11:07:25",
+  "summary_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-h15-route-selected-000500-a29-20260917/baseline/results/stack_bowls_three/summary.json"
+}

@@ -136,8 +136,12 @@ def main() -> int:
     expected_start_seed = int(manifest.get("absolute_start_seed", -1))
     expected_model_rng_seed = int(manifest.get("model_rng_seed", -1))
     baseline_is_untouched_anchor = bool(manifest.get("baseline_is_untouched_anchor", False))
-    conditions = (("baseline", "zeva") if baseline_is_untouched_anchor
-                  else ("baseline", "anchor", "zeva"))
+    # A paired Base/ZeVA run can also use a newly trained Base, with no
+    # untouched-anchor condition.  Do not infer a missing third rollout from
+    # baseline_is_untouched_anchor alone.
+    has_anchor_condition = bool(manifest.get("anchor_config"))
+    conditions = (("baseline", "anchor", "zeva") if has_anchor_condition
+                  else ("baseline", "zeva"))
     check(expected_task_count == 10, f"formal task_count must be 10, got {expected_task_count}")
     check(expected_episodes > 0, f"episodes_per_task must be positive, got {expected_episodes}")
     check(expected_start_seed >= 0, f"absolute_start_seed must be non-negative, got {expected_start_seed}")
@@ -314,17 +318,18 @@ def main() -> int:
     paired_path = root / "paired_report.json"
     acceptance_path = root / "acceptance.json"
     check(paired_path.is_file(), "missing paired_report.json")
-    check(acceptance_path.is_file(), "missing acceptance.json")
+    if has_anchor_condition:
+        check(acceptance_path.is_file(), "missing acceptance.json")
     paired = load_json(paired_path) if paired_path.is_file() else {}
     acceptance = load_json(acceptance_path) if acceptance_path.is_file() else {}
     if all(name in condition_summaries for name in conditions):
         baseline_rate = condition_summaries["baseline"]["success_rate"]
-        anchor_rate = (baseline_rate if baseline_is_untouched_anchor else
-                       condition_summaries["anchor"]["success_rate"])
+        anchor_rate = (condition_summaries["anchor"]["success_rate"]
+                       if has_anchor_condition else None)
         zeva_rate = condition_summaries["zeva"]["success_rate"]
         check(paired.get("total_paired_episodes") == expected_total,
               f"paired report does not contain {expected_total} episodes")
-        expected_paired_anchor = None if baseline_is_untouched_anchor else anchor_rate
+        expected_paired_anchor = anchor_rate
         check(paired.get("anchor_success_rate") == expected_paired_anchor,
               "paired report anchor rate mismatch")
         check(paired.get("baseline_success_rate") == baseline_rate,
@@ -334,18 +339,19 @@ def main() -> int:
         check(paired.get("absolute_delta") == zeva_rate - baseline_rate,
               "paired report Base/ZeVA delta mismatch")
         minimum_baseline_rate = float(manifest.get("min_baseline_success_rate", 0.0))
-        baseline_floor = max(anchor_rate, minimum_baseline_rate)
+        baseline_floor = max(anchor_rate or 0.0, minimum_baseline_rate)
         accepted = baseline_rate >= baseline_floor and zeva_rate > baseline_rate
-        check(acceptance.get("accepted") is accepted,
-              "acceptance.json disagrees with recomputed criteria")
-        check(
-            acceptance.get("minimum_baseline_success_rate") == minimum_baseline_rate,
-            "acceptance.json historical normal-PI floor mismatch",
-        )
-        check(
-            acceptance.get("effective_baseline_floor") == baseline_floor,
-            "acceptance.json effective baseline floor mismatch",
-        )
+        if acceptance_path.is_file():
+            check(acceptance.get("accepted") is accepted,
+                  "acceptance.json disagrees with recomputed criteria")
+            check(
+                acceptance.get("minimum_baseline_success_rate") == minimum_baseline_rate,
+                "acceptance.json historical normal-PI floor mismatch",
+            )
+            check(
+                acceptance.get("effective_baseline_floor") == baseline_floor,
+                "acceptance.json effective baseline floor mismatch",
+            )
         if args.require_accepted:
             check(
                 accepted,
@@ -354,8 +360,8 @@ def main() -> int:
             )
 
     config_evidence = {}
-    config_keys = (["baseline_config", "zeva_config"] if baseline_is_untouched_anchor
-                   else ["baseline_config", "anchor_config", "zeva_config"])
+    config_keys = (["baseline_config", "anchor_config", "zeva_config"]
+                   if has_anchor_condition else ["baseline_config", "zeva_config"])
     for key in config_keys:
         value = manifest.get(key)
         path = Path(value) if value else None

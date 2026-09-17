@@ -1,0 +1,230 @@
+{
+  "version": 1,
+  "identity": {
+    "task_name": "stamp_seal",
+    "task_config": "zeva_randomized",
+    "checkpoint": "h15-route-zeva-000500",
+    "use_ema": true,
+    "instruction_type": "seen",
+    "execute_horizon": 15,
+    "num_steps": 30,
+    "seed": 0,
+    "absolute_start_seed": 1000,
+    "fixed_seed_sequence": true,
+    "fixed_seed_values": [
+      1000,
+      1001,
+      1005,
+      1006,
+      1008,
+      1009,
+      1012,
+      1013,
+      1014,
+      1023,
+      1024,
+      1026,
+      1029,
+      1031,
+      1033,
+      1034,
+      1035,
+      1037,
+      1039,
+      1040
+    ],
+    "fixed_instructions": [
+      "Position the yellow stamping tool on Olive, apply pressure",
+      "Lift the plastic seal with handle and press onto Lime",
+      "With the right arm, secure the palm-sized stamping seal and mark Tan.",
+      "Grab the yellow seal with ridged grip and press Lime",
+      "Press the seal for imprinting onto Red",
+      "With the right arm, secure the seal with raised rounded edges and mark Orange.",
+      "Set the small seal with round base on Indigo",
+      "Stamp Orange after grabbing the seal with smooth handle",
+      "the right arm holds the yellow stamping tool, presses Black",
+      "Place the hand-sized rectangular brown seal onto Brown after grabbing.",
+      "Position the yellow stamping tool over Gray and stamp",
+      "Press the plastic seal with handle firmly onto Black",
+      "Lift the reddish seal with light markings and press onto Tan",
+      "Take the red seal for stamping and stamp it on Green.",
+      "Grab the hand-sized red and black seal, align it with Cyan",
+      "Pick the yellow seal and press on Navy",
+      "the right arm picks the round yellow seal base, stamps Indigo",
+      "Position the seal with white engraving on Black, apply pressure",
+      "the left arm holds the yellow seal, presses Orange",
+      "Use the right arm to lift the yellow seal, then stamp Cyan."
+    ],
+    "model_seed_policy": "continuous",
+    "target_episodes": 20
+  },
+  "complete": true,
+  "next_seed": 1041,
+  "completed_episodes": 20,
+  "successes": 15,
+  "episode_results": [
+    {
+      "episode_index": 0,
+      "seed": 1000,
+      "success": true,
+      "steps": 135,
+      "step_limit": 400,
+      "instruction": "Position the yellow stamping tool on Olive, apply pressure"
+    },
+    {
+      "episode_index": 1,
+      "seed": 1001,
+      "success": true,
+      "steps": 138,
+      "step_limit": 400,
+      "instruction": "Lift the plastic seal with handle and press onto Lime"
+    },
+    {
+      "episode_index": 2,
+      "seed": 1005,
+      "success": true,
+      "steps": 157,
+      "step_limit": 400,
+      "instruction": "With the right arm, secure the palm-sized stamping seal and mark Tan."
+    },
+    {
+      "episode_index": 3,
+      "seed": 1006,
+      "success": false,
+      "steps": 400,
+      "step_limit": 400,
+      "instruction": "Grab the yellow seal with ridged grip and press Lime"
+    },
+    {
+      "episode_index": 4,
+      "seed": 1008,
+      "success": true,
+      "steps": 145,
+      "step_limit": 400,
+      "instruction": "Press the seal for imprinting onto Red"
+    },
+    {
+      "episode_index": 5,
+      "seed": 1009,
+      "success": true,
+      "steps": 145,
+      "step_limit": 400,
+      "instruction": "With the right arm, secure the seal with raised rounded edges and mark Orange."
+    },
+    {
+      "episode_index": 6,
+      "seed": 1012,
+      "success": false,
+      "steps": 400,
+      "step_limit": 400,
+      "instruction": "Set the small seal with round base on Indigo"
+    },
+    {
+      "episode_index": 7,
+      "seed": 1013,
+      "success": true,
+      "steps": 142,
+      "step_limit": 400,
+      "instruction": "Stamp Orange after grabbing the seal with smooth handle"
+    },
+    {
+      "episode_index": 8,
+      "seed": 1014,
+      "success": true,
+      "steps": 140,
+      "step_limit": 400,
+      "instruction": "the right arm holds the yellow stamping tool, presses Black"
+    },
+    {
+      "episode_index": 9,
+      "seed": 1023,
+      "success": true,
+      "steps": 137,
+      "step_limit": 400,
+      "instruction": "Place the hand-sized rectangular brown seal onto Brown after grabbing."
+    },
+    {
+      "episode_index": 10,
+      "seed": 1024,
+      "success": true,
+      "steps": 144,
+      "step_limit": 400,
+      "instruction": "Position the yellow stamping tool over Gray and stamp"
+    },
+    {
+      "episode_index": 11,
+      "seed": 1026,
+      "success": true,
+      "steps": 133,
+      "step_limit": 400,
+      "instruction": "Press the plastic seal with handle firmly onto Black"
+    },
+    {
+      "episode_index": 12,
+      "seed": 1029,
+      "success": true,
+      "steps": 140,
+      "step_limit": 400,
+      "instruction": "Lift the reddish seal with light markings and press onto Tan"
+    },
+    {
+      "episode_index": 13,
+      "seed": 1031,
+      "success": false,
+      "steps": 400,
+      "step_limit": 400,
+      "instruction": "Take the red seal for stamping and stamp it on Green."
+    },
+    {
+      "episode_index": 14,
+      "seed": 1033,
+      "success": true,
+      "steps": 145,
+      "step_limit": 400,
+      "instruction": "Grab the hand-sized red and black seal, align it with Cyan"
+    },
+    {
+      "episode_index": 15,
+      "seed": 1034,
+      "success": true,
+      "steps": 139,
+      "step_limit": 400,
+      "instruction": "Pick the yellow seal and press on Navy"
+    },
+    {
+      "episode_index": 16,
+      "seed": 1035,
+      "success": false,
+      "steps": 400,
+      "step_limit": 400,
+      "instruction": "the right arm picks the round yellow seal base, stamps Indigo"
+    },
+    {
+      "episode_index": 17,
+      "seed": 1037,
+      "success": true,
+      "steps": 175,
+      "step_limit": 400,
+      "instruction": "Position the seal with white engraving on Black, apply pressure"
+    },
+    {
+      "episode_index": 18,
+      "seed": 1039,
+      "success": true,
+      "steps": 187,
+      "step_limit": 400,
+      "instruction": "the left arm holds the yellow seal, presses Orange"
+    },
+    {
+      "episode_index": 19,
+      "seed": 1040,
+      "success": false,
+      "steps": 400,
+      "step_limit": 400,
+      "instruction": "Use the right arm to lift the yellow seal, then stamp Cyan."
+    }
+  ],
+  "created_at": "2026-09-17T12:46:04",
+  "updated_at": "2026-09-17T13:05:37",
+  "summary_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-h15-route-selected-000500-a29-20260917/zeva/results/stamp_seal/summary.json"
+}
