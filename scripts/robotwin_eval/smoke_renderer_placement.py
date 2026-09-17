@@ -43,7 +43,10 @@ def main() -> None:
     parser.add_argument("--expected-pci", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--explicit-cleanup", action="store_true")
+    parser.add_argument("--hold-seconds", type=int, default=8)
     args = parser.parse_args()
+    if not 1 <= args.hold_seconds <= 60:
+        raise ValueError("hold-seconds must be in [1, 60]")
     if args.output.exists():
         raise FileExistsError(f"Refusing to overwrite health proof: {args.output}")
     if os.environ.get("ZEVA_SAPIEN_RENDER_DEVICE") != "cuda:0":
@@ -101,7 +104,7 @@ def main() -> None:
     }
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(result, sort_keys=True), flush=True)
-    time.sleep(8)
+    time.sleep(args.hold_seconds)
     if not frame_passed:
         raise RuntimeError("Rendered frame did not satisfy formal placement/shape/finite checks")
     if args.explicit_cleanup:

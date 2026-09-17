@@ -1,0 +1,173 @@
+{
+  "formal_rollout_started": false,
+  "gpu_rows_before": [
+    {
+      "index": 0,
+      "memory_mib": 38,
+      "pci": "00000000:18:00.0",
+      "utilization_percent": 0,
+      "uuid": "GPU-dc037006-cc5d-131d-9b69-cae335dcf41f"
+    },
+    {
+      "index": 1,
+      "memory_mib": 37,
+      "pci": "00000000:2A:00.0",
+      "utilization_percent": 0,
+      "uuid": "GPU-7d64ba08-7827-c2af-2cea-808b090e33db"
+    },
+    {
+      "index": 2,
+      "memory_mib": 37,
+      "pci": "00000000:3A:00.0",
+      "utilization_percent": 0,
+      "uuid": "GPU-42dabc5e-22d7-fbef-fe82-08483690cf70"
+    },
+    {
+      "index": 3,
+      "memory_mib": 37,
+      "pci": "00000000:5D:00.0",
+      "utilization_percent": 0,
+      "uuid": "GPU-3919fd5d-0726-b99c-2516-bfe855577149"
+    },
+    {
+      "index": 4,
+      "memory_mib": 37,
+      "pci": "00000000:9A:00.0",
+      "utilization_percent": 0,
+      "uuid": "GPU-23cf0ed2-0f7a-f425-7457-781b444b2811"
+    },
+    {
+      "index": 5,
+      "memory_mib": 37,
+      "pci": "00000000:AB:00.0",
+      "utilization_percent": 0,
+      "uuid": "GPU-e65459ab-c5dc-5535-7e5a-5004a3a8bcae"
+    },
+    {
+      "index": 6,
+      "memory_mib": 37,
+      "pci": "00000000:BA:00.0",
+      "utilization_percent": 0,
+      "uuid": "GPU-356e1bc5-2ea9-e524-1c2e-ef7844140f13"
+    },
+    {
+      "index": 7,
+      "memory_mib": 37,
+      "pci": "00000000:DB:00.0",
+      "utilization_percent": 0,
+      "uuid": "GPU-06290db9-90c3-2137-8446-909c60a37420"
+    }
+  ],
+  "host": "aigc29",
+  "isolated_egl_sha256": "69816a7062d7d624144472f5ef71f5b23732b9003df7472662920602e62805db",
+  "passed": true,
+  "probes": [
+    {
+      "frame_passed": true,
+      "frame_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu0.json",
+      "frame_sha256": "27889d900370185925b3c20cb5aeffe4f4934a7349d7ea30d46fa5bf6d451ab9",
+      "index": 0,
+      "log_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu0.log",
+      "passed": true,
+      "pci": "00000000:18:00.0",
+      "pid": 1935171,
+      "pid_mapping_verified": true,
+      "process_exit_code": 0,
+      "uuid": "GPU-dc037006-cc5d-131d-9b69-cae335dcf41f"
+    },
+    {
+      "frame_passed": true,
+      "frame_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu1.json",
+      "frame_sha256": "e5d447f7b00a792874f4af3a6a8f52736ca9c2f3ed253fed7735e48ca39b41f2",
+      "index": 1,
+      "log_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu1.log",
+      "passed": true,
+      "pci": "00000000:2A:00.0",
+      "pid": 1935565,
+      "pid_mapping_verified": true,
+      "process_exit_code": 0,
+      "uuid": "GPU-7d64ba08-7827-c2af-2cea-808b090e33db"
+    },
+    {
+      "frame_passed": true,
+      "frame_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu2.json",
+      "frame_sha256": "444a47003ba70b3607da03fe7a0ce1ae08a9b49ab6cb1db56517b5c6bcee3a40",
+      "index": 2,
+      "log_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu2.log",
+      "passed": true,
+      "pci": "00000000:3A:00.0",
+      "pid": 1935839,
+      "pid_mapping_verified": true,
+      "process_exit_code": 0,
+      "uuid": "GPU-42dabc5e-22d7-fbef-fe82-08483690cf70"
+    },
+    {
+      "frame_passed": true,
+      "frame_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu3.json",
+      "frame_sha256": "22d8d536b45e2fbe2befefa5c6c1ead597780eb103977196ed26c1c1c1ebf80b",
+      "index": 3,
+      "log_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu3.log",
+      "passed": true,
+      "pci": "00000000:5D:00.0",
+      "pid": 1936260,
+      "pid_mapping_verified": true,
+      "process_exit_code": 0,
+      "uuid": "GPU-3919fd5d-0726-b99c-2516-bfe855577149"
+    },
+    {
+      "frame_passed": true,
+      "frame_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu4.json",
+      "frame_sha256": "03cbb05b42d5b0408802b12eacc74767f4121f6bb6c2da9206373f0db30d0d1d",
+      "index": 4,
+      "log_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu4.log",
+      "passed": true,
+      "pci": "00000000:9A:00.0",
+      "pid": 1936534,
+      "pid_mapping_verified": true,
+      "process_exit_code": 0,
+      "uuid": "GPU-23cf0ed2-0f7a-f425-7457-781b444b2811"
+    },
+    {
+      "frame_passed": true,
+      "frame_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu5.json",
+      "frame_sha256": "a6c2765d89820ab8ca68350ea326fd97747df3e70020d50887d71e5bcb0e871e",
+      "index": 5,
+      "log_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu5.log",
+      "passed": true,
+      "pci": "00000000:AB:00.0",
+      "pid": 1936914,
+      "pid_mapping_verified": true,
+      "process_exit_code": 0,
+      "uuid": "GPU-e65459ab-c5dc-5535-7e5a-5004a3a8bcae"
+    },
+    {
+      "frame_passed": true,
+      "frame_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu6.json",
+      "frame_sha256": "3a6657503a6700cd48992ba941c4b9a4337e07e22de2cd5df5f9b614f69f40bf",
+      "index": 6,
+      "log_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu6.log",
+      "passed": true,
+      "pci": "00000000:BA:00.0",
+      "pid": 1937167,
+      "pid_mapping_verified": true,
+      "process_exit_code": 0,
+      "uuid": "GPU-356e1bc5-2ea9-e524-1c2e-ef7844140f13"
+    },
+    {
+      "frame_passed": true,
+      "frame_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu7.json",
+      "frame_sha256": "3e4af717bae772001635bd01f19d3a4da4364322f301c444c67b260504157b6f",
+      "index": 7,
+      "log_path": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/h15-route-full-20260916-a29/h15_route_full/renderer_health_a29_all8_20260916/gpu7.log",
+      "passed": true,
+      "pci": "00000000:DB:00.0",
+      "pid": 1937569,
+      "pid_mapping_verified": true,
+      "process_exit_code": 0,
+      "uuid": "GPU-06290db9-90c3-2137-8446-909c60a37420"
+    }
+  ],
+  "schema": "zeva-robotwin-a29-all8-renderer-health-v1",
+  "vk_icd_filenames": "/etc/vulkan/icd.d/nvidia_icd.json",
+  "vulkan_loader_sha256": "f2c637267fc08e343f3d617252e1ddcaf035dc714728fbdc35ce9ebd8fc4a453"
+}
