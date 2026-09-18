@@ -12,6 +12,7 @@
 - `scripts/test_robotwin_behavior_effect.py`：真实CUDA/Mamba测试。
 - `scripts/smoke_robotwin_behavior_effect_pi.py`：真实PI/真实数据单卡推理反传及双卡AdamW/梯度累积测试；不保存可提升的训练权重。
 - `scripts/select_robotwin_behavior_effect.py`：固定step5000的validation5-only gate，拒绝覆盖缺失、重复sample、非同任务置换、正式标签、不同Base权重或checkpoint哈希不符。
+- `scripts/report_robotwin_behavior_effect.py`：完整validation5采样动作误差生成器；先从原始episode长度独立枚举expected ids，再核验cache完整性；显式复用同一H50×32噪声、10步去噪，计算Base/aligned/同任务完整错位置换/effect-off四条件H15误差。
 - `scripts/run_robotwin_behavior_effect.sh`：aigc28 GPU0 UUID/空闲检查；test、smoke、stage1模式。
 
 快照 `/mnt/100T/users/dingxin/VLA/zeva-behavior-effect-20260918`；输出 `/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-behavior-effect-20260918`。不抢占其他任务，不复用非空目录。
@@ -41,6 +42,8 @@ aigc28真实H100/Mamba测试PASS：整段/逐步phase+effect一致、SOS/reset�
 
 2026-09-18后续集成：a28空闲GPU1的真实best-v1/真实图像样本测试exit0。PBD未激活时与Base动作逐位一致，激活时输出仍[1,50,16]、finite；真实full-PI backward成功，global/effect/APN均有非零梯度，peak19.43GiB。随后独立GPU1/2双卡DDP测试exit0：每卡batch1、累积2、**测试global4**，2个真实AdamW更新，effect权重变化且两rank逐位一致，peak46.91GiB。它不声称formal global256吞吐或长期稳定性通过，不保存可选checkpoint。原始报告见`docs/results/robotwin-behavior-effect-20260918/pi-runtime-smoke.json`和`pi-ddp-runtime-smoke.json`。
 
-单元selector三组测试通过；新memory加载器拒绝非finite/错维/缺任务产物，并将50-task语言分类器候选限制为固定十任务memory范围，不用每个样本的真实task标签。Stage1进程未重启、参数未更改。下一步还需完成validation5 matched-noise采样报告生成器和实际新CTE/cache→完整policy端到端测试；新Stage1未过gate前不能启动正式Stage2。
+单元selector三组测试通过；新memory加载器拒绝非finite/错维/缺任务产物，并将50-task语言分类器候选限制为固定十任务memory范围，不用每个样本的真实task标签。Stage1进程未重启、参数未更改。后续新增采样报告生成器及三组独立枚举/置换/cache覆盖测试，合计六组纯CPU单元测试通过。报告生成器拒绝不完整checkpoint、非step5000/global256、不同Base SHA、非train-only bank、缺失/多余cache；先写决策和置换计划，再采样，部分结果单独保留，不能提升。CTE历史采用专家H15动作的离线递归cache，明确不是闭环成功率。
+
+**仍未验证**：报告生成器真实完整权重/数据运行；实际新CTE/cache→完整policy端到端；正式global256容量；Stage2精确断点恢复。不能把六组单元测试当成这些运行验收通过。Stage1尚须固定epoch80通过gate，才能导出正式新memory并开始Stage2；当前继续训练，无新成功率。报告命令从项目根目录运行，提供`--dataset-root --cte-checkpoint --artifacts --retrieval-checkpoint --foundation-checkpoint --checkpoint --output-dir`；随后将`report.json`和`expected-decisions.json`交给独立selector，禁止用中间`rows.partial.jsonl`作选择。
 
 上一正式Base111/20055.5%、旧ZeVA106/20053%、−2.5pp；旧输出残差500步验证改善0.00537%、preserve0改善0.2676%，均失败，不是本次新方法结果。
