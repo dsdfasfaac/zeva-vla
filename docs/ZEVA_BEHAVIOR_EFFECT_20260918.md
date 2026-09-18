@@ -64,4 +64,6 @@ Stage2预备入口已部署到aigc28。Stage1继续训练，入口的`preflight`
 
 epoch10同一validation5：action 0.014655 对零动作0.312295（改善95.31%）；effect 0.005010 对零effect0.007447（改善32.73%）；direct vision 0.007167 对persistence0.007447（改善3.76%）。三者finite，vision仍未过本轮5%门槛。因为`target_next = target_current + target_effect`，effect head的低误差表明潜在表示已包含部分转移信息；direct vision head却没有同等提升。这提示绝对未来视觉预测头的参数化或优化可能是瓶颈，但两头分别使用`z`与视觉流`v`，不能据此断定原因。现有Stage1/门槛保持原样；若固定epoch80最终失败，再基于验证集做有边界的新方法实验，而非改写本轮判定。
 
+epoch15同一validation5：action 0.012982 对零动作0.312295（改善95.84%）；effect 0.003938 对零effect0.006032（改善34.71%）；direct vision 0.005597 对persistence0.006032（改善7.21%）。三项均finite，**这一中途验证点**达到预声明阈值，但不提前提升checkpoint；正式判定仍仅在固定epoch80进行。训练进程继续运行。
+
 上一正式Base111/20055.5%、旧ZeVA106/20053%、−2.5pp；旧输出残差500步验证改善0.00537%、preserve0改善0.2676%，均失败，不是本次新方法结果。
