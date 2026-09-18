@@ -47,16 +47,29 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 ## Zeva architecture
 
-Latest verified result (2026-09-17): the frozen 10-task × 20-episode paired
-H15-route evaluation is Base 111/200 (55.5%) versus ZeVA 106/200 (53.0%),
-so the +4 percentage-point goal is **not met**. A train95/validation5
-Base1000-residual probe finds useful state-aligned information in frozen ZTE v2,
-while shuffling the ZTE input to the earlier token-injection model does not
-hurt its validation error. The next, preregistered candidate freezes Base1000
-and Stage1 v2 and learns a bounded post-diffusion H15 residual. It has not yet
-been trained or evaluated in closed loop. See the [mechanism diagnosis](docs/ZTEV2_POST_H15_MECHANISM_20260917.md)
-and [fixed candidate configuration](configs/robotwin_base1000_ztev2_output_residual_20260917.json).
-The dated experiment notes below are historical snapshots.
+Current direction (2026-09-18, user-requested): **BehaviorVLA-aligned ZeVA CTE/PBD
+with effect prediction and an effect prefix token**. CTE reuses the official
+three-stream causal Mamba and four objectives; only effect MSE is added.
+Stage2 follows the actual official injection: global behavior (plus our effect)
+tokens before the VLM, and a Gaussian APN mean residual in action-expert
+embeddings. Full PI0.5 and PBD are trained; CTE/memory stay frozen. The old
+dual-gate/post-diffusion output-residual experiments are not this route.
+RoboTwin H50/H15, three cameras, baseline normalization and task-language
+retrieval/true recurrence remain explicit adaptations. Architecture is
+attributed to BehaviorVLA commit `0dbabc7e79791a325c4e76acde0ddfd7a18e8326`.
+
+Pipeline: fresh pretrained Stage1 (80epochs, batch8) → validation5 gate →
+new train-only memory/recurrent cache → full PI0.5/PBD Stage2 (5000steps,
+global256, PI LR5e-6/new modules5e-5) → validation ablations → disjoint development
+pair → audited frozen formal pair. See [current method](docs/ZEVA_ROBOTWIN_METHOD_CN.md),
+[implementation/status](docs/ZEVA_BEHAVIOR_EFFECT_20260918.md), and
+[fixed configuration](configs/robotwin_behavior_effect_20260918.json).
+Core real-Mamba and real-data smoke tests passed; new Stage1 is running on
+aigc28 GPU0 (train5230/validation270, verified step20). Stage2 and the complete
+new pipeline are not yet trained/evaluated. Last formal evidence remains
+Base111/200 vs old ZeVA106/200: goal not met.
+
+### Historical experiment snapshots (not current architecture or launch instructions)
 
 New bounded experiment (2026-09-16): to test whether H50 training diluted
 the deployed H15 effect, a Base-locked H15 route has passed a real four-rank
@@ -274,7 +287,12 @@ are disabled under Transformers 5 and all 4.53-trained checkpoints are excluded
 from final reporting. The exact runtime versions are stored in every Stage 2
 manifest.
 
-## Three-stage training pipeline
+## Historical three-stage training pipeline (before 2026-09-18)
+
+The commands and variants in this section are retained for reproduction of old
+results, not for the current BehaviorVLA+effect run. The current entrypoints,
+fixed Stage1/Stage2 settings and progress are in
+[the new experiment record](docs/ZEVA_BEHAVIOR_EFFECT_20260918.md).
 
 Latest completed paired evaluation (2026-09-12): **Base 54.5% (109/200),
 ZeVA 55.0% (110/200), Anchor 50.5% (101/200)**. All 600 videos and exact

@@ -131,26 +131,38 @@ class ZevaModel:
         stage2_checkpoint = args.get("stage2_checkpoint")
         if not self._baseline_only and not stage2_checkpoint and not self._candidate_selector:
             raise ValueError("ZeVA evaluation requires stage2_checkpoint.")
-        self.policy = RobotWinZevaPolicy.from_handoff(
-            args["handoff_root"],
-            device=args.get("device", "cuda"),
-            foundation_checkpoint=args.get("foundation_checkpoint"),
-            goal_embedding_checkpoint=(
-                None if self._baseline_only else args.get("goal_embedding_checkpoint")
-            ),
-            zte_checkpoint=None if self._baseline_only else args["zte_checkpoint"],
-            adapter_checkpoint=(
-                None
-                if self._baseline_only or not stage2_checkpoint
-                else str(Path(stage2_checkpoint) / "zeva_adapter.pth")
-            ),
-            # Stage 2 saves the complete action-expert PI0.5 weights separately
-            # from the ZeVA adapter.  Both trained variants must load them here;
-            # omitting this silently evaluates the original foundation model.
-            stage2_checkpoint=stage2_checkpoint,
-            retrieval_checkpoint=None if self._baseline_only else args["retrieval_checkpoint"],
-            causal_bank=None if self._baseline_only else args["causal_bank"],
-        )
+        method = args.get("zeva_method", "legacy")
+        if method not in {"legacy", "behavior_effect"}:
+            raise ValueError(f"Unknown ZeVA method: {method}")
+        if method == "behavior_effect":
+            from openpi.zeva.behavior_effect_policy import ZevaBehaviorEffectPolicy
+
+            if self._baseline_only or self._candidate_selector or self._consensus_tasks:
+                raise ValueError("CTE+effect is a separate policy, not a legacy selector/baseline mode.")
+            self.policy = ZevaBehaviorEffectPolicy.from_handoff(
+                args["handoff_root"], args["foundation_checkpoint"], args["zte_checkpoint"],
+                args["behavior_effect_artifacts"], args["retrieval_checkpoint"],
+                device=args.get("device", "cuda"), stage2_checkpoint=stage2_checkpoint,
+            )
+        else:
+            self.policy = RobotWinZevaPolicy.from_handoff(
+                args["handoff_root"],
+                device=args.get("device", "cuda"),
+                foundation_checkpoint=args.get("foundation_checkpoint"),
+                goal_embedding_checkpoint=(
+                    None if self._baseline_only else args.get("goal_embedding_checkpoint")
+                ),
+                zte_checkpoint=None if self._baseline_only else args["zte_checkpoint"],
+                adapter_checkpoint=(
+                    None
+                    if self._baseline_only or not stage2_checkpoint
+                    else str(Path(stage2_checkpoint) / "zeva_adapter.pth")
+                ),
+                # Restore complete trained PI weights, not just the adapter.
+                stage2_checkpoint=stage2_checkpoint,
+                retrieval_checkpoint=None if self._baseline_only else args["retrieval_checkpoint"],
+                causal_bank=None if self._baseline_only else args["causal_bank"],
+            )
         if self._consensus_tasks:
             unknown = sorted(self._consensus_tasks.difference(self.policy.retrieval_task_names))
             if unknown:

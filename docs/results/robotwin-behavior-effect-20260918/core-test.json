@@ -1,0 +1,20 @@
+{
+  "host": "aigc28",
+  "gpu_uuid": "GPU-c4d9aceb-c274-fb29-e145-f6c2ef560bdc",
+  "status": "PASS",
+  "exit_code": 0,
+  "real_mamba_sequence_step_parity": true,
+  "future_image_and_current_action_nonleakage": true,
+  "episode_reset": true,
+  "five_objective_gradients_and_masks": true,
+  "prefix_and_suffix_contract": true,
+  "precision": "fp32, CUDA matmul and cudnn TF32 disabled",
+  "gaussian_nll": 0.2281113564968109,
+  "losses": {"action": 16.69409942626953, "vision": 109.9476089477539, "global": 0.9607791900634766, "phase": 0.34328627586364746, "effect": 25.77398109436035},
+  "scope": "bounded synthetic core audit, not real PI/DDP or success-rate evidence",
+  "real_data_stage1_smoke": {"exit_code": 0, "steps": 2, "pretrained_vision": true, "loss": [34.60279083251953, 32.514530181884766], "gradient_norm": [85.83280944824219, 94.80018615722656]},
+  "prior_attempts": [
+    {"scope": "default-TF32 parity audit", "status": "FAIL", "max_abs_difference": 0.000714525580406189, "atol": 0.0002, "resolution": "rerun unchanged tolerance in full FP32"},
+    {"scope": "real-data Stage1 smoke before first optimizer step", "status": "FAIL", "reason": "ResNet18 pretrained cache absent and remote DNS unavailable", "resolution": "official pretrained weights copied; full SHA checked on source and destination"}
+  ]
+}

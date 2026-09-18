@@ -1,0 +1,204 @@
+"""RoboTwin deployment/training interface for the isolated CTE+effect experiment."""
+from __future__ import annotations
+
+from dataclasses import replace
+import hashlib
+from pathlib import Path
+
+import torch
+from torch import nn
+import torch.nn.functional as F
+
+from openpi.zeva.behavior_effect import SCHEMA, ZevaCTE, ZevaCTEConfig, ZevaPBD
+from openpi.zeva.retrieval import CausalRetrievalHead
+from openpi.zeva.robotwin_contract import ROBOTWIN_CAMERA_KEYS
+
+
+def file_sha(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(4 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_cte(path, device="cuda", *, require_gate=True):
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    if payload.get("schema") != SCHEMA:
+        raise ValueError("New CTE+effect cannot load a legacy ZTE or ego encoder checkpoint.")
+    if require_gate and (payload["epoch"] != 80 or not payload["manifest"]["promotable"]
+                         or not (payload.get("validation") or {}).get("stage1_gate")):
+        raise ValueError("Stage2 requires fixed epoch80 and a passed validation5 Stage1 gate.")
+    config = ZevaCTEConfig(**payload["config"])
+    model = ZevaCTE(replace(config, vision_pretrained=False))
+    model.config = config
+    model.load_state_dict(payload["model_state_dict"], strict=True)
+    return model.to(device).requires_grad_(False).eval()
+
+
+class TaskLanguageMemory(nn.Module):
+    """Validated frozen language task classifier → *new* CTE keys/values.
+
+    The classifier's old coordinates are used ONLY to classify language, not
+    as a new CTE query. Predicted task identity maps to a freshly built mean
+    CTE retrieval key. No dataset episode id or true task id is an input.
+    """
+    def __init__(self, bank, retrieval):
+        super().__init__()
+        if bank.get("schema") != SCHEMA + "-artifacts" or bank.get("bank_subset") != "train":
+            raise ValueError("Require a new train-only CTE memory artifact.")
+        if retrieval.get("source_feature") != "task_language":
+            raise ValueError("Only task-language retrieval is authorized.")
+        state = retrieval["model_state_dict"]
+        self.head = CausalRetrievalHead(input_dim=state["network.0.weight"].shape[1],
+                                       hidden_dim=state["network.0.weight"].shape[0],
+                                       output_dim=state["network.4.weight"].shape[0], dropout=0.)
+        self.head.load_state_dict(state, strict=True)
+        self.task_names = tuple(retrieval["task_names"])
+        new_tasks = tuple(bank["tasks"])
+        self.register_buffer("language_prototypes", F.normalize(retrieval["task_prototypes"].float(), dim=-1))
+        self.register_buffer("keys", bank["keys"].float())
+        self.register_buffer("values", bank["values"].float())
+        self.register_buffer("entry_task", bank["task_ids"].long())
+        mapping = torch.tensor([new_tasks.index(n) if n in new_tasks else -1 for n in self.task_names])
+        self.register_buffer("task_mapping", mapping)
+        prototypes = torch.stack([F.normalize(self.keys[self.entry_task == i].mean(0), dim=-1)
+                                  for i in range(len(new_tasks))])
+        self.register_buffer("new_task_keys", prototypes)
+        self.requires_grad_(False).eval()
+        self.last_diagnostics = []
+
+    def forward(self, task_language):
+        language_scores = self.head(task_language) @ self.language_prototypes.T
+        confidence, predicted = language_scores.max(-1)
+        self.last_diagnostics = [{"task":self.task_names[int(i)], "score":float(s)}
+                                 for i,s in zip(predicted.detach().cpu(), confidence.detach().cpu(), strict=True)]
+        task = self.task_mapping[predicted]
+        if (task < 0).any():
+            raise ValueError("Language retrieved a task outside the frozen ten-task memory.")
+        query = self.new_task_keys[task]
+        # Same top5 cosine/softmax value aggregation as BehaviorVLA. Restrict to
+        # the language-retrieved task, never to the current trajectory.
+        scores = query @ F.normalize(self.keys, dim=-1).T
+        scores = scores.masked_fill(self.entry_task[None] != task[:, None], -torch.inf)
+        values, indices = scores.topk(min(5, scores.shape[1]), dim=-1)
+        return (values.softmax(-1).unsqueeze(-1) * self.values[indices]).sum(1)
+
+
+class ZevaBehaviorEffectPolicy(nn.Module):
+    def __init__(self, loader, cte, bank, retrieval):
+        super().__init__()
+        self.foundation = loader.foundation
+        self.preprocessor, self.postprocessor = loader.preprocessor, loader.postprocessor
+        self.action_normalizer = loader.action_normalizer
+        self.tokenizer = loader._task_only_tokenizer
+        self.register_buffer("language_table", loader.frozen_goal_embedding_table, persistent=False)
+        self.cte = cte
+        self.memory = TaskLanguageMemory(bank, retrieval)
+        self.pbd = ZevaPBD(dim=cte.config.d_model)
+        self.pbd.install(self.foundation.model)
+        self.foundation.requires_grad_(True)
+        self.reset()
+
+    @classmethod
+    def from_handoff(cls, handoff, foundation_checkpoint, cte_checkpoint, artifacts, retrieval_checkpoint,
+                     *, device="cuda", stage2_checkpoint=None):
+        from openpi.zeva.robotwin_policy import RobotWinZevaPolicy
+        from safetensors.torch import load_model
+
+        bank = torch.load(artifacts, map_location="cpu", weights_only=False)
+        if bank["cte_sha256"] != file_sha(cte_checkpoint):
+            raise ValueError("New CTE and memory/live cache SHA differ.")
+        cte = load_cte(cte_checkpoint, device)
+        loader = RobotWinZevaPolicy.from_handoff(handoff, foundation_checkpoint=foundation_checkpoint,
+                                               goal_embedding_checkpoint=Path(handoff)/"checkpoint/pretrained_model",
+                                               install_injection_hooks=False, device=device)
+        retrieval = torch.load(retrieval_checkpoint, map_location="cpu", weights_only=False)
+        policy = cls(loader, cte, bank, retrieval).to(device)
+        policy.identity = {"schema": SCHEMA, "cte_sha256": file_sha(cte_checkpoint),
+                           "artifacts_sha256": file_sha(artifacts), "retrieval_sha256": file_sha(retrieval_checkpoint),
+                           "foundation_sha256": file_sha(Path(foundation_checkpoint)/"model.safetensors")}
+        if stage2_checkpoint:
+            folder = Path(stage2_checkpoint)
+            adapter = torch.load(folder/"zeva_adapter.pth", map_location=device, weights_only=False)
+            if adapter["identity"] != policy.identity:
+                raise ValueError("Stage2 lineage mismatch.")
+            policy.pbd.load_state_dict(adapter["pbd"], strict=True)
+            load_model(policy.foundation, str(folder/"model.safetensors"), strict=True)
+        return policy.eval()
+
+    def train(self, mode=True):
+        super().train(mode)
+        self.cte.eval()
+        self.memory.eval()
+        return self
+
+    @torch.no_grad()
+    def language(self, tasks):
+        if isinstance(tasks, str):
+            tasks = [tasks]
+        prompts = [t.strip().replace("_", " ").replace("\n", " ") + "\n" for t in tasks]
+        encoded = self.tokenizer(prompts, max_length=200, padding="max_length", truncation=True, return_tensors="pt")
+        embeddings = F.embedding(encoded["input_ids"].to(self.language_table.device), self.language_table).float()
+        mask = encoded["attention_mask"].to(embeddings.device).unsqueeze(-1)
+        return (embeddings*mask).sum(1)/mask.sum(1).clamp_min(1)
+
+    def forward(self, processed, phase, effect, task_language):
+        global_token = self.memory(task_language)
+        prior = self.pbd.activate(global_token, phase.detach(), effect.detach())
+        try:
+            output = self.foundation(processed)
+            flow = output[0] if isinstance(output, tuple) else output
+            loss = flow.mean() + self.pbd.prior_loss(prior, processed["action"])
+            return loss, {"flow": flow.mean().detach(), "nll": self.pbd.prior_loss(prior, processed["action"]).detach()}
+        finally:
+            self.pbd.clear()
+
+    def reset(self, *, scope="episode"):
+        if scope != "episode":
+            raise ValueError("This CTE cache must reset at complete episode boundaries.")
+        self._cache = None
+        self._global_token = None
+        self.memory.last_diagnostics = []
+        self.pbd.clear()
+        self.foundation.reset()
+
+    def retrieval_diagnostics(self):
+        return self.memory.last_diagnostics
+
+    @torch.inference_mode()
+    def extract_vlm_features(self, batch):
+        # Reuse the baseline trace extractor with inactive PBD, not a second
+        # encoder or a different tokenizer/state/image preparation path.
+        from openpi.zeva.robotwin_policy import RobotWinZevaPolicy
+        if self.pbd._active is not None:
+            raise RuntimeError("Trace extraction must run outside a conditioned forward.")
+        return RobotWinZevaPolicy.extract_vlm_features(self, batch)
+
+    @torch.no_grad()
+    def infer_chunk(self, raw, *, executed_actions=None):
+        processed = self.preprocessor(raw)
+        if executed_actions is not None:
+            executed_actions = torch.as_tensor(executed_actions, dtype=torch.float32,
+                                               device=processed[ROBOTWIN_CAMERA_KEYS[0]].device)
+            if executed_actions.ndim == 2:
+                executed_actions = executed_actions.unsqueeze(0)
+        normalized = self.predict_action_chunk(processed, task=raw["task"], executed_actions=executed_actions)
+        return self.postprocessor(normalized)
+
+    @torch.no_grad()
+    def predict_action_chunk(self, processed, *, task, executed_actions=None):
+        if self.training:
+            raise RuntimeError("Deployment must use policy.eval().")
+        views = torch.stack([F.interpolate(processed[key].float(), (224,224), mode="bilinear",
+                                           align_corners=False, antialias=True).mul(2).sub(1)
+                             for key in ROBOTWIN_CAMERA_KEYS], dim=1)
+        previous = None if executed_actions is None else self.action_normalizer.normalize(executed_actions)
+        phase, effect, self._cache = self.cte.step(views, previous, self._cache)
+        if self._global_token is None:
+            self._global_token = self.memory(self.language(task))
+        self.pbd.activate(self._global_token, phase, effect)
+        try:
+            return self.foundation.predict_action_chunk(processed)
+        finally:
+            self.pbd.clear()

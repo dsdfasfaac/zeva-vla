@@ -1,0 +1,14 @@
+# Template only: placeholders prevent accidentally evaluating an unapproved run.
+{
+  "policy_name": "zeva_policy",
+  "zeva_method": "behavior_effect",
+  "handoff_root": "__REQUIRED_HANDOFF_ROOT__",
+  "foundation_checkpoint": "__REQUIRED_TRAINING_FOUNDATION_CHECKPOINT__",
+  "zte_checkpoint": "__REQUIRED_NEW_EPOCH80_CTE__",
+  "behavior_effect_artifacts": "__REQUIRED_NEW_CTE_MEMORY_AND_LIVE_CACHE__",
+  "retrieval_checkpoint": "__REQUIRED_FROZEN_TASK_LANGUAGE_CLASSIFIER__",
+  "stage2_checkpoint": "__REQUIRED_NEW_STEP5000_AND_PASSED_GATES__",
+  "baseline_only": false,
+  "device": "cuda",
+  "model_rng_seed": 20260907
+}

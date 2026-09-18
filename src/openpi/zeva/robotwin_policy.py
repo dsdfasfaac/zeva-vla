@@ -374,6 +374,7 @@ class RobotWinZevaPolicy(nn.Module):
         preprocessor: Any | None = None,
         postprocessor: Any | None = None,
         zeva_config: ZevaConfig | None = None,
+        install_injection_hooks: bool = True,
     ):
         super().__init__()
         self.foundation = foundation_policy
@@ -492,7 +493,8 @@ class RobotWinZevaPolicy(nn.Module):
         self.register_buffer("frozen_goal_embedding_table", None, persistent=False)
         self._task_only_tokenizer: Any | None = None
         self.retrieval_task_names: tuple[str, ...] = ()
-        self._install_foundation_injection_hooks()
+        if install_injection_hooks:
+            self._install_foundation_injection_hooks()
         self.reset(scope="episode")
 
     def train(self, mode: bool = True):  # noqa: FBT001, FBT002 - matches torch.nn.Module API.
@@ -522,6 +524,7 @@ class RobotWinZevaPolicy(nn.Module):
         stage2_checkpoint: str | Path | None = None,
         retrieval_checkpoint: str | Path | None = None,
         causal_bank: str | Path | None = None,
+        install_injection_hooks: bool = True,
     ) -> RobotWinZevaPolicy:
         """Load the exact selected PI0.5 weights and their saved processors."""
         handoff = RobotWinHandoff.from_root(handoff_root)
@@ -717,6 +720,7 @@ class RobotWinZevaPolicy(nn.Module):
             preprocessor=preprocessor,
             postprocessor=postprocessor,
             zeva_config=zeva_config,
+            install_injection_hooks=install_injection_hooks,
         ).to(device)
         if goal_embedding_checkpoint is None:
             wrapper.frozen_goal_embedding_table = (

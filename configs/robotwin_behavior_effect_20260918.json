@@ -1,0 +1,9 @@
+{
+  "schema": "zeva-behavior-effect-experiment-v1",
+  "upstream_commit": "0dbabc7e79791a325c4e76acde0ddfd7a18e8326",
+  "stage1": {"epochs": 80, "batch_size": 8, "vision_lr": 1e-5, "other_lr": 1e-4, "effect_weight": 0.2, "selection": "epoch80", "validation_relative_gains_min": 0.05},
+  "stage2": {"steps": 5000, "global_batch": 256, "pi_lr": 5e-6, "pbd_lr": 5e-5, "trainable": ["full_pi05", "pbd"], "frozen": ["cte", "memory", "language_retrieval"], "gaussian_nll_weight": 0.01, "prior_train_keep": 0.6, "prior_eval_scale": 0.5, "selection": "step5000"},
+  "protocol": {"action_dim": 16, "state_dim": 14, "output_horizon": 50, "execution_horizon": 15, "camera_resolution": [640,480], "task_subset": "configs/robotwin_zeva_advantage10.json", "normalization": "baseline_mean_std", "episode_oracle": false},
+  "gates": {"validation_h15_mse_relative_gain": 0.03, "validation_nonworse_tasks": 8, "development_paired_episodes": 80, "development_min_extra_success": 4, "formal_paired_episodes": 200, "formal_min_extra_success": 8},
+  "formal_manifest_sha256": "1b9dbf74bd9d9b8871647a00d6557f84884685d4459065f004bd600a86b1679b"
+}
