@@ -1,6 +1,8 @@
 {
   "schema": "zeva-behavior-effect-experiment-v1",
   "upstream_commit": "0dbabc7e79791a325c4e76acde0ddfd7a18e8326",
+  "comparison_base": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/baseline/001000",
+  "comparison_base_model_sha256": "bcf1d4f5f3e77926b8b7f798bb983378ad096e3892eed1a66058c5d98ed9bc17",
   "stage1": {"epochs": 80, "batch_size": 8, "vision_lr": 1e-5, "other_lr": 1e-4, "effect_weight": 0.2, "selection": "epoch80", "validation_relative_gains_min": 0.05},
   "stage2": {"steps": 5000, "global_batch": 256, "pi_lr": 5e-6, "pbd_lr": 5e-5, "trainable": ["full_pi05", "pbd"], "frozen": ["cte", "memory", "language_retrieval"], "gaussian_nll_weight": 0.01, "prior_train_keep": 0.6, "prior_eval_scale": 0.5, "selection": "step5000"},
   "protocol": {"action_dim": 16, "state_dim": 14, "output_horizon": 50, "execution_horizon": 15, "camera_resolution": [640,480], "task_subset": "configs/robotwin_zeva_advantage10.json", "normalization": "baseline_mean_std", "episode_oracle": false},

@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "scope": "bounded real PI DDP/AdamW smoke; no promotable checkpoint",
+  "ranks": 2,
+  "per_rank_batch": 1,
+  "accumulation": 2,
+  "smoke_global_batch": 4,
+  "optimizer_steps": 2,
+  "losses_last_microbatch_rank0": [
+    2.893829584121704,
+    1.156156063079834
+  ],
+  "effect_weights_updated_and_rank_identical": true,
+  "peak_allocated_gib": 46.91267681121826,
+  "elapsed_seconds": 116.27446727291681
+}

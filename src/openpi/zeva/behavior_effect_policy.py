@@ -56,6 +56,17 @@ class TaskLanguageMemory(nn.Module):
         self.head.load_state_dict(state, strict=True)
         self.task_names = tuple(retrieval["task_names"])
         new_tasks = tuple(bank["tasks"])
+        if len(set(new_tasks)) != len(new_tasks) or not set(new_tasks).issubset(self.task_names):
+            raise ValueError("New memory tasks must be unique and represented by the frozen language classifier.")
+        entries = len(bank["keys"])
+        if bank["keys"].shape != (entries,128) or bank["values"].shape != (entries,256) or bank["task_ids"].shape != (entries,):
+            raise ValueError("Memory must contain aligned [N,128] keys, [N,256] values and [N] task ids.")
+        if not torch.isfinite(bank["keys"]).all() or not torch.isfinite(bank["values"]).all():
+            raise ValueError("Non-finite CTE memory.")
+        if (bank["task_ids"] < 0).any() or (bank["task_ids"] >= len(new_tasks)).any():
+            raise ValueError("Memory task id outside its declared task table.")
+        if any(int((bank["task_ids"] == i).sum()) == 0 for i in range(len(new_tasks))):
+            raise ValueError("Every declared memory task needs train-only entries.")
         self.register_buffer("language_prototypes", F.normalize(retrieval["task_prototypes"].float(), dim=-1))
         self.register_buffer("keys", bank["keys"].float())
         self.register_buffer("values", bank["values"].float())
@@ -70,6 +81,10 @@ class TaskLanguageMemory(nn.Module):
 
     def forward(self, task_language):
         language_scores = self.head(task_language) @ self.language_prototypes.T
+        # Restrict the classifier to the fixed, predeclared memory task scope.
+        # This uses no per-example task label and prevents a 50-task classifier
+        # from crashing a valid ten-task deployment on an out-of-scope argmax.
+        language_scores = language_scores.masked_fill(self.task_mapping[None] < 0, -torch.inf)
         confidence, predicted = language_scores.max(-1)
         self.last_diagnostics = [{"task":self.task_names[int(i)], "score":float(s)}
                                  for i,s in zip(predicted.detach().cpu(), confidence.detach().cpu(), strict=True)]
