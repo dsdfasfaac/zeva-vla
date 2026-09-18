@@ -32,6 +32,8 @@
 
 在任何新Stage2验证结果出现前，selector将定性消融门槛落实为：aligned MSE严格低于完整同任务置换，且不高于effect-off。比较Base固定为此前正常训练Base1000，模型SHA `bcf1d4f5f3e77926b8b7f798bb983378ad096e3892eed1a66058c5d98ed9bc17`，不能换成较弱权重。指标必须是采样动作H15 MSE，不能用flow loss或NLL代替；独立expected-decision清单要求完整coverage。
 
+开发闭环在任何新ZeVA评测前将seed筛选规则固定为：从absolute seed `1000000`开始，逐任务按递增顺序取最早8个expert-valid seed，并冻结对应seen instruction；须与正式10×20清单（SHA `1b9dbf74bd9d9b8871647a00d6557f84884685d4459065f004bd600a86b1679b`）完全不交叉。Base使用同一个正常训练Base1000，ZeVA仅在相同seed/instruction上配对。配置见`configs/robotwin_behavior_effect_20260918.json`。当前尚未筛选或运行这80个episode；aigc29/32/15正被其他作业占满，aigc31有现存显存占用，不抢占。
+
 ## 已测/未测
 
 aigc28真实H100/Mamba测试PASS：整段/逐步phase+effect一致、SOS/reset、未来图像/当前目标动作非泄漏、五损失mask与梯度、global/effect prefix mask、Gaussian H50 suffix、0.5推理倍率。
