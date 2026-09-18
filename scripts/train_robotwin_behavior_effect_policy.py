@@ -35,6 +35,7 @@ class Args:
     accumulation: int = 4
     workers: int = 4
     seed: int = 1000
+    exploratory_epoch40: bool = False
 
 
 class Decisions(Dataset):
@@ -82,10 +83,13 @@ def main(args):
     torch.cuda.manual_seed_all(args.seed + accelerator.process_index)
     policy = ZevaBehaviorEffectPolicy.from_handoff(args.handoff_root, args.foundation_checkpoint,
                                                   args.cte_checkpoint, args.artifacts, args.retrieval_checkpoint,
-                                                  device=str(accelerator.device))
+                                                  device=str(accelerator.device),
+                                                  exploratory_epoch40=args.exploratory_epoch40)
     policy.foundation.model.gradient_checkpointing_enable()
     policy.train()
     artifact = torch.load(args.artifacts, map_location="cpu", weights_only=False)
+    if bool(artifact.get("exploratory_epoch40", False)) != args.exploratory_epoch40:
+        raise ValueError("CTE artifact exploratory status differs from Stage2 run.")
     dataset = Decisions(Path(args.dataset_root)/"adapter.json", artifact, "train")
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers,
                         pin_memory=True, drop_last=True, persistent_workers=args.workers > 0)
@@ -103,7 +107,9 @@ def main(args):
     output.mkdir(parents=True, exist_ok=True)
     identity = {"args": dataclasses.asdict(args), "lineage": policy.identity, "global_batch": global_batch,
                 "decision_count": len(dataset), "source_sha256": file_sha(__file__),
-                "selection": "fixed-step5000; validation-only preclosed-loop gate"}
+                "selection": ("exploratory-epoch40-fixed-step5000; not original formal promotion"
+                              if args.exploratory_epoch40 else
+                              "fixed-step5000; validation-only preclosed-loop gate")}
     if accelerator.is_main_process:
         (output/"manifest.json").write_text(json.dumps(identity, indent=2)+"\n")
     preprocess, language = policy.preprocessor, policy.language

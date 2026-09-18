@@ -109,6 +109,8 @@ def main():
     if state["step"] != 5000 or state["manifest"]["global_batch"] != 256:
         raise ValueError("Checkpoint step/batch differs from the predeclared run.")
     train_args = state["manifest"]["args"]
+    if train_args.get("exploratory_epoch40", False):
+        raise ValueError("Epoch40 exploratory Stage2 cannot be promoted by the preregistered epoch80 selector.")
     denominator = train_args["batch_size"] * train_args["accumulation"]
     if denominator <= 0 or 256 % denominator:
         raise ValueError("Checkpoint per-rank batch/accumulation is incompatible with global256.")

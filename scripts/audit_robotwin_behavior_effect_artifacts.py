@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("checkpoint", "artifacts", "retrieval", "dataset-root", "foundation", "handoff", "tasks", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--exploratory-epoch40", action="store_true")
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError(args.output)
@@ -28,14 +29,15 @@ def main():
     if len(tasks) != 10 or len(set(tasks)) != 10:
         raise ValueError("Audit requires the frozen ten unique tasks.")
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    if (checkpoint.get("schema") != SCHEMA or checkpoint.get("epoch") != 80
+    expected_epoch = 40 if args.exploratory_epoch40 else 80
+    if (checkpoint.get("schema") != SCHEMA or checkpoint.get("epoch") != expected_epoch
             or not checkpoint["manifest"]["promotable"]
             or not (checkpoint.get("validation") or {}).get("stage1_gate")):
-        raise ValueError("Fixed epoch80 Stage1 validation gate did not pass.")
+        raise ValueError(f"Epoch{expected_epoch} Stage1 validation gate did not pass.")
     manifest = checkpoint["manifest"]
     if (manifest["tasks"] != tasks or manifest["train_episodes"] != 5230
             or manifest["validation_episodes"] != 270
-            or checkpoint["step"] != 80 * 654
+            or checkpoint["step"] != expected_epoch * 654
             or manifest["normalization"] != "baseline-mean-std"
             or manifest["decoder"] != "torchcodec"
             or manifest["source_sha256"]["trainer"] != file_sha(Path(__file__).with_name(
@@ -64,7 +66,8 @@ def main():
     if (artifact.get("schema") != SCHEMA + "-artifacts" or artifact["cte_sha256"] != file_sha(args.checkpoint)
             or artifact["adapter_sha256"] != file_sha(adapter) or artifact["tasks"] != tasks
             or artifact["bank_subset"] != "train" or artifact["execution_horizon"] != 15
-            or artifact["policy_horizon"] != 50):
+            or artifact["policy_horizon"] != 50
+            or bool(artifact.get("exploratory_epoch40", False)) != args.exploratory_epoch40):
         raise ValueError("Exported artifact lineage/schema/protocol differs.")
     retrieval = torch.load(args.retrieval, map_location="cpu", weights_only=False)
     if retrieval.get("source_feature") != "task_language" or not set(tasks).issubset(retrieval["task_names"]):
@@ -112,7 +115,9 @@ def main():
     if file_sha(foundation_model) != "7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe":
         raise ValueError("Foundation best-v1 SHA differs from frozen selected handoff.")
     report = {"schema":"zeva-behavior-effect-prestage2-audit-v1", "status":"PASS",
-              "stage1_epoch":80, "stage1_step":checkpoint["step"],
+              "stage1_epoch":expected_epoch, "exploratory_epoch40":args.exploratory_epoch40,
+              "formal_promotion_eligible":not args.exploratory_epoch40,
+              "stage1_step":checkpoint["step"],
               "validation":checkpoint["validation"], "split":rows,
               "train_bank_entries":len(bank_ids), "validation_in_bank":0,
               "sha256":{"checkpoint":file_sha(args.checkpoint), "artifact":file_sha(args.artifacts),

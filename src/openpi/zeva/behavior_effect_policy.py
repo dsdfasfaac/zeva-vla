@@ -22,12 +22,17 @@ def file_sha(path):
     return digest.hexdigest()
 
 
-def load_cte(path, device="cuda", *, require_gate=True):
+def load_cte(path, device="cuda", *, require_gate=True, exploratory_epoch40=False):
     payload = torch.load(path, map_location="cpu", weights_only=False)
     if payload.get("schema") != SCHEMA:
         raise ValueError("New CTE+effect cannot load a legacy ZTE or ego encoder checkpoint.")
-    if require_gate and (payload["epoch"] != 80 or not payload["manifest"]["promotable"]
-                         or not (payload.get("validation") or {}).get("stage1_gate")):
+    if exploratory_epoch40:
+        if (payload.get("epoch") != 40 or payload.get("step") != 40 * 654
+                or not payload["manifest"]["promotable"]
+                or not (payload.get("validation") or {}).get("stage1_gate")):
+            raise ValueError("Exploratory Stage2 requires the real epoch40/step26160 checkpoint and its passed interim validation.")
+    elif require_gate and (payload["epoch"] != 80 or not payload["manifest"]["promotable"]
+                           or not (payload.get("validation") or {}).get("stage1_gate")):
         raise ValueError("Stage2 requires fixed epoch80 and a passed validation5 Stage1 gate.")
     config = ZevaCTEConfig(**payload["config"])
     model = ZevaCTE(replace(config, vision_pretrained=False))
@@ -117,14 +122,14 @@ class ZevaBehaviorEffectPolicy(nn.Module):
 
     @classmethod
     def from_handoff(cls, handoff, foundation_checkpoint, cte_checkpoint, artifacts, retrieval_checkpoint,
-                     *, device="cuda", stage2_checkpoint=None):
+                     *, device="cuda", stage2_checkpoint=None, exploratory_epoch40=False):
         from openpi.zeva.robotwin_policy import RobotWinZevaPolicy
         from safetensors.torch import load_model
 
         bank = torch.load(artifacts, map_location="cpu", weights_only=False)
         if bank["cte_sha256"] != file_sha(cte_checkpoint):
             raise ValueError("New CTE and memory/live cache SHA differ.")
-        cte = load_cte(cte_checkpoint, device)
+        cte = load_cte(cte_checkpoint, device, exploratory_epoch40=exploratory_epoch40)
         loader = RobotWinZevaPolicy.from_handoff(handoff, foundation_checkpoint=foundation_checkpoint,
                                                goal_embedding_checkpoint=Path(handoff)/"checkpoint/pretrained_model",
                                                install_injection_hooks=False, device=device)

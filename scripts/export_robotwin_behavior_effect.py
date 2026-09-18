@@ -21,6 +21,7 @@ class Args:
     output: str
     task_subset: str = "configs/robotwin_zeva_advantage10.json"
     handoff_root: str = "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1"
+    exploratory_epoch40: bool = False
 
 
 @torch.no_grad()
@@ -30,7 +31,7 @@ def main(args):
     output = Path(args.output)
     if output.exists():
         raise ValueError("Do not overwrite a prior CTE artifact.")
-    cte = load_cte(args.checkpoint)
+    cte = load_cte(args.checkpoint, exploratory_epoch40=args.exploratory_epoch40)
     tasks = json.loads(Path(args.task_subset).read_text())["task_names"]
     normalizer = MeanStdActionNormalizer.from_stats_file(RobotWinHandoff.from_root(args.handoff_root).statistics)
     keys, values, task_ids, bank_record_ids = [], [], [], []
@@ -63,6 +64,7 @@ def main(args):
         raise ValueError("Train/validation trajectory overlap.")
     output.parent.mkdir(parents=True, exist_ok=True)
     payload = {"schema": SCHEMA+"-artifacts", "cte_sha256": sha(args.checkpoint),
+               "exploratory_epoch40": args.exploratory_epoch40,
                "adapter_sha256": sha(Path(args.dataset_root)/"adapter.json"),
                "tasks": tasks, "bank_subset": "train", "bank_record_ids": bank_record_ids,
                "keys": torch.stack(keys), "values": torch.stack(values), "task_ids": torch.tensor(task_ids),
