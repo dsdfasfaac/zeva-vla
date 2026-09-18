@@ -8,9 +8,10 @@
 - `src/openpi/zeva/behavior_effect_policy.py`：新schema/SHA、语言检索、新memory、训练和在线接口。
 - `scripts/train_robotwin_behavior_effect_cte.py`：train95完整序列、80epochs/batch8、验证和optimizer保存。
 - `scripts/export_robotwin_behavior_effect.py`：重建train-only memory及真实H15递归cache。
-- `scripts/train_robotwin_behavior_effect_policy.py`：Stage2 full PI＋PBD、global256/5000steps、完整model/adapter/optimizer/RNG；尚未启动，须先做实际PI/DDP测试。
+- `scripts/train_robotwin_behavior_effect_policy.py`：Stage2 full PI＋PBD、global256/5000steps、完整model/adapter/optimizer/RNG；尚未启动，须等固定epoch80 gate及完整产物检查通过。
 - `scripts/test_robotwin_behavior_effect.py`：真实CUDA/Mamba测试。
 - `scripts/smoke_robotwin_behavior_effect_pi.py`：真实PI/真实数据单卡推理反传及双卡AdamW/梯度累积测试；不保存可提升的训练权重。
+- `scripts/smoke_robotwin_behavior_effect_pipeline.py`：早期CTE、十任务train-only微型fixture memory、真实PI的两次H15边界端到端检查；不会保存或提升正式产物。
 - `scripts/select_robotwin_behavior_effect.py`：固定step5000的validation5-only gate，拒绝覆盖缺失、重复sample、非同任务置换、正式标签、不同Base权重或checkpoint哈希不符。
 - `scripts/report_robotwin_behavior_effect.py`：完整validation5采样动作误差生成器；先从原始episode长度独立枚举expected ids，再核验cache完整性；显式复用同一H50×32噪声、10步去噪，计算Base/aligned/同任务完整错位置换/effect-off四条件H15误差。
 - `scripts/run_robotwin_behavior_effect.sh`：aigc28 GPU0 UUID/空闲检查；test、smoke、stage1模式。
@@ -44,6 +45,12 @@ aigc28真实H100/Mamba测试PASS：整段/逐步phase+effect一致、SOS/reset�
 
 单元selector三组测试通过；新memory加载器拒绝非finite/错维/缺任务产物，并将50-task语言分类器候选限制为固定十任务memory范围，不用每个样本的真实task标签。Stage1进程未重启、参数未更改。后续新增采样报告生成器及三组独立枚举/置换/cache覆盖测试，合计六组纯CPU单元测试通过。报告生成器拒绝不完整checkpoint、非step5000/global256、不同Base SHA、非train-only bank、缺失/多余cache；先写决策和置换计划，再采样，部分结果单独保留，不能提升。CTE历史采用专家H15动作的离线递归cache，明确不是闭环成功率。
 
-**仍未验证**：报告生成器真实完整权重/数据运行；实际新CTE/cache→完整policy端到端；正式global256容量；Stage2精确断点恢复。不能把六组单元测试当成这些运行验收通过。Stage1尚须固定epoch80通过gate，才能导出正式新memory并开始Stage2；当前继续训练，无新成功率。报告命令从项目根目录运行，提供`--dataset-root --cte-checkpoint --artifacts --retrieval-checkpoint --foundation-checkpoint --checkpoint --output-dir`；随后将`report.json`和`expected-decisions.json`交给独立selector，禁止用中间`rows.partial.jsonl`作选择。
+进一步容量检查已在a28 GPU1/2 exit0：每卡batch8、累积16、两rank，**实际global256、2次AdamW更新**，peak47.00GiB，总耗时128.18秒，effect权重更新且rank一致。测试重复真实样本，验证计算/显存容量，不证明完整dataloader吞吐、训练收益或正式八rank拓扑；未保存checkpoint，Stage1 GPU0未重启。报告`pi-global256-capacity.json`。
+
+GPU3完整policy接口smoke已exit0：使用真实epoch5 CTE（SHA `49524b87f046c77e6ca6406fca18129f0ee49f353333d6d175e3dc864d4f47db`）、每任务一个train episode形成的十任务微型fixture memory、冻结语言分类器和真实best-v1 PI。在独立validation episode的frame0/15，在线CTE与导出式递归特征最大误差≤1.08e-6，在线/缓存条件下H50动作逐位一致，episode reset通过；显式相同噪声的effect-off采样在改变全局RNG后仍逐位一致。耗时122.76秒，peak10.18GiB，报告`cte-pipeline-smoke.json`明确`promotable=false`，没有保存memory/模型，也没有绕过正式epoch80 gate。此测试不代表全部5230条memory产物或训练后的策略验收。
+
+**仍未验证**：报告生成器真实完整权重/数据运行；epoch80正式全量memory/cache产物；正式八rank拓扑；Stage2精确断点恢复。不能把单元测试、容量测试或早期fixture集成测试当成这些验收通过。Stage1尚须固定epoch80通过gate，才能导出正式新memory并开始Stage2；当前继续训练，无新成功率。报告命令从项目根目录运行，提供`--dataset-root --cte-checkpoint --artifacts --retrieval-checkpoint --foundation-checkpoint --checkpoint --output-dir`；随后将`report.json`和`expected-decisions.json`交给独立selector，禁止用中间`rows.partial.jsonl`作选择。
+
+首次epoch5验证：action相对零动作改善93.63%，effect相对零effect改善30.11%，vision相对persistence改善3.43%，finite。当前vision未到预声明5%，但本轮只在固定epoch80决定通过与否，不提前提升、不放宽门槛，训练正常继续。
 
 上一正式Base111/20055.5%、旧ZeVA106/20053%、−2.5pp；旧输出残差500步验证改善0.00537%、preserve0改善0.2676%，均失败，不是本次新方法结果。

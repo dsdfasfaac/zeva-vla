@@ -1,0 +1,39 @@
+{
+  "status": "PASS",
+  "promotable": false,
+  "scope": "early CTE, tiny train-only fixture bank, real PI integration only",
+  "cte_checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-behavior-effect-20260918/stage1/cte_epoch_005.pth",
+  "cte_sha256": "49524b87f046c77e6ca6406fca18129f0ee49f353333d6d175e3dc864d4f47db",
+  "retrieval_sha256": "c54b3275af4b15999a5d849f476c19ff3d01c76150a487679e9bbe61928798b7",
+  "train_fixture_record_ids": [
+    "Clean:beat_block_hammer:0",
+    "Clean:blocks_ranking_rgb:0",
+    "Clean:blocks_ranking_size:0",
+    "Clean:handover_block:0",
+    "Clean:hanging_mug:0",
+    "Clean:pick_dual_bottles:1",
+    "Clean:put_bottles_dustbin:0",
+    "Clean:scan_object:0",
+    "Clean:stack_bowls_three:0",
+    "Clean:stamp_seal:0"
+  ],
+  "validation_record_id": "Clean:beat_block_hammer:20",
+  "checks": [
+    {
+      "frame": 0,
+      "max_phase_error": 1.0728836059570312e-06,
+      "max_action_error": 0.0,
+      "explicit_noise_bit_exact": true
+    },
+    {
+      "frame": 15,
+      "max_phase_error": 5.960464477539062e-07,
+      "max_action_error": 0.0,
+      "explicit_noise_bit_exact": true
+    }
+  ],
+  "episode_reset": true,
+  "source_sha256": "a9570e1cb554e61c45adcdbc416c3ba22868a28db53d53d3be9b08b8a7f0401c",
+  "elapsed_seconds": 122.75827284785919,
+  "peak_allocated_gib": 10.181702613830566
+}

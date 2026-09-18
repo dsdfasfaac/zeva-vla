@@ -24,6 +24,7 @@ class Args:
     handoff: str = "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1"
     dataset: str = "/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/data/adapter.json"
     distributed_steps: int = 0
+    capacity_global256: bool = False
 
 
 class TrainingHarness(torch.nn.Module):
@@ -41,13 +42,20 @@ class TrainingHarness(torch.nn.Module):
             self.pbd.clear()
 
 
-def distributed_smoke(foundation, processed, output, steps, started):
-    """Two-rank real PI AdamW/accumulation test, explicitly NOT global256 training."""
+def distributed_smoke(foundation, processed, output, steps, started, capacity_global256=False):
+    """Bounded two-rank capacity test; repeated real sample, no quality claims."""
     from torch.nn.parallel import DistributedDataParallel
     from contextlib import nullcontext
 
     if steps != 2 or torch.distributed.get_world_size() != 2:
         raise ValueError("This bounded DDP test requires two ranks and two optimizer steps.")
+    batch, accumulation = (8, 16) if capacity_global256 else (1, 2)
+    if capacity_global256:
+        # Replication deliberately isolates full-PI memory/compute capacity.
+        # It is not a full data-loader or generalization test.
+        processed = {key: value.repeat(batch, *([1] * (value.ndim - 1)))
+                     if isinstance(value, torch.Tensor) and value.shape[0] == 1 else value
+                     for key, value in processed.items()}
     foundation.requires_grad_(True).train()
     foundation.model.gradient_checkpointing_enable()
     pbd = ZevaPBD().cuda().train()
@@ -63,23 +71,28 @@ def distributed_smoke(foundation, processed, output, steps, started):
     losses = []
     for step in range(steps):
         optimizer.zero_grad(set_to_none=True)
-        for micro in range(2):
-            features = [torch.randn(1,256,device="cuda") for _ in range(3)]
-            with harness.no_sync() if micro == 0 else nullcontext():
+        for micro in range(accumulation):
+            features = [torch.randn(batch,256,device="cuda") for _ in range(3)]
+            with harness.no_sync() if micro < accumulation - 1 else nullcontext():
                 with torch.autocast("cuda", dtype=torch.bfloat16):
-                    loss = harness(processed, features)/2
+                    loss = harness(processed, features)/accumulation
                 loss.backward()
         norm = torch.nn.utils.clip_grad_norm_(harness.parameters(),1.,error_if_nonfinite=True)
         assert norm > 0
         optimizer.step()
-        losses.append(float(loss.detach())*2)
+        losses.append(float(loss.detach())*accumulation)
+        if torch.distributed.get_rank() == 0:
+            print(json.dumps({"capacity_global256":capacity_global256,"optimizer_step":step+1,
+                              "peak_allocated_gib":torch.cuda.max_memory_allocated()/1024**3}),flush=True)
     assert not torch.equal(initial, pbd.effect_projector.weight)
     weight = pbd.effect_projector.weight.detach().clone()
     reference = weight.clone()
     torch.distributed.broadcast(reference, src=0)
     torch.testing.assert_close(weight,reference,rtol=0,atol=0)
     report = {"status":"PASS", "scope":"bounded real PI DDP/AdamW smoke; no promotable checkpoint",
-              "ranks":2, "per_rank_batch":1, "accumulation":2, "smoke_global_batch":4,
+              "ranks":2, "per_rank_batch":batch, "accumulation":accumulation,
+              "smoke_global_batch":2*batch*accumulation, "repeated_real_sample":True,
+              "formal_eight_rank_topology_tested":False,
               "optimizer_steps":steps, "losses_last_microbatch_rank0":losses,
               "effect_weights_updated_and_rank_identical":True,
               "peak_allocated_gib":torch.cuda.max_memory_allocated()/1024**3,
@@ -93,6 +106,8 @@ def distributed_smoke(foundation, processed, output, steps, started):
 
 
 def main(args):
+    if args.capacity_global256 and args.distributed_steps != 2:
+        raise ValueError("Capacity mode requires the bounded two-update DDP test.")
     if args.distributed_steps:
         torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
         torch.distributed.init_process_group("nccl", device_id=torch.device("cuda",torch.cuda.current_device()))
@@ -118,7 +133,7 @@ def main(args):
     if processed["action"].ndim == 2:
         processed["action"] = processed["action"].unsqueeze(0)
     if args.distributed_steps:
-        distributed_smoke(foundation,processed,output,args.distributed_steps,started)
+        distributed_smoke(foundation,processed,output,args.distributed_steps,started,args.capacity_global256)
         return
     foundation.eval()
     # Inactive hooks must be exactly identity for baseline samples.
