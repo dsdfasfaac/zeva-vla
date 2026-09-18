@@ -1,0 +1,114 @@
+{
+  "step": 500,
+  "train_loss": 0.036868248134851456,
+  "train_flow": 0.03609297797083855,
+  "train_flow_h15": null,
+  "train_residual_off_flow": null,
+  "train_baseline_flow": 0.036226581782102585,
+  "train_baseline_sampled": true,
+  "train_prior_nll": 17.60869598388672,
+  "train_prior_std": 1.0041786432266235,
+  "train_prior_residual_keep": 0.5048162937164307,
+  "train_residual_regression": 0.0030984131153672934,
+  "train_residual_trust_region": 1.321575204826786e-08,
+  "train_residual_abs": 0.0036340304650366306,
+  "validation": {
+    "total": 0.011846458539366722,
+    "flow": 0.01111829187721014,
+    "prior": 17.305078506469727,
+    "prior_std": 1.0044578313827515,
+    "baseline": 0.011147969402372837,
+    "retrieval_accuracy": 0.9974888563156128,
+    "paired_improvement": 2.9676861231564544e-05,
+    "paired_win_fraction": 0.4738070070743561,
+    "paired_degradation": 4.956727570970543e-05,
+    "residual_regression": 0.002912003081291914,
+    "trust_region": 3.531124193045798e-08,
+    "residual_abs": 0.004121626261621714,
+    "prior_residual_keep": 0.5274113416671753,
+    "gate": 0.0016190230380743742,
+    "per_task_paired": {
+      "beat_block_hammer": {
+        "count": 220,
+        "corrected_h15_mse": 0.002446595812216401,
+        "base_h15_mse": 0.0024474698584526777,
+        "paired_improvement": 8.739244208300079e-07,
+        "paired_win_fraction": 0.48636364936828613,
+        "paired_degradation": 1.3499292435881216e-05
+      },
+      "blocks_ranking_rgb": {
+        "count": 409,
+        "corrected_h15_mse": 0.012049526907503605,
+        "base_h15_mse": 0.012038541957736015,
+        "paired_improvement": -1.098437587643275e-05,
+        "paired_win_fraction": 0.4474327564239502,
+        "paired_degradation": 3.9230420952662826e-05
+      },
+      "blocks_ranking_size": {
+        "count": 409,
+        "corrected_h15_mse": 0.00908634252846241,
+        "base_h15_mse": 0.009092080406844616,
+        "paired_improvement": 5.738012532674475e-06,
+        "paired_win_fraction": 0.46699267625808716,
+        "paired_degradation": 3.313207344035618e-05
+      },
+      "handover_block": {
+        "count": 409,
+        "corrected_h15_mse": 0.007404230535030365,
+        "base_h15_mse": 0.007420586422085762,
+        "paired_improvement": 1.6355779735022224e-05,
+        "paired_win_fraction": 0.5207824110984802,
+        "paired_degradation": 3.2488740544067696e-05
+      },
+      "hanging_mug": {
+        "count": 409,
+        "corrected_h15_mse": 0.01355201005935669,
+        "base_h15_mse": 0.013578628189861774,
+        "paired_improvement": 2.6618236006470397e-05,
+        "paired_win_fraction": 0.47677260637283325,
+        "paired_degradation": 7.13343542884104e-05
+      },
+      "pick_dual_bottles": {
+        "count": 233,
+        "corrected_h15_mse": 0.00863928347826004,
+        "base_h15_mse": 0.008653218857944012,
+        "paired_improvement": 1.3935969036538154e-05,
+        "paired_win_fraction": 0.4806866943836212,
+        "paired_degradation": 4.98531007906422e-05
+      },
+      "put_bottles_dustbin": {
+        "count": 409,
+        "corrected_h15_mse": 0.008769793435931206,
+        "base_h15_mse": 0.00878369715064764,
+        "paired_improvement": 1.390372017340269e-05,
+        "paired_win_fraction": 0.5061124563217163,
+        "paired_degradation": 2.951060923805926e-05
+      },
+      "scan_object": {
+        "count": 313,
+        "corrected_h15_mse": 0.03903789445757866,
+        "base_h15_mse": 0.03928897902369499,
+        "paired_improvement": 0.00025108351837843657,
+        "paired_win_fraction": 0.5399361252784729,
+        "paired_degradation": 0.00019985296239610761
+      },
+      "stack_bowls_three": {
+        "count": 409,
+        "corrected_h15_mse": 0.006336487829685211,
+        "base_h15_mse": 0.006338237319141626,
+        "paired_improvement": 1.749245825521939e-06,
+        "paired_win_fraction": 0.4156479239463806,
+        "paired_degradation": 2.154435969714541e-05
+      },
+      "stamp_seal": {
+        "count": 269,
+        "corrected_h15_mse": 0.004897724837064743,
+        "base_h15_mse": 0.004905420821160078,
+        "paired_improvement": 7.696115972066764e-06,
+        "paired_win_fraction": 0.41263940930366516,
+        "paired_degradation": 2.1398109311121516e-05
+      }
+    },
+    "minimum_task_paired_improvement": -1.098437587643275e-05
+  }
+}
