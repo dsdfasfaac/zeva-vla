@@ -106,6 +106,13 @@ def main():
     state = torch.load(checkpoint/"training_state.pth", map_location="cpu", weights_only=False)
     if state["step"] != 5000 or state["manifest"]["global_batch"] != 256:
         raise ValueError("Checkpoint step/batch differs from the predeclared run.")
+    train_args = state["manifest"]["args"]
+    denominator = train_args["batch_size"] * train_args["accumulation"]
+    if denominator <= 0 or 256 % denominator:
+        raise ValueError("Checkpoint per-rank batch/accumulation is incompatible with global256.")
+    for rank in range(256 // denominator):
+        if not (checkpoint/f"rng_rank{rank}.pth").is_file():
+            raise ValueError(f"Incomplete checkpoint: rank{rank} RNG state absent.")
     result = select(report, json.loads(args.expected_decisions.read_text()), json.loads(args.plan.read_text()),
                     json.loads(args.tasks.read_text())["task_names"])
     result["report_sha256"] = sha(args.report)

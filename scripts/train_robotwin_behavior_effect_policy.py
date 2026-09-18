@@ -136,6 +136,7 @@ def main(args):
                     folder.mkdir(exist_ok=True)
                     torch.save({"cpu":torch.get_rng_state(), "cuda":torch.cuda.get_rng_state_all()},
                                folder/f"rng_rank{accelerator.process_index}.pth")
+                    accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
                         model = accelerator.unwrap_model(policy)
                         save_model(model.foundation, str(folder/"model.safetensors"))
