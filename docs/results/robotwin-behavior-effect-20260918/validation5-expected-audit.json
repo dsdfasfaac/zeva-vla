@@ -1,0 +1,26 @@
+{
+  "schema": "zeva-behavior-effect-validation5-expected-v1",
+  "split": "validation",
+  "formal_labels_used": false,
+  "episodes": 270,
+  "decisions": 5874,
+  "per_task_decisions": {
+    "beat_block_hammer": 220,
+    "blocks_ranking_rgb": 839,
+    "blocks_ranking_size": 839,
+    "handover_block": 531,
+    "hanging_mug": 619,
+    "pick_dual_bottles": 233,
+    "put_bottles_dustbin": 1145,
+    "scan_object": 313,
+    "stack_bowls_three": 866,
+    "stamp_seal": 269
+  },
+  "sha256": {
+    "adapter": "864e7e3a3cea2966c4e4e2d984d033ac87008017d11a7fa17fd2d6cd0d459eb1",
+    "task_config": "0501e43192415f5e32de993866536e25a3c9a51c2622248402bc3b9cd8b157bd",
+    "stage1_manifest": "66214b0fe9963ba70fe358a564a143fd265ecffa63034286470c0994ab2d0f18",
+    "expected_decisions": "169145aa28b70bd14396904fd0a15e02a216e46ef4d07337fb17ee84b65b1466",
+    "enumerator": "26db7954c0694ba1c5a91f4845869cfe95b8d83264a0d8a8706e966a91bcd563"
+  }
+}

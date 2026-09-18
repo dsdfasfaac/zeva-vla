@@ -102,6 +102,8 @@ def main():
         raise ValueError("Validation report belongs to different PI weights.")
     if sha(checkpoint/"zeva_adapter.pth") != report["adapter_sha256"]:
         raise ValueError("Validation report belongs to a different PBD adapter.")
+    if sha(args.expected_decisions) != report["expected_decisions_sha256"]:
+        raise ValueError("Validation expected-ID file differs from the frozen independent enumeration.")
     import torch
     state = torch.load(checkpoint/"training_state.pth", map_location="cpu", weights_only=False)
     if state["step"] != 5000 or state["manifest"]["global_batch"] != 256:

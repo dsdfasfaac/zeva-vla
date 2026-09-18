@@ -66,10 +66,14 @@ if [[ "$mode" == preflight ]]; then
     --tasks "$zeva_root/configs/robotwin_zeva_advantage10.json" --output "$audit"
 fi
 [[ -f $audit ]] || { echo 'Independent pre-Stage2 audit is absent'; exit 2; }
+[[ -f $run/validation5-expected-decisions.json && -f $run/validation5-expected-audit.json ]] || {
+  echo 'Independent raw validation5 expected-ID manifest is absent'; exit 2;
+}
 [[ ! -e $stage2 ]] || { echo 'Fresh Stage2 destination already exists'; exit 2; }
 /usr/bin/python3 - "$audit" "$cte" "$artifact" "$retrieval" "$foundation/model.safetensors" \
   "$dataset/adapter.json" "$handoff/reference/mean-std-eef16-h50-stage1grip-train95-v2.json" \
-  "$zeva_root/scripts/audit_robotwin_behavior_effect_artifacts.py" <<'PY'
+  "$zeva_root/scripts/audit_robotwin_behavior_effect_artifacts.py" \
+  "$run/validation5-expected-decisions.json" "$run/validation5-expected-audit.json" <<'PY'
 import hashlib, json, pathlib, sys
 report = json.loads(pathlib.Path(sys.argv[1]).read_text())
 if report.get("schema") != "zeva-behavior-effect-prestage2-audit-v1" or report.get("status") != "PASS":
@@ -81,6 +85,18 @@ for label, arg in zip(("checkpoint", "artifact", "retrieval", "foundation", "ada
             sha.update(block)
     if sha.hexdigest() != report["sha256"][label]:
         raise SystemExit(f"Preflight {label} SHA changed")
+expected = pathlib.Path(sys.argv[9])
+enumeration = json.loads(pathlib.Path(sys.argv[10]).read_text())
+if (enumeration.get("schema") != "zeva-behavior-effect-validation5-expected-v1"
+        or enumeration.get("episodes") != 270 or enumeration.get("decisions") != 5874
+        or enumeration["sha256"]["adapter"] != report["sha256"]["adapter"]):
+    raise SystemExit("Frozen validation5 enumeration audit differs from preflight")
+sha = hashlib.sha256()
+with expected.open("rb") as stream:
+    for block in iter(lambda:stream.read(4 << 20), b""):
+        sha.update(block)
+if sha.hexdigest() != enumeration["sha256"]["expected_decisions"]:
+    raise SystemExit("Frozen validation5 expected IDs changed")
 PY
 exec /usr/bin/python3 -m torch.distributed.run --standalone --nproc_per_node=8 \
   "$zeva_root/scripts/train_robotwin_behavior_effect_policy.py" \

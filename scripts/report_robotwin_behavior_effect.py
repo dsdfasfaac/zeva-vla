@@ -25,7 +25,7 @@ def write_json(path, value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("dataset-root", "cte-checkpoint", "artifacts", "retrieval-checkpoint",
-                 "foundation-checkpoint", "checkpoint", "output-dir"):
+                 "foundation-checkpoint", "checkpoint", "output-dir", "expected-decisions"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--plan", type=Path, default=Path("configs/robotwin_behavior_effect_20260918.json"))
     parser.add_argument("--tasks", type=Path, default=Path("configs/robotwin_zeva_advantage10.json"))
@@ -63,9 +63,14 @@ def main():
     source = TorchCodecRoboTwinDataset(dataset_path, "validation")
     decisions = enumerate_decisions(source.dataset._records, tasks)
     expected = [row["sample_id"] for row in decisions]
+    independent_expected = json.loads(args.expected_decisions.read_text())
+    if independent_expected != expected:
+        raise ValueError("Independent pre-Stage2 raw validation enumeration differs.")
     permutation = within_task_permutation(decisions)
     # These manifests are independent of cache availability and model errors.
     write_json(args.output_dir / "expected-decisions.json", expected)
+    if sha(args.output_dir / "expected-decisions.json") != sha(args.expected_decisions):
+        raise ValueError("Independent frozen expected-ID file changed when copied.")
     write_json(args.output_dir / "decision-plan.json", {"schema": "zeva-validation5-decisions-v1",
                "split": "validation", "adapter_sha256": sha(dataset_path),
                "tasks": tasks, "decisions": decisions, "within_task_permutation": permutation,
@@ -168,6 +173,7 @@ def main():
               "model_sha256": sha(args.checkpoint / "model.safetensors"),
               "adapter_sha256": sha(args.checkpoint / "zeva_adapter.pth"),
               "identity": policy.identity, "source_sha256": sha(Path(__file__)),
+              "expected_decisions_sha256": sha(args.output_dir / "expected-decisions.json"),
               "decision_plan_sha256": sha(args.output_dir / "decision-plan.json"), "rows": rows}
     # Fail closed before producing a complete report; gate failure is a valid report.
     gate = select(report, expected, plan, tasks)

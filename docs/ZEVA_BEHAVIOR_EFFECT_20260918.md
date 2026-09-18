@@ -13,8 +13,9 @@
 - `scripts/smoke_robotwin_behavior_effect_pi.py`：真实PI/真实数据单卡推理反传及双卡AdamW/梯度累积测试；不保存可提升的训练权重。
 - `scripts/smoke_robotwin_behavior_effect_pipeline.py`：早期CTE、十任务train-only微型fixture memory、真实PI的两次H15边界端到端检查；不会保存或提升正式产物。
 - `scripts/select_robotwin_behavior_effect.py`：固定step5000的validation5-only gate，拒绝覆盖缺失、重复sample、非同任务置换、正式标签、不同Base权重或checkpoint哈希不符。
-- `scripts/report_robotwin_behavior_effect.py`：完整validation5采样动作误差生成器；先从原始episode长度独立枚举expected ids，再核验cache完整性；显式复用同一H50×32噪声、10步去噪，计算Base/aligned/同任务完整错位置换/effect-off四条件H15误差。
-- `scripts/run_robotwin_behavior_effect.sh`：aigc28 GPU0 UUID/空闲检查；test、smoke、stage1模式。
+- `scripts/enumerate_robotwin_behavior_effect_validation.py`：在Stage2前直接从原始adapter metadata及已冻结Stage1 split另行枚举validation5全部决策ID，无CTE/cache/PI输入；按SHA冻结清单。
+- `scripts/report_robotwin_behavior_effect.py`：完整validation5采样动作误差生成器；需显式`--expected-decisions`读取上述已冻结清单、再独立枚举并验证相同，然后核验cache完整性；显式复用同一H50×32噪声、10步去噪，计算Base/aligned/同任务完整错位置换/effect-off四条件H15误差。
+- `scripts/run_robotwin_behavior_effect.sh`：aigc28指定GPU UUID/空闲检查；Stage1与smoke模式，另有不触碰GPU的`enumerate-validation`模式。
 - `scripts/audit_robotwin_behavior_effect_artifacts.py`：Stage1 epoch80通过后，以原始adapter独立重算train/validation episode与H15决策完整集合，核对导出cache每帧、train-only bank每条task归属、全部有限值、训练源码/数据/CTE/PI/统计与来源SHA。通过时写带输入SHA的审计报告。
 - `scripts/run_robotwin_behavior_effect_stage2.sh`：固定的`export → preflight → stage2`入口；检查epoch80完成、源权重与审计SHA、aigc28指定GPU UUID及空闲、全新输出目录。正式Stage2参数是八卡、每卡8、累积4、global256/5000steps。当前仅备妥入口，未启动。
 
@@ -51,7 +52,9 @@ aigc28真实H100/Mamba测试PASS：整段/逐步phase+effect一致、SOS/reset�
 
 GPU3完整policy接口smoke已exit0：使用真实epoch5 CTE（SHA `49524b87f046c77e6ca6406fca18129f0ee49f353333d6d175e3dc864d4f47db`）、每任务一个train episode形成的十任务微型fixture memory、冻结语言分类器和真实best-v1 PI。在独立validation episode的frame0/15，在线CTE与导出式递归特征最大误差≤1.08e-6，在线/缓存条件下H50动作逐位一致，episode reset通过；显式相同噪声的effect-off采样在改变全局RNG后仍逐位一致。耗时122.76秒，peak10.18GiB，报告`cte-pipeline-smoke.json`明确`promotable=false`，没有保存memory/模型，也没有绕过正式epoch80 gate。此测试不代表全部5230条memory产物或训练后的策略验收。
 
-**仍未验证**：报告生成器真实完整权重/数据运行；epoch80正式全量memory/cache产物；正式八rank拓扑；Stage2精确断点恢复。不能把单元测试、容量测试或早期fixture集成测试当成这些验收通过。Stage1尚须固定epoch80通过gate，才能导出正式新memory并开始Stage2；当前继续训练，无新成功率。报告命令从项目根目录运行，提供`--dataset-root --cte-checkpoint --artifacts --retrieval-checkpoint --foundation-checkpoint --checkpoint --output-dir`；随后将`report.json`和`expected-decisions.json`交给独立selector，禁止用中间`rows.partial.jsonl`作选择。
+**仍未验证**：报告生成器真实完整权重/数据运行；epoch80正式全量memory/cache产物；正式八rank拓扑；Stage2精确断点恢复。不能把单元测试、容量测试或早期fixture集成测试当成这些验收通过。Stage1尚须固定epoch80通过gate，才能导出正式新memory并开始Stage2；当前继续训练，无新成功率。报告命令从项目根目录运行，提供`--dataset-root --cte-checkpoint --artifacts --retrieval-checkpoint --foundation-checkpoint --checkpoint --output-dir --expected-decisions`；随后将`report.json`和`expected-decisions.json`交给独立selector，禁止用中间`rows.partial.jsonl`作选择。
+
+独立validation5 ID枚举现已在aigc28完成：固定split270个episode，H15边界共5874个决策，清单SHA `169145aa28b70bd14396904fd0a15e02a216e46ef4d07337fb17ee84b65b1466`，来源adapter/任务配置/Stage1 manifest SHA均记录在`validation5-expected-audit.json`，完整清单`validation5-expected-decisions.json`。第一次尝试导入旧训练包装器时因CPU不可初始化Triton失败，没有生成清单；改为仅导入原始adapter metadata后重新执行exit0，未使用GPU或任何模型输出。正式Stage2入口必须见到该冻结清单及同源adapter哈希；Stage2之后报告生成器再次独立重算并逐项核对。报告命令还必须传`--expected-decisions`，selector检查清单SHA。该清单是离线验证数据索引，与正式闭环seed/成功标签无关。
 
 Stage2预备入口已部署到aigc28。当前Stage1 epoch8仍在运行，入口的`preflight`早期拒绝检查可确认不会提前提升；实际epoch80产物尚不存在，所以完整审计结果也尚不存在。best-v1模型SHA已在远程重新核实为`7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe`。正式训练前入口要求八卡全部安全空闲；只有所有rank先写完RNG，主rank才写完整模型、adapter、optimizer并标记`COMPLETE`。validation selector还要求全部rank RNG齐全。
 
