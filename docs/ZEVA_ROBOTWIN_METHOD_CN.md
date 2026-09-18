@@ -64,4 +64,4 @@ Stage2 **全量训练PI0.5＋PBD**，冻结新CTE/memory/语言检索；global25
 
 新路线无成功率结果。上一正式Base111/200=55.5%、旧ZeVA106/200=53.0%仍是失败。之后两个旧输出残差试验均未过验证gate，无新闭环结果。见[机制记录](ZTEV2_POST_H15_MECHANISM_20260917.md)和[本轮工程记录](ZEVA_BEHAVIOR_EFFECT_20260918.md)。
 
-新Stage1在aigc28 GPU0运行，已完成epoch5并继续epoch6；train5230/validation270、固定80epochs/batch8。epoch5 action/effect验证改善93.63%/30.11%，vision改善3.43%尚未到5%，不提前提升或改门槛。真实PI双卡global256容量测试、早期CTE→语言检索→PI的H15在线/cache一致性测试已通过；后者仅微型train-only fixture，不是正式memory或成功率。Stage2和新闭环尚未开始。
+新Stage1在aigc28 GPU0运行，已完成epoch10并继续epoch11；train5230/validation270、固定80epochs/batch8。epoch10 action/effect验证改善95.31%/32.73%，direct vision改善3.76%尚未到5%，不提前提升或改门槛。真实PI双卡global256容量测试、早期CTE→语言检索→PI的H15在线/cache一致性测试已通过；后者仅微型train-only fixture，不是正式memory或成功率。Stage2和新闭环尚未开始。

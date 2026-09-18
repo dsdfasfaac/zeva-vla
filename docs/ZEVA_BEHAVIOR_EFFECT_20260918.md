@@ -56,8 +56,10 @@ GPU3完整policy接口smoke已exit0：使用真实epoch5 CTE（SHA `49524b87f046
 
 独立validation5 ID枚举现已在aigc28完成：固定split270个episode，H15边界共5874个决策，清单SHA `169145aa28b70bd14396904fd0a15e02a216e46ef4d07337fb17ee84b65b1466`，来源adapter/任务配置/Stage1 manifest SHA均记录在`validation5-expected-audit.json`，完整清单`validation5-expected-decisions.json`。第一次尝试导入旧训练包装器时因CPU不可初始化Triton失败，没有生成清单；改为仅导入原始adapter metadata后重新执行exit0，未使用GPU或任何模型输出。正式Stage2入口必须见到该冻结清单及同源adapter哈希；Stage2之后报告生成器再次独立重算并逐项核对。报告命令还必须传`--expected-decisions`，selector检查清单SHA。该清单是离线验证数据索引，与正式闭环seed/成功标签无关。
 
-Stage2预备入口已部署到aigc28。当前Stage1 epoch8仍在运行，入口的`preflight`早期拒绝检查可确认不会提前提升；实际epoch80产物尚不存在，所以完整审计结果也尚不存在。best-v1模型SHA已在远程重新核实为`7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe`。正式训练前入口要求八卡全部安全空闲；只有所有rank先写完RNG，主rank才写完整模型、adapter、optimizer并标记`COMPLETE`。validation selector还要求全部rank RNG齐全。
+Stage2预备入口已部署到aigc28。Stage1继续训练，入口的`preflight`早期拒绝检查可确认不会提前提升；实际epoch80产物尚不存在，所以完整审计结果也尚不存在。best-v1模型SHA已在远程重新核实为`7d3e945c1d17eae24b9f374d818ee43415e6a789da5587397403ea26a91e0abe`。正式训练前入口要求八卡全部安全空闲；只有所有rank先写完RNG，主rank才写完整模型、adapter、optimizer并标记`COMPLETE`。validation selector还要求全部rank RNG齐全。
 
 首次epoch5验证：action相对零动作改善93.63%，effect相对零effect改善30.11%，vision相对persistence改善3.43%，finite。当前vision未到预声明5%，但本轮只在固定epoch80决定通过与否，不提前提升、不放宽门槛，训练正常继续。
+
+epoch10同一validation5：action 0.014655 对零动作0.312295（改善95.31%）；effect 0.005010 对零effect0.007447（改善32.73%）；direct vision 0.007167 对persistence0.007447（改善3.76%）。三者finite，vision仍未过本轮5%门槛。因为`target_next = target_current + target_effect`，effect head的低误差表明潜在表示已包含部分转移信息；direct vision head却没有同等提升。这提示绝对未来视觉预测头的参数化或优化可能是瓶颈，但两头分别使用`z`与视觉流`v`，不能据此断定原因。现有Stage1/门槛保持原样；若固定epoch80最终失败，再基于验证集做有边界的新方法实验，而非改写本轮判定。
 
 上一正式Base111/20055.5%、旧ZeVA106/20053%、−2.5pp；旧输出残差500步验证改善0.00537%、preserve0改善0.2676%，均失败，不是本次新方法结果。
