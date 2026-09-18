@@ -64,6 +64,8 @@ Stage2预备入口已部署到aigc28。Stage1继续训练，入口的`preflight`
 
 epoch40探索分支已开始导出：aigc28 GPU1上的PID `3239175`，日志`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-behavior-effect-20260918/epoch40-export.log`。启动前读回checkpoint确认为epoch40/step26160、三项中途validation gain为action96.55%、vision25.65%、effect37.64%，GPU1 UUID及空闲门槛通过；导出进程已实际进入TorchCodec/CTE运行。此时**Stage2优化器尚未启动**，仍需待完整导出、独立审计、GPU1–4空闲复核通过。原Stage1约epoch60并继续在GPU0运行。
 
+已启动独立的自动续跑监护PID `3242375`，日志`epoch40-continue.log`：它只等待上述导出PID生成原子完整artifact，随后依次执行`preflight`和`stage2`。任一环节失败就停止并留下日志；GPU1–4的UUID/显存/利用率检查仍在实际Stage2启动前重新执行。探索分支的训练尚未宣称开始，须以该日志及实际optimizer step为准。
+
 首次epoch5验证：action相对零动作改善93.63%，effect相对零effect改善30.11%，vision相对persistence改善3.43%，finite。当前vision未到预声明5%，但本轮只在固定epoch80决定通过与否，不提前提升、不放宽门槛，训练正常继续。
 
 epoch10同一validation5：action 0.014655 对零动作0.312295（改善95.31%）；effect 0.005010 对零effect0.007447（改善32.73%）；direct vision 0.007167 对persistence0.007447（改善3.76%）。三者finite，vision仍未过本轮5%门槛。因为`target_next = target_current + target_effect`，effect head的低误差表明潜在表示已包含部分转移信息；direct vision head却没有同等提升。这提示绝对未来视觉预测头的参数化或优化可能是瓶颈，但两头分别使用`z`与视觉流`v`，不能据此断定原因。现有Stage1/门槛保持原样；若固定epoch80最终失败，再基于验证集做有边界的新方法实验，而非改写本轮判定。
