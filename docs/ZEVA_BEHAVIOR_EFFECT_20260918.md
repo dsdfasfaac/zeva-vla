@@ -66,4 +66,6 @@ epoch10同一validation5：action 0.014655 对零动作0.312295（改善95.31%�
 
 epoch15同一validation5：action 0.012982 对零动作0.312295（改善95.84%）；effect 0.003938 对零effect0.006032（改善34.71%）；direct vision 0.005597 对persistence0.006032（改善7.21%）。三项均finite，**这一中途验证点**达到预声明阈值，但不提前提升checkpoint；正式判定仍仅在固定epoch80进行。训练进程继续运行。
 
+epoch20同一validation5：action 0.012004 对零动作0.312295（改善96.16%）；effect 0.003304 对零effect0.005140（改善35.72%）；direct vision 0.004539 对persistence0.005140（改善11.69%）。三项finite且中途仍过阈值；固定epoch80判定不变。
+
 上一正式Base111/20055.5%、旧ZeVA106/20053%、−2.5pp；旧输出残差500步验证改善0.00537%、preserve0改善0.2676%，均失败，不是本次新方法结果。
