@@ -976,7 +976,7 @@ scripts/export_robotwin_causal_bank.py       causal bank export
 scripts/export_robotwin_live_queries.py      H15 live-query export
 scripts/train_robotwin_task_retrieval.py     Stage1.5 retrieval
 scripts/train_robotwin_stage2.py             多 variant Stage2 trainer；支持 Base1000 冻结输出残差与缓存身份核验
-scripts/train_robotwin_base1000_ztev2_output_residual.sh  预注册的新候选入口（尚未启动）
+scripts/train_robotwin_base1000_ztev2_output_residual.sh  预注册的新候选入口（aigc28 两步 smoke 与 500-step 训练完成；250/500 均未通过 validation5 的 3% 改进门槛，未进入闭环）
 scripts/cache_robotwin_base_actions_v13_8gpu.sh immutable Base action cache
 scripts/train_robotwin_advantage10_output_residual_v14.sh 旧 v14 历史入口；开发集失败
 scripts/audit_robotwin_v14_checkpoint.py     frozen PI 与 H15 direct residual 契约审计

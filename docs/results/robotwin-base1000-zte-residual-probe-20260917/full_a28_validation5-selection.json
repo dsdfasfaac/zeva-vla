@@ -1,0 +1,30 @@
+{
+  "candidates": [
+    {
+      "base_h15_mse": 0.011346410581717675,
+      "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/base1000-ztev2-output-residual-20260918-a28/full/000250",
+      "corrected_h15_mse": 0.01134608986454635,
+      "finite_diagnostics": true,
+      "nonworse_tasks": 10,
+      "passed": false,
+      "relative_h15_mse_improvement": 2.826595856159126e-05,
+      "step": 250,
+      "validation_decisions": 3489
+    },
+    {
+      "base_h15_mse": 0.011346410581717675,
+      "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/base1000-ztev2-output-residual-20260918-a28/full/000500",
+      "corrected_h15_mse": 0.011345801042837557,
+      "finite_diagnostics": true,
+      "nonworse_tasks": 10,
+      "passed": false,
+      "relative_h15_mse_improvement": 5.3720855219193925e-05,
+      "step": 500,
+      "validation_decisions": 3489
+    }
+  ],
+  "formal_test_success_labels_used": false,
+  "schema": "zeva-base1000-ztev2-validation5-selection-v1",
+  "selected_checkpoint": null,
+  "selected_step": null
+}

@@ -10,6 +10,8 @@ native_transformers=/mnt/100T/users/dingxin/VLA/runtime/zeva-stage2-resume-aigc2
 shared_deps=/data1/dingxin/zeva-runtime-deps
 compiled_deps=/mnt/100T/users/dingxin/VLA/runtime/zeva-eval-deps-py310-v1
 run_root=${BASE1000_ZTEV2_RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/base1000-ztev2-output-residual-20260917}
+preserve_weight=${BASE1000_ZTEV2_PRESERVE_WEIGHT:-8}
+[[ "$preserve_weight" == 8 || "$preserve_weight" == 0 ]] || { echo "Only preregistered preserve weights 8/0 are supported" >&2; exit 2; }
 mode=${1:-full}
 base=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/fixed-anchor-pair-20260914/baseline/001000
 stage1_root=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911
@@ -44,7 +46,22 @@ case "$host" in
     replica_args=(--dataset-identity-source-report "$source_identity" --dataset-identity-replica-report "$replica_identity")
     cache_only_args=(--cache-only-dataset-replica)
     ;;
-  *) echo "Only content-verified aigc29/aigc31 are supported (aigc24 CUDA timeout)" >&2; exit 2 ;;
+  aigc28)
+    # The action/Joint/stats indices were independently rehashed on this host
+    # against the complete source/replica identity reports. Cached training
+    # does not read the local source videos.
+    dataset=/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/data
+    gpu_index=0
+    expected_uuid=GPU-c4d9aceb-c274-fb29-e145-f6c2ef560bdc
+    max_used_mib=1024
+    source_identity=$dataset_identity_root/dataset-identity-aigc29-stage2-resume-20260912.json
+    replica_identity=$dataset_identity_root/dataset-identity-aigc24-stage2-resume-20260912.json
+    [[ $(sha256sum "$source_identity" | awk '{print $1}') == 3ba76d89295564cabb735aecc47ddb55cb039fe21f4072138a14d1f02fb20666 ]] || exit 2
+    [[ $(sha256sum "$replica_identity" | awk '{print $1}') == 73060be4ce82244631def725e8a05a1216aafd52550fa295221f79bc61f511d5 ]] || exit 2
+    replica_args=(--dataset-identity-source-report "$source_identity" --dataset-identity-replica-report "$replica_identity")
+    cache_only_args=(--cache-only-dataset-replica)
+    ;;
+  *) echo "Only content-verified aigc28/aigc29/aigc31 are supported (aigc24 CUDA timeout)" >&2; exit 2 ;;
 esac
 [[ "$mode" == smoke || "$mode" == full ]] || { echo "Usage: $0 [smoke|full]" >&2; exit 2; }
 for required in "$base/model.safetensors" "$zte" "$cache" "$dataset/adapter.json" \
@@ -101,7 +118,7 @@ export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
   --batch-size 256 --gradient-accumulation-steps 1 \
   --num-workers 4 --video-backend torchcodec \
   --prior-injection-horizon 15 \
-  --prior-loss-weight 0 --preserve-loss-weight 8 \
+  --prior-loss-weight 0 --preserve-loss-weight "$preserve_weight" \
   --paired-improvement-margin 0 --gate-regularization-weight 0.0001 \
   --residual-bound 0.2 --residual-regression-weight 0.25 \
   --residual-trust-region-weight 0.1 --residual-trust-region-radius 0.05 \

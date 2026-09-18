@@ -1,0 +1,103 @@
+{
+  "step": 250,
+  "validation": {
+    "total": 0.011874955147504807,
+    "flow": 0.011147652752697468,
+    "prior": 17.15826416015625,
+    "prior_std": 1.0000911951065063,
+    "baseline": 0.011147969402372837,
+    "retrieval_accuracy": 0.9974888563156128,
+    "paired_improvement": 3.154522687509598e-07,
+    "paired_win_fraction": 0.685219407081604,
+    "paired_degradation": 9.766230846253166e-08,
+    "residual_regression": 0.0029059716034680605,
+    "trust_region": 0.0,
+    "residual_abs": 8.494264329783618e-05,
+    "prior_residual_keep": 0.495390921831131,
+    "gate": 0.000277444050880149,
+    "per_task_paired": {
+      "beat_block_hammer": {
+        "count": 220,
+        "corrected_h15_mse": 0.002447299426421523,
+        "base_h15_mse": 0.0024474698584526777,
+        "paired_improvement": 1.7042596311966918e-07,
+        "paired_win_fraction": 0.7272727489471436,
+        "paired_degradation": 4.328014213683673e-08
+      },
+      "blocks_ranking_rgb": {
+        "count": 409,
+        "corrected_h15_mse": 0.012038320302963257,
+        "base_h15_mse": 0.012038541957736015,
+        "paired_improvement": 2.2136828192742541e-07,
+        "paired_win_fraction": 0.6919315457344055,
+        "paired_degradation": 1.1846965008999177e-07
+      },
+      "blocks_ranking_size": {
+        "count": 409,
+        "corrected_h15_mse": 0.00909191183745861,
+        "base_h15_mse": 0.009092080406844616,
+        "paired_improvement": 1.6872358798991627e-07,
+        "paired_win_fraction": 0.6772615909576416,
+        "paired_degradation": 1.2640447266676347e-07
+      },
+      "handover_block": {
+        "count": 409,
+        "corrected_h15_mse": 0.007420340087264776,
+        "base_h15_mse": 0.007420586422085762,
+        "paired_improvement": 2.4716968027860275e-07,
+        "paired_win_fraction": 0.684596598148346,
+        "paired_degradation": 1.0182642995459901e-07
+      },
+      "hanging_mug": {
+        "count": 409,
+        "corrected_h15_mse": 0.013578270561993122,
+        "base_h15_mse": 0.013578628189861774,
+        "paired_improvement": 3.5821548749481735e-07,
+        "paired_win_fraction": 0.7114914655685425,
+        "paired_degradation": 8.210352575588331e-08
+      },
+      "pick_dual_bottles": {
+        "count": 233,
+        "corrected_h15_mse": 0.008652943186461926,
+        "base_h15_mse": 0.008653218857944012,
+        "paired_improvement": 2.7643503131002944e-07,
+        "paired_win_fraction": 0.7038626670837402,
+        "paired_degradation": 1.0153154050840385e-07
+      },
+      "put_bottles_dustbin": {
+        "count": 409,
+        "corrected_h15_mse": 0.008783469907939434,
+        "base_h15_mse": 0.00878369715064764,
+        "paired_improvement": 2.2699077817378566e-07,
+        "paired_win_fraction": 0.6797065734863281,
+        "paired_degradation": 8.116453642514898e-08
+      },
+      "scan_object": {
+        "count": 313,
+        "corrected_h15_mse": 0.03928765282034874,
+        "base_h15_mse": 0.03928897902369499,
+        "paired_improvement": 1.3303332480063546e-06,
+        "paired_win_fraction": 0.7380191683769226,
+        "paired_degradation": 1.4613753762660053e-07
+      },
+      "stack_bowls_three": {
+        "count": 409,
+        "corrected_h15_mse": 0.006338078062981367,
+        "base_h15_mse": 0.006338237319141626,
+        "paired_improvement": 1.5900884875463817e-07,
+        "paired_win_fraction": 0.6479217410087585,
+        "paired_degradation": 8.348844460215332e-08
+      },
+      "stamp_seal": {
+        "count": 269,
+        "corrected_h15_mse": 0.004905281588435173,
+        "base_h15_mse": 0.004905420821160078,
+        "paired_improvement": 1.393571125163362e-07,
+        "paired_win_fraction": 0.6282528042793274,
+        "paired_degradation": 7.53868292235893e-08
+      }
+    },
+    "minimum_task_paired_improvement": 1.393571125163362e-07
+  },
+  "checkpoint": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/base1000-ztev2-output-residual-20260918-a28/full/000250"
+}
