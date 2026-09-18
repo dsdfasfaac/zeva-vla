@@ -66,10 +66,9 @@ pair → audited frozen formal pair. See [current method](docs/ZEVA_ROBOTWIN_MET
 [fixed configuration](configs/robotwin_behavior_effect_20260918.json).
 Core real-Mamba and real-data smoke tests passed; new Stage1 is running on
 aigc28 GPU0 (train5230/validation270, fixed 80-epoch endpoint). At the user's
-request, an isolated **epoch40 exploratory Stage2 branch** is now exporting its
-own train-only memory/H15 cache on GPU1; an audited continuation will launch
-four-card full-PI/PBD training at global batch 256 and fixed 5000 steps only
-after the export and safety checks pass. This does not replace the original
+request, an isolated **epoch40 exploratory Stage2 branch** passed full memory/
+H15-cache export and independent source audit, and is now training full PI/PBD
+on four idle GPUs at global batch 256 toward the fixed 5000 steps. This does not replace the original
 epoch80 gate or count as formal checkpoint promotion. The complete new pipeline
 has not yet been evaluated. Last formal evidence remains
 Base111/200 vs old ZeVA106/200: goal not met.
