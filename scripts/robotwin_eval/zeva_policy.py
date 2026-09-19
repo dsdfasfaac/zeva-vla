@@ -143,6 +143,7 @@ class ZevaModel:
                 args["handoff_root"], args["foundation_checkpoint"], args["zte_checkpoint"],
                 args["behavior_effect_artifacts"], args["retrieval_checkpoint"],
                 device=args.get("device", "cuda"), stage2_checkpoint=stage2_checkpoint,
+                exploratory_epoch40=bool(args.get("exploratory_epoch40", False)),
             )
         else:
             self.policy = RobotWinZevaPolicy.from_handoff(
