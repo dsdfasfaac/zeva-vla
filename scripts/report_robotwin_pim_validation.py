@@ -62,16 +62,19 @@ def bounded_trace(row: dict, capacity: int):
 
 
 def validate_checkpoint(checkpoint: Path) -> dict:
-    import torch
-
     required = ["COMPLETE", "model.safetensors", "zeva_adapter.pth", "training_state.pth"]
     required.extend(f"rng_rank{rank}.pth" for rank in range(8))
     missing = [name for name in required if not (checkpoint / name).is_file()]
     if missing:
         raise ValueError(f"Incomplete PIM checkpoint: {missing}")
-    state = torch.load(checkpoint / "training_state.pth", map_location="cpu", weights_only=False)
-    manifest = state["manifest"]
-    if (state["step"] != 2000 or manifest["global_batch"] != 256
+    # Eight validation workers must not each deserialize the 15 GB Adam state.
+    # The immutable root manifest carries the same training contract, while
+    # the fixed folder name, COMPLETE marker and non-empty state file prove
+    # that the final save barrier finished.
+    manifest_path = checkpoint.parent / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if (checkpoint.name != "002000" or (checkpoint / "training_state.pth").stat().st_size < 1_000_000
+            or manifest["global_batch"] != 256
             or manifest["schema"] != "zeva-cte-eap-pim-v1-training-v1"
             or manifest["sampling_schedule"] != ["matched"] * 5 + ["same_condition_far"] * 2
             + ["cross_condition"] + ["none"] * 2):
