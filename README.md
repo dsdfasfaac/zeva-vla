@@ -65,7 +65,9 @@ pair → audited frozen formal pair. See [current method](docs/ZEVA_ROBOTWIN_MET
 [implementation/status](docs/ZEVA_BEHAVIOR_EFFECT_20260918.md), and
 [fixed configuration](configs/robotwin_behavior_effect_20260918.json).
 Core real-Mamba and real-data smoke tests passed; new Stage1 is running on
-aigc28 GPU0 (train5230/validation270, fixed 80-epoch endpoint). At the user's
+aigc28 GPU0 (train5230/validation270, fixed 80-epoch endpoint) and passed its
+predeclared action/vision/effect gate. The formal epoch80 memory/cache export is
+now running before independent audit. At the user's
 request, an isolated **epoch40 exploratory Stage2 branch** passed full memory/
 H15-cache export and independent source audit, and is now training full PI/PBD
 on four idle GPUs at global batch 256 toward the fixed 5000 steps. This does not replace the original

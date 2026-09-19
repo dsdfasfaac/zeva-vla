@@ -68,6 +68,8 @@ epoch40探索分支已开始导出：aigc28 GPU1上的PID `3239175`，日志`/mn
 
 **epoch40探索Stage2现已实际运行**：导出产物SHA `b78d0f0993296e162fa88e6784fa940fc237268e71598d89b668a94614aabed0`，train-only memory 5230 entries、train/validation recurrent cache各5230/270 episodes。独立audit `PASS`，确认原始训练决策113408、验证决策5874、Stage1 epoch40/step26160与checkpoint/数据/统计/基础模型SHA一致，并明确`formal_promotion_eligible=false`；证据见`docs/results/robotwin-behavior-effect-20260918/epoch40-exploratory-prestage2-audit.json`。aigc28四卡GPU1–4训练进程PID3256370及4个rank已运行，manifest确认batch8/卡×累积8×4卡=global256、固定5000步、全PI+PBD、探索性标记；已看到至少250个真实optimizer steps与finite flow/NLL loss。对应manifest保存在同一results目录，连续日志在`epoch40-continue.log`，输出目录`stage2-fullpi-pbd-effect-epoch040-exploratory`。GPU0的原Stage1同时继续训练（约epoch65）。这不是成功率结果，也不能绕过原epoch80选择规则。
 
+**正式Stage1已完成并通过固定epoch80 gate**：epoch80/step52320，validation5 action/vision/effect相对基线改善分别为97.00%/26.89%/38.49%，5604 transitions且全部finite。原训练PID已退出，GPU0释放。正式epoch80 memory/H15 cache导出已在GPU0启动（PID `3524967`，日志`epoch80-export.log`）；导出完成后仍须执行正式独立preflight。因为GPU1–4正在训练epoch40探索分支，正式epoch80 Stage2不会提前争抢GPU或启动。
+
 首次epoch5验证：action相对零动作改善93.63%，effect相对零effect改善30.11%，vision相对persistence改善3.43%，finite。当前vision未到预声明5%，但本轮只在固定epoch80决定通过与否，不提前提升、不放宽门槛，训练正常继续。
 
 epoch10同一validation5：action 0.014655 对零动作0.312295（改善95.31%）；effect 0.005010 对零effect0.007447（改善32.73%）；direct vision 0.007167 对persistence0.007447（改善3.76%）。三者finite，vision仍未过本轮5%门槛。因为`target_next = target_current + target_effect`，effect head的低误差表明潜在表示已包含部分转移信息；direct vision head却没有同等提升。这提示绝对未来视觉预测头的参数化或优化可能是瓶颈，但两头分别使用`z`与视觉流`v`，不能据此断定原因。现有Stage1/门槛保持原样；若固定epoch80最终失败，再基于验证集做有边界的新方法实验，而非改写本轮判定。
