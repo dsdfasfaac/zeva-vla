@@ -135,8 +135,8 @@ def main(args: Args) -> None:
     )
     global_batch = args.batch_size * args.accumulation * accelerator.num_processes
     if args.smoke_test:
-        if args.steps != 2 or global_batch > 8:
-            raise ValueError("PIM smoke is exactly two updates with global batch at most eight.")
+        if args.steps != 2 or (global_batch > 8 and global_batch != 256):
+            raise ValueError("PIM smoke is two updates at global<=8 or the formal global256 capacity.")
     elif global_batch != 256 or args.steps != 2000 or args.warmup_steps != 500:
         raise ValueError("PIM Stage2 is preregistered as global256, warmup500, fixed2000 steps.")
     torch.manual_seed(args.seed + accelerator.process_index)

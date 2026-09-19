@@ -69,4 +69,4 @@ exec /usr/bin/python3 -m torch.distributed.run --standalone --nproc_per_node=8 \
   --pim-artifacts "$pim_artifacts" --retrieval-checkpoint "$retrieval" \
   --foundation-checkpoint "$foundation" --parent-stage2-checkpoint "$parent" \
   --handoff-root "$handoff" --save-dir "$output" --steps 2000 --warmup-steps 500 \
-  --batch-size 8 --accumulation 4 --workers 2 --exploratory-epoch40
+  --batch-size 32 --accumulation 1 --workers 2 --exploratory-epoch40
