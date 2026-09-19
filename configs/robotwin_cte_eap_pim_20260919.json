@@ -28,5 +28,18 @@
     "attempt": "commit current BIT trace to PIM; clear CTE recurrence and current BIT",
     "episode": "clear CTE recurrence, BIT, and PIM"
   },
+  "validation5_gate": {
+    "checkpoint": 2000,
+    "conditions": ["parent", "aligned", "same_task_shuffled", "pim_off"],
+    "metric": "common-noise sampled normalized H15 action MSE over the frozen 5874 decisions",
+    "checks": [
+      "pim_off <= parent",
+      "aligned <= parent",
+      "aligned < same_task_shuffled",
+      "aligned <= pim_off"
+    ],
+    "formal_success_labels": false,
+    "offline_gate_is_not_success_rate": true
+  },
   "protocol": {"action_dim": 16, "state_dim": 14, "output_horizon": 50, "execution_horizon": 15, "camera_resolution": [640, 480], "episode_oracle": false}
 }
