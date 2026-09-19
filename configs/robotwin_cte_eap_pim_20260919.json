@@ -41,5 +41,20 @@
     "formal_success_labels": false,
     "offline_gate_is_not_success_rate": true
   },
+  "multiattempt_development": {
+    "split": "development-disjoint-from-prior-development-and-formal",
+    "seed_rule": "first 8 expert-valid seeds per task from absolute seed 2000000",
+    "attempts": 4,
+    "conditions": ["base1000", "cte_bit_eap_parent", "cte_bit_pim_eap"],
+    "scene_retry": "same seed, instruction, scene initialization and stochastic-policy budget",
+    "parent_reset_between_attempts": "episode",
+    "pim_reset_between_attempts": "attempt",
+    "gate": {
+      "first_attempt_pim_not_worse_than_parent": true,
+      "pim_cumulative_extra_successes_over_parent_at_attempt4": 4,
+      "complete_attempt_videos_and_seed_instruction_audit": true
+    },
+    "formal_success_labels": false
+  },
   "protocol": {"action_dim": 16, "state_dim": 14, "output_horizon": 50, "execution_horizon": 15, "camera_resolution": [640, 480], "episode_oracle": false}
 }

@@ -268,6 +268,8 @@ def _build_resume_identity(usr_args, task_name, task_config, ckpt_setting, test_
         "fixed_seed_values": usr_args.get("fixed_seed_values"),
         "fixed_instructions": usr_args.get("fixed_instructions"),
         "model_seed_policy": model_seed_policy(usr_args.get("model_seed_policy")),
+        "max_policy_attempts": int(usr_args.get("max_policy_attempts", 1)),
+        "attempt_reset_scope": str(usr_args.get("attempt_reset_scope", "episode")),
         "target_episodes": int(test_num),
     }
 
@@ -684,6 +686,8 @@ def main(usr_args):
     args["absolute_start_seed"] = int(usr_args.get("absolute_start_seed", -1))
     args["fixed_seed_sequence"] = as_bool(usr_args.get("fixed_seed_sequence"), False)
     args["model_seed_policy"] = model_seed_policy(usr_args.get("model_seed_policy"))
+    args["max_policy_attempts"] = int(usr_args.get("max_policy_attempts", 1))
+    args["attempt_reset_scope"] = str(usr_args.get("attempt_reset_scope", "episode"))
     sapien_render_device = _configure_sapien_renderer(args)
     if sapien_render_device is not None:
         args["sapien_render_device"] = sapien_render_device
@@ -900,6 +904,14 @@ def main(usr_args):
         "episodes": int(test_num),
         "successes": int(suc_num),
         "success_rate": float(suc_num / test_num),
+        "max_policy_attempts": int(usr_args.get("max_policy_attempts", 1)),
+        "attempt_reset_scope": str(usr_args.get("attempt_reset_scope", "episode")),
+        "total_attempts_executed": sum(len(row.get("attempts", [row])) for row in episode_results),
+        "successes_by_attempt": [
+            sum(bool(row.get("attempts", [row])[index]["success"])
+                for row in episode_results if len(row.get("attempts", [row])) > index)
+            for index in range(int(usr_args.get("max_policy_attempts", 1)))
+        ],
         "domain_id": int(usr_args.get("domain_id", 10)),
         "fps": float(usr_args.get("fps", 30)),
         "resolution": str(usr_args.get("resolution", "480")),
@@ -1076,70 +1088,105 @@ def eval_policy(task_name,
             instruction = fixed_instructions[now_id]
         TASK_ENV.set_instruction(instruction=instruction)  # set language instruction
 
-        if TASK_ENV.eval_video_path is not None:
-            ffmpeg = subprocess.Popen(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-loglevel",
-                    "error",
-                    "-f",
-                    "rawvideo",
-                    "-pixel_format",
-                    "rgb24",
-                    "-video_size",
-                    video_size,
-                    "-framerate",
-                    "10",
-                    "-i",
-                    "-",
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-vcodec",
-                    "libx264",
-                    "-crf",
-                    "23",
-                    f"{TASK_ENV.eval_video_path}/episode{TASK_ENV.test_num}.mp4",
-                ],
-                stdin=subprocess.PIPE,
-            )
-            TASK_ENV._set_eval_video_ffmpeg(ffmpeg)
+        max_policy_attempts = int(args.get("max_policy_attempts", 1))
+        attempt_reset_scope = str(args.get("attempt_reset_scope", "episode"))
+        if max_policy_attempts < 1 or max_policy_attempts > 4:
+            raise ValueError("max_policy_attempts must be in [1,4].")
+        if attempt_reset_scope not in {"episode", "attempt"}:
+            raise ValueError("attempt_reset_scope must be episode or attempt.")
+        if attempt_reset_scope == "attempt" and max_policy_attempts == 1:
+            raise ValueError("Attempt-persistent reset is meaningless for one attempt.")
 
-        if hasattr(model, "begin_episode_trace"):
-            model.begin_episode_trace(
-                task=task_name,
-                seed=now_seed,
-                episode_index=now_id,
-                instruction=instruction,
-            )
-
+        attempt_results = []
         succ = False
-        # Match the frozen PI0.5 protocol: reset recurrent state without
-        # overwriting diffusion RNG from the environment seed. Reusing the
-        # environment seed as model noise changes the stochastic policy and
-        # was not used by the historical baseline or validated ZeVA run.
-        if model_seed_policy(args.get("model_seed_policy")) == "episode_seed":
-            model.call(func_name="reset_model", obs={"seed": int(now_seed)})
-        else:
-            model.call(func_name="reset_model")
-        while TASK_ENV.take_action_cnt < TASK_ENV.step_lim:
-            observation = TASK_ENV.get_obs()
-            eval_func(TASK_ENV, model, observation)
-            if TASK_ENV.eval_success:
+        for attempt_index in range(max_policy_attempts):
+            if attempt_index:
+                # Recreate exactly the same scene/robot/object initialization;
+                # only the model-side reset scope differs across conditions.
+                TASK_ENV.close_env()
+                retry = 0
+                while True:
+                    try:
+                        TASK_ENV.setup_demo(now_ep_num=now_id, seed=now_seed, is_test=True, **args)
+                        break
+                    except UnStableError as e:
+                        TASK_ENV.close_env()
+                        retry += 1
+                        if retry >= fixed_seed_init_max_attempts:
+                            raise RuntimeError(
+                                f"Frozen seed {now_seed} stayed unstable for multi-attempt "
+                                f"retry {attempt_index + 1}."
+                            ) from e
+                TASK_ENV.set_instruction(instruction=instruction)
+
+            if TASK_ENV.eval_video_path is not None:
+                ffmpeg = subprocess.Popen(
+                    [
+                        "ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo",
+                        "-pixel_format", "rgb24", "-video_size", video_size,
+                        "-framerate", "10", "-i", "-", "-pix_fmt", "yuv420p",
+                        "-vcodec", "libx264", "-crf", "23",
+                        f"{TASK_ENV.eval_video_path}/episode{TASK_ENV.test_num}.mp4",
+                    ],
+                    stdin=subprocess.PIPE,
+                )
+                TASK_ENV._set_eval_video_ffmpeg(ffmpeg)
+
+            if hasattr(model, "begin_episode_trace"):
+                model.begin_episode_trace(
+                    task=task_name,
+                    seed=now_seed,
+                    episode_index=now_id,
+                    instruction=instruction,
+                )
+
+            # Attempt one is an ordinary episode reset.  Later attempts either
+            # commit BIT into PIM (PIM condition) or fully forget history
+            # (Base/parent controls), without reseeding the diffusion stream.
+            if attempt_index == 0:
+                if model_seed_policy(args.get("model_seed_policy")) == "episode_seed":
+                    model.call(func_name="reset_model", obs={"seed": int(now_seed), "scope": "episode"})
+                else:
+                    model.call(func_name="reset_model", obs={"scope": "episode"})
+            else:
+                model.call(func_name="reset_model", obs={"scope": attempt_reset_scope})
+
+            attempt_success = False
+            while TASK_ENV.take_action_cnt < TASK_ENV.step_lim:
+                observation = TASK_ENV.get_obs()
+                eval_func(TASK_ENV, model, observation)
+                if TASK_ENV.eval_success:
+                    attempt_success = True
+                    break
+
+            if TASK_ENV.eval_video_path is not None:
+                original_video = Path(TASK_ENV.eval_video_path) / f"episode{TASK_ENV.test_num}.mp4"
+                TASK_ENV._del_eval_video_ffmpeg()
+                suffix = "" if max_policy_attempts == 1 else f"_attempt-{attempt_index + 1}"
+                renamed_video = Path(TASK_ENV.eval_video_path) / (
+                    f"episode{TASK_ENV.test_num}{suffix}_randomized-true_"
+                    f"success-{str(bool(attempt_success)).lower()}.mp4"
+                )
+                if not original_video.is_file():
+                    raise FileNotFoundError(f"RoboTwin evaluator did not produce {original_video}")
+                os.replace(original_video, renamed_video)
+
+            attempt_results.append({
+                "attempt": attempt_index + 1,
+                "success": bool(attempt_success),
+                "steps": int(TASK_ENV.take_action_cnt),
+                "step_limit": int(TASK_ENV.step_lim),
+                "reset_scope": "episode" if attempt_index == 0 else attempt_reset_scope,
+            })
+            if hasattr(model, "finalize_episode_trace"):
+                model.finalize_episode_trace(
+                    success=bool(attempt_success),
+                    steps=int(TASK_ENV.take_action_cnt),
+                    step_limit=int(TASK_ENV.step_lim),
+                )
+            if attempt_success:
                 succ = True
                 break
-        # task_total_reward += TASK_ENV.episode_score
-        if TASK_ENV.eval_video_path is not None:
-            original_video = Path(TASK_ENV.eval_video_path) / f"episode{TASK_ENV.test_num}.mp4"
-            TASK_ENV._del_eval_video_ffmpeg()
-
-            renamed_video = Path(TASK_ENV.eval_video_path) / (
-                f"episode{TASK_ENV.test_num}_randomized-true_"
-                f"success-{str(bool(succ)).lower()}.mp4"
-            )
-            if not original_video.is_file():
-                raise FileNotFoundError(f"RoboTwin evaluator did not produce {original_video}")
-            os.replace(original_video, renamed_video)
 
         if succ:
             TASK_ENV.suc += 1
@@ -1151,17 +1198,11 @@ def eval_policy(task_name,
             "episode_index": int(now_id),
             "seed": int(now_seed),
             "success": bool(succ),
-            "steps": int(TASK_ENV.take_action_cnt),
-            "step_limit": int(TASK_ENV.step_lim),
+            "steps": sum(item["steps"] for item in attempt_results),
+            "step_limit": sum(item["step_limit"] for item in attempt_results),
             "instruction": str(instruction),
+            "attempts": attempt_results,
         })
-
-        if hasattr(model, "finalize_episode_trace"):
-            model.finalize_episode_trace(
-                success=bool(succ),
-                steps=int(TASK_ENV.take_action_cnt),
-                step_limit=int(TASK_ENV.step_lim),
-            )
 
         now_id += 1
 

@@ -109,6 +109,16 @@ episodes=${EPISODES:-20}
 absolute_start_seed=${ABSOLUTE_START_SEED:-1000}
 model_seed_policy=${MODEL_SEED_POLICY:-continuous}
 model_rng_seed=${MODEL_RNG_SEED:-20260907}
+max_policy_attempts=${MAX_POLICY_ATTEMPTS:-1}
+baseline_attempt_reset_scope=${BASELINE_ATTEMPT_RESET_SCOPE:-episode}
+anchor_attempt_reset_scope=${ANCHOR_ATTEMPT_RESET_SCOPE:-episode}
+zeva_attempt_reset_scope=${ZEVA_ATTEMPT_RESET_SCOPE:-episode}
+[[ "$max_policy_attempts" =~ ^[1-4]$ ]] || { echo "MAX_POLICY_ATTEMPTS must be 1..4" >&2; exit 2; }
+for reset_scope in "$baseline_attempt_reset_scope" "$anchor_attempt_reset_scope" "$zeva_attempt_reset_scope"; do
+  [[ "$reset_scope" == episode || "$reset_scope" == attempt ]] || {
+    echo "Attempt reset scopes must be episode or attempt" >&2; exit 2;
+  }
+done
 # Optional previously established normal-PI floor.  A newly evaluated anchor
 # can fluctuate slightly because GPU PhysX is not bit deterministic, so the
 # formal gate must not silently weaken a historical reference supplied by the
@@ -394,6 +404,9 @@ run_condition() {
   local config=$2
   local ckpt_label=$3
   local seeds=${4:-}
+  local attempt_reset_scope=$baseline_attempt_reset_scope
+  [[ "$condition" == anchor ]] && attempt_reset_scope=$anchor_attempt_reset_scope
+  [[ "$condition" == zeva ]] && attempt_reset_scope=$zeva_attempt_reset_scope
   local condition_root="$output/$condition"
   mkdir -p "$condition_root"/{logs,progress,status,results}
   printf '{"state":"starting","condition":"%s","started":"%s"}\n' \
@@ -435,6 +448,7 @@ run_condition() {
           --overrides --task_name '$task' --task_config zeva_randomized --test_num '$episodes' \
           --instruction_type seen --seed 0 --absolute_start_seed '$absolute_start_seed' $seed_args \
           --model_seed_policy '$model_seed_policy' \
+          --max_policy_attempts '$max_policy_attempts' --attempt_reset_scope '$attempt_reset_scope' \
           --policy_name zeva_policy --ckpt_setting '$ckpt_label' \
           --eval_video_log True --result_dir '$result_dir' \
           --execute_horizon 15 --chunk_length 50 --action_dim 16 \
@@ -488,15 +502,32 @@ for task in (root.parent / "tasks.txt").read_text().splitlines():
         raise RuntimeError(f"{condition}/{task}: incomplete progress")
     if any(seed < absolute_start_seed for seed in seeds) or len(set(seeds)) != expected:
         raise RuntimeError(f"{condition}/{task}: invalid seeds {seeds}")
+    max_attempts = int(progress["identity"].get("max_policy_attempts", 1))
+    expected_videos = 0
+    for episode in episodes:
+        attempts = episode.get("attempts", [episode])
+        if not 1 <= len(attempts) <= max_attempts:
+            raise RuntimeError(f"{condition}/{task}: invalid attempt count")
+        if [int(row.get("attempt", index + 1)) for index, row in enumerate(attempts)] != list(
+                range(1, len(attempts) + 1)):
+            raise RuntimeError(f"{condition}/{task}: nonsequential attempts")
+        if any(bool(row["success"]) for row in attempts[:-1]):
+            raise RuntimeError(f"{condition}/{task}: rollout continued after success")
+        if bool(episode["success"]) != any(bool(row["success"]) for row in attempts):
+            raise RuntimeError(f"{condition}/{task}: cumulative success differs from attempts")
+        expected_videos += len(attempts)
     videos = sorted((root / "results" / task).glob("episode*_randomized-true_success-*.mp4"))
-    if len(videos) != expected:
-        raise RuntimeError(f"{condition}/{task}: expected {expected} videos, got {len(videos)}")
+    if len(videos) != expected_videos:
+        raise RuntimeError(
+            f"{condition}/{task}: expected {expected_videos} attempt videos, got {len(videos)}"
+        )
     successes = sum(bool(item["success"]) for item in episodes)
     video_successes = sum("success-true" in video.name for video in videos)
     if successes != video_successes:
         raise RuntimeError(f"{condition}/{task}: progress/video success mismatch")
     rows.append({"task": task, "episodes": expected, "successes": successes,
-                 "success_rate": successes / expected, "seeds": seeds})
+                 "success_rate": successes / expected, "seeds": seeds,
+                 "attempt_videos": expected_videos, "max_policy_attempts": max_attempts})
 report = {
     "schema": "zeva-robotwin-paired-condition-v1",
     "condition": condition,
@@ -507,6 +538,7 @@ report = {
     "episodes_per_task": expected,
     "total_episodes": len(rows) * expected,
     "total_successes": sum(row["successes"] for row in rows),
+    "total_attempts_executed": sum(row["attempt_videos"] for row in rows),
     "micro_success_rate": sum(row["successes"] for row in rows) / (len(rows) * expected),
     "macro_success_rate": sum(row["success_rate"] for row in rows) / len(rows),
     "tasks": rows,
@@ -549,6 +581,10 @@ cat > "$output/manifest.json" <<EOF
   "action_contract": "chunk-start-relative-eef16-predict-h50-execute-h15",
   "model_seed_policy": "$model_seed_policy",
   "model_rng_seed": $model_rng_seed,
+  "max_policy_attempts": $max_policy_attempts,
+  "baseline_attempt_reset_scope": "$baseline_attempt_reset_scope",
+  "anchor_attempt_reset_scope": "$anchor_attempt_reset_scope",
+  "zeva_attempt_reset_scope": "$zeva_attempt_reset_scope",
   "min_baseline_success_rate": $min_baseline_success_rate,
   "baseline_is_untouched_anchor": $baseline_is_untouched_anchor,
   "precomputed_baseline_root": "$precomputed_baseline_root",
@@ -776,6 +812,8 @@ base_rows = {row["task"]: row for row in baseline["tasks"]}
 zeva_rows = {row["task"]: row for row in zeva["tasks"]}
 paired = []
 discordant = {"baseline_only": 0, "zeva_only": 0}
+base_episode_items = []
+zeva_episode_items = []
 for task in (root / "tasks.txt").read_text().splitlines():
     bp = json.loads((root / "baseline" / "progress" / f"{task}.json").read_text())
     zp = json.loads((root / "zeva" / "progress" / f"{task}.json").read_text())
@@ -784,6 +822,8 @@ for task in (root / "tasks.txt").read_text().splitlines():
         raise RuntimeError(f"{task}: paired seed mismatch")
     if [x["instruction"] for x in bitems] != [x["instruction"] for x in zitems]:
         raise RuntimeError(f"{task}: paired instruction mismatch")
+    base_episode_items.extend(bitems)
+    zeva_episode_items.extend(zitems)
     for b, z in zip(bitems, zitems, strict=True):
         bs, zs = bool(b["success"]), bool(z["success"])
         paired.append(int(zs) - int(bs))
@@ -823,6 +863,33 @@ report = {
     "discordant_pairs": discordant,
     "exact_mcnemar_p": mcnemar_p,
     "tasks": task_deltas,
+}
+max_attempts = max(
+    max((len(row.get("attempts", [row])) for row in base_episode_items), default=1),
+    max((len(row.get("attempts", [row])) for row in zeva_episode_items), default=1),
+)
+def attempt_curve(items, maximum):
+    exact = []
+    cumulative = []
+    reached = []
+    for index in range(maximum):
+        reached.append(sum(len(row.get("attempts", [row])) > index for row in items))
+        exact.append(sum(
+            len(row.get("attempts", [row])) > index
+            and bool(row.get("attempts", [row])[index]["success"])
+            for row in items
+        ))
+        cumulative.append(sum(
+            any(bool(attempt["success"]) for attempt in row.get("attempts", [row])[:index + 1])
+            for row in items
+        ))
+    return {"attempted": reached, "successes_at_attempt": exact,
+            "cumulative_successes": cumulative,
+            "cumulative_success_rates": [value / len(items) for value in cumulative]}
+report["multi_attempt"] = {
+    "max_attempts_observed": max_attempts,
+    "baseline": attempt_curve(base_episode_items, max_attempts),
+    "zeva": attempt_curve(zeva_episode_items, max_attempts),
 }
 temporary = root / "paired_report.json.partial"
 temporary.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

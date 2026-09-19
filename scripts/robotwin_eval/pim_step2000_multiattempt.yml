@@ -1,0 +1,10 @@
+policy_name: zeva_policy
+zeva_method: cte_eap_pim
+exploratory_epoch40: true
+handoff_root: /mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1
+foundation_checkpoint: /mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1/checkpoint/pretrained_model-best-v1
+stage2_checkpoint: /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-pim-20260919/stage2-cte-eap-pim-parent61-fixed2000-8gpu/002000
+zte_checkpoint: /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-behavior-effect-20260918/stage1/cte_epoch_040.pth
+cte_artifacts: /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-behavior-effect-20260918/cte-epoch040-exploratory-artifacts.pth
+retrieval_checkpoint: /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte-v2-artifacts-scheduler-repaired-20260911/task_retrieval.pth
+device: cuda
