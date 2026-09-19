@@ -1,67 +1,59 @@
-# ZeVA：BehaviorVLA 对齐的 CTE + effect
+# ZeVA：CTE、BIT、PIM 与 EAP
 
-更新：2026-09-19。用户指定以 BehaviorVLA 为骨架，增加 effect 预测和 effect token。本页取代旧双门控、冻结 PI 输出残差等方法纵览；[历史实验完整保留](ZEVA_ROBOTWIN_METHOD_HISTORY_TO_20260918.md)。
+更新：2026-09-19。本页定义当前 ZeVA 方法及训练口径；旧路线仅保留在历史文档中。
 
-## 方法纵览
+## 核心表示
 
-CTE 沿用 BehaviorVLA VBE 的三流因果 Mamba：视觉流、**上一段实际执行动作**流、可学习行为 token 流。各流作因果时间建模，再在同一时刻交互。当前隐状态 `z_t ∈ R256` 表示执行阶段，task head 输出128维检索 key。新增 effect head 从 `z_t` 预测下一次 H15 边界的视觉特征差；它不是已被证明的因果识别量。
+- **CTE（Causal Transition Encoder）**：三相机视觉、上一段真实执行的 H15 EEF16 动作和因果状态三路建模，输出当前执行阶段 `z_t`。
+- **BIT（Boundary Interaction Token）**：CTE 在每个 H15 边界预测的短期 effect token，描述当前 attempt 下一边界的视觉变化。BIT 随当前 attempt 实时更新。
+- **PIM（Persistent Interaction Memory）**：同一 episode 内已经结束的 attempt 的 BIT 序列。attempt reset 时提交，episode reset 时清空。
+- **EAP（Effect Action Prior）**：以任务全局先验、当前 phase 和 PIM context 预测 H50×16 Gaussian action prior，并在动作专家的 noisy-action embedding 中注入 mean residual。
 
-Stage2 信息进入 PI0.5 的路径：
+当前已验证的 CTE+BIT+EAP 路径使用两个 prefix：任务全局 token 与 BIT。PIM 扩展增加第三个 prefix，并将检索到的跨 attempt context 同时送入 EAP。第一 attempt 的 PIM 为空，其前向必须与已验证模型逐位一致。
 
-1. 冻结 task-language 检索器从指令预测任务，在**新 CTE 的 train95 memory**中检索全局行为 `g`，本 episode 保持稳定。
-2. `Linear(g)` 和 `Linear(predicted_effect_t)` 两个 token 放在 **VLM prefix 最前方**，与图像、语言同属 prefix attention block。
-3. Gaussian APN 将 `g` 展开为8个 waypoint，以当前 `z_t` 作 attention query，预测 H50×16 mean/std。
-4. mean 经零初始化线性层，**相加到 action expert 的 noisy-action embedding**，不是最终 EEF 动作。训练每样本40% residual dropout，推理固定乘0.5。
-5. PI原始 flow 解码仍输出H50；执行前H15后，用真实已执行动作及新图像更新 CTE。
+## Stage1：训练 CTE 与 BIT
 
-这条路线不使用旧 context/prior 双门控、BIT/PIM context、输出动作修正、teacher hinge 或 episode oracle。旧 CTE/bank/adapter 不能当作新 checkpoint 加载。
-
-## Stage1
-
-保留官方四个目标：action reconstruction、next-vision JEPA、global task contrastive、local temporal distinctiveness。只增加 effect MSE：
+Stage1 使用 action reconstruction、next-vision prediction、global task contrastive、local temporal distinctiveness 和 effect prediction：
 
 `effect_target_t = stopgrad(EMA_visual(o_{t+1}) − EMA_visual(o_t))`
 
 `L = 0.1 L_action + 0.2 L_vision + 2 L_global + L_phase + 0.2 L_effect`
 
-effect head 只有 `z_t` 输入，不输入当前 expert action 或未来图像。未来图像仅作监督，部署使用同一个预测 effect。
+三路 640×480 图像分别缩放至 224×224；动作按 RoboTwin baseline mean/std 归一化。模型为 ImageNet 初始化 ResNet18、4 层三流 Mamba、dim256。固定训练 80 epochs，batch8，vision LR `1e-5`，其余 LR `1e-4`。Stage1 不因增加 PIM 而重训。
 
-- 三路640×480 RGB分别缩放224×224、映射[-1,1]后融合，保持相机顺序。
-- 动作采用 baseline mean/std；上一段有序 H15×EEF16 展平投影，不将未执行H50放入历史。
-- action loss 对15个时间位置平均、对16个动作坐标求和；effect权重0.2与JEPA同量级，是本轮预声明而非调测试集得到。
-- ImageNet预训练 ResNet18、4层三流Mamba、dim256；80epochs、batch8；vision LR1e-5，其他LR1e-4；AdamW decay1e-4、clip1、EMA0.99。
-- 固定十任务train95、完整H15序列、右padding+mask，同任务成对且每epoch无放回完整覆盖。
-- BatchNorm固定预训练running statistics，避免跨时间batch statistics泄漏；EMA始终eval。
-- 固定epoch80；每5epoch验证，不按正式闭环结果选权重。
+## Stage2：CTE+BIT+EAP
 
-## Memory、Stage2、评测
+冻结 CTE、train-only task memory 和语言检索；完整训练 PI0.5 与 EAP。任务语言先预测任务，再在该任务的 CTE memory 中 top-5 cosine/softmax 聚合任务全局 token。BIT 作为实时短期 prefix；EAP residual 只进入动作专家 embedding，不直接改最终 EEF 动作。保持 H50 输出、H15 执行和真实 recurrent 更新。
 
-Stage1过验证gate后重新导出 train-only key/value memory、真实逐步 train/validation H15 phase/effect cache。旧的**语言任务分类器**只复用指令→任务分类，不把旧ZTE坐标当新CTE key；预测任务映射到新CTE task key，再在该任务memory中top5 cosine/softmax检索。
+已验证 checkpoint 使用 global batch256、5000 steps、PI LR `5e-6`、EAP LR `5e-5`。冻结 10×20 配对结果为 Base `111/200=55.5%`、ZeVA `122/200=61.0%`，提升 `+11/200=+5.5pp`。这通过工程 gate，但 McNemar `p=0.2543`，不宣称统计显著。
 
-Stage2 **全量训练PI0.5＋PBD**，冻结新CTE/memory/语言检索；global256，PI LR5e-6、新模块5e-5，固定首轮5000steps。目标为原始H50 flow loss＋0.01 Gaussian NLL（动作维求和，batch/time求平均），不再只训练action expert。保存完整model.safetensors、adapter、optimizer、每rank RNG及manifest/SHA。没有验证过exact-resume前不宣称无损续训。
+## Stage2-PIM：跨 attempt BIT
 
-固定末步在validation5做Base对照和对齐/错位/去effect消融，过gate后才进入新disjoint10×8开发闭环，再按冻结10×20配对协议正式评测。不能用正式success labels选checkpoint、任务、seed或gate；正式测试已有历史曝光必须披露。
+PIM 是 Stage2-only 扩展，从上面的已验证 checkpoint 初始化：
 
-不存在自动追加的“Stage3再微调”。语言检索必须在Stage2前对齐，并在训练/部署保持一致；若需改检索，另立有验证依据的方案，不复制官方训练期episode oracle。
+1. 一个 attempt 中，每个 H15 边界记录 `(phase, BIT)`；不会立刻写入 PIM。
+2. `reset(scope="attempt")` 将完整 BIT trace 均匀压缩后提交至 PIM，随后清空 CTE recurrence 和当前 BIT。
+3. 下一 attempt 用当前 phase 对历史 `(phase, BIT)` 做 attention，形成 PIM context。
+4. PIM context 作为第三个 prefix，并条件化 EAP；`reset(scope="episode")` 清空全部 PIM。
 
-## 来源与明确差异
+离线训练不做全局随机配对。对每条当前轨迹，只从 train95 选择同任务且不同 episode 的历史：50% 同条件初始 CTE phase 最近邻、20% 同条件远邻、10% 跨条件最近邻、20% PIM-off。所有匹配均不使用成功率标签；validation 和 formal 轨迹绝不进入 PIM 训练源。
 
-依据 [BehaviorVLA官方仓库](https://github.com/iLearn-Lab/ICML26-BehaviorVLA)，commit `0dbabc7e79791a325c4e76acde0ddfd7a18e8326`，Apache-2.0。CTE/PBD是工程命名，不代表共有结构由我们首创。
+PIM Stage2 固定首轮 2000 steps、global batch256。前 500 steps 仅训练 PIM 模块（LR `5e-5`）；之后 PI 使用 `1e-6`、已有 EAP 使用 `1e-5`、PIM 保持 `5e-5`。CTE 始终冻结。PIM-off batch 用于维持第一 attempt 的原模型能力。
 
-| 项目 | 本路线 |
-|---|---|
-| 三流Mamba、四个loss、APN、global prefix、Gaussian prior embedding residual | 沿用官方结构 |
-| effect head/loss/prefix token | 本次新增 |
-| LIBERO单图/7D/H10 | 适配三图/16D/H50，实际执行H15 |
-| released Stage2局部token为stateless | 保留用户要求的真实H15 recurrent状态 |
-| released Stage2 episode_index全局查询 | 改用训练/部署一致的task-language检索 |
-| quantile normalization | 保留RoboTwin mean/std |
-| 旧B₀语言拼接与post-effect Mamba流 | 移除，回到官方可学习行为token；语言用于PI和检索 |
+## Reset 与评测协议
 
-应称“BehaviorVLA对齐＋effect的RoboTwin适配”，不能说所有细节完全一样。effect目标与JEPA相关，并不自动保证互补，须以消融和闭环检验。
+```python
+# 新 episode：清空 CTE、BIT 和 PIM
+policy.reset(scope="episode")
 
-## 证据状态
+# 同一 episode 内一次失败后重试：提交 BIT 到 PIM，只清短期状态
+policy.reset(scope="attempt")
+```
 
-固定80 epoch Stage1已通过预声明gate，正式train-only memory/H15 cache及独立preflight均PASS。用户授权的epoch40探索Stage2完成5000步；冻结validation5共同噪声评估中，对齐ZeVA的H15 sampled-action MSE相对Base改善18.03%，10/10任务非劣，并在全局平均上优于同任务错位和effect-off。它是离线expert-history证据且不能被改称epoch80正式checkpoint。
+评测保持 Large_D435 640×480 三相机、Joint14→relative EEF16、H50 输出/H15 执行、seen instruction 和冻结 seed manifest。PIM 版先做 validation5 的 PIM-aligned/PIM-shuffled/PIM-off 检验，再用与正式测试不相交的多-attempt 开发 seeds 做配对闭环；不能用正式 success labels 选择 checkpoint、seed 或 gate。
 
-随后disjoint 10×8开发pair为Base44/80、ZeVA51/80，+7次成功超过预声明+4 gate，160个视频及seed零交叉审计通过。原冻结10×20一次正式pair最终为Base111/200=55.5%、ZeVA122/200=61.0%，**+11次成功、+5.5pp**，超过+8/200目标；400个视频、逐episode seed/instruction/result和配置独立审计通过。McNemar `p=0.2543`、paired bootstrap 95% CI为[-3,+14]pp，故这是本次工程gate通过，不是统计显著性结论。正式集合已有历史曝光；上一正式旧ZeVA106/200=53.0%、−2.5pp的失败仍完整披露。见[正式配对结果](ROBOTWIN_BEHAVIOR_EFFECT_PAIRED_RESULTS_20260919.md)、[机制记录](ZTEV2_POST_H15_MECHANISM_20260917.md)和[本轮工程记录](ZEVA_BEHAVIOR_EFFECT_20260918.md)。
+## 来源与许可
+
+三流时序编码和动作先验实现参考了 Apache-2.0 项目 `iLearn-Lab/ICML26-BehaviorVLA` 的 commit `0dbabc7e79791a325c4e76acde0ddfd7a18e8326`。来源信息保留在第三方声明中；ZeVA 对外术语统一为 CTE、BIT、PIM 和 EAP。RoboTwin 三相机/H50-H15、task-language 检索、BIT effect 目标和跨-attempt PIM 均是当前 ZeVA 的独立训练与部署契约。
+
+历史正式失败 Base `111/200`、旧 ZeVA `106/200` 仍完整保留；不得删除失败记录或将 PIM 离线指标表述为闭环成功率。

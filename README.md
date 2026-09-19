@@ -47,28 +47,31 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 ## Zeva architecture
 
-Current direction (2026-09-18, user-requested): **BehaviorVLA-aligned ZeVA CTE/PBD
-with effect prediction and an effect prefix token**. CTE reuses the official
-three-stream causal Mamba and four objectives; only effect MSE is added.
-Stage2 follows the actual official injection: global behavior (plus our effect)
-tokens before the VLM, and a Gaussian APN mean residual in action-expert
-embeddings. Full PI0.5 and PBD are trained; CTE/memory stay frozen. The old
+Current direction: **ZeVA CTE + BIT + PIM + EAP**. CTE is a three-stream causal
+Mamba over vision, the previously executed H15 action and causal state. BIT is
+the current attempt's predicted boundary effect token. PIM retains BIT traces
+from completed attempts in the same episode. EAP supplies a Gaussian mean
+residual inside action-expert embeddings. Full PI0.5 and EAP are trained while
+CTE/task memory/language retrieval remain frozen. The old
 dual-gate/post-diffusion output-residual experiments are not this route.
 RoboTwin H50/H15, three cameras, baseline normalization and task-language
 retrieval/true recurrence remain explicit adaptations. Architecture is
-attributed to BehaviorVLA commit `0dbabc7e79791a325c4e76acde0ddfd7a18e8326`.
+source attribution is separated into [third-party notices](THIRD_PARTY_NOTICES.md).
 
 Pipeline: fresh pretrained Stage1 (80epochs, batch8) → validation5 gate →
-new train-only memory/recurrent cache → full PI0.5/PBD Stage2 (5000steps,
+new train-only memory/recurrent cache → full PI0.5/EAP Stage2 (5000steps,
 global256, PI LR5e-6/new modules5e-5) → validation ablations → disjoint development
 pair → audited frozen formal pair. See [current method](docs/ZEVA_ROBOTWIN_METHOD_CN.md),
 [implementation/status](docs/ZEVA_BEHAVIOR_EFFECT_20260918.md), and
-[fixed configuration](configs/robotwin_behavior_effect_20260918.json).
+[fixed configuration](configs/robotwin_behavior_effect_20260918.json). The PIM
+extension is Stage2-only: it starts from the validated 61.0% CTE+BIT+EAP model,
+uses label-free same-task cross-episode BIT pairings, and trains for a fixed
+2000 steps under [its own frozen configuration](configs/robotwin_cte_eap_pim_20260919.json).
 Core real-Mamba and real-data smoke tests passed. The fixed 80-epoch Stage1
 finished and passed its preregistered action/vision/effect gate; its complete
 train-only memory/H15 cache export and independent pre-Stage2 audit also passed.
 Formal epoch80 Stage2 has not started. At the user's request, an isolated
-**epoch40 exploratory Stage2 branch** completed full PI/PBD at global256 for
+**epoch40 exploratory Stage2 branch** completed full PI/EAP at global256 for
 5000 steps. Its complete 5,874-decision matched-noise validation5 report showed
 18.03% lower aligned H15 sampled-action MSE than Base, 10/10 nonworse tasks, and
 passed the global alignment/effect ablations. This offline result does not count

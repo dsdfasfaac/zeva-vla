@@ -1,8 +1,7 @@
-"""ZeVA CTE/PBD: BehaviorVLA structure with one additional effect prediction.
+"""ZeVA causal transition encoder (CTE) and effect action prior (EAP).
 
-Architecture attribution: iLearn-Lab/ICML26-BehaviorVLA, Apache-2.0,
-commit 0dbabc7e79791a325c4e76acde0ddfd7a18e8326. This is a separate,
-incompatible experiment; it does not reinterpret older ZeVA checkpoints.
+Source attribution is kept separately in ``THIRD_PARTY_NOTICES.md``; public
+model concepts and checkpoint contracts use ZeVA terminology.
 """
 from __future__ import annotations
 
@@ -190,7 +189,7 @@ class ZevaActionPrior(nn.Module):
         return torch.distributions.Normal(params[..., 0], params[..., 1].clamp(-5, 2).exp())
 
 
-class ZevaPBD(nn.Module):
+class ZevaEffectActionPrior(nn.Module):
     """Global+effect prefix tokens and Gaussian-mean action-embedding residual.
 
     No context gate, output correction, teacher hinge or extra causal bank pool.
@@ -209,7 +208,7 @@ class ZevaPBD(nn.Module):
 
     def activate(self, global_token, phase, effect, *, include_effect=True):
         if self._active is not None:
-            raise RuntimeError("Nested PBD activation would corrupt the current diffusion forward.")
+            raise RuntimeError("Nested EAP activation would corrupt the current diffusion forward.")
         prior = self.action_prior(global_token, phase)
         tokens = [self.global_projector(global_token)]
         if include_effect:
@@ -240,8 +239,8 @@ class ZevaPBD(nn.Module):
 
     def install(self, core):
         """Install on the released LeRobot PI0.5, not the old ZeVA conditioner."""
-        if getattr(core, "_zeva_behavior_effect_installed", False):
-            raise ValueError("PBD hooks are already installed.")
+        if getattr(core, "_zeva_eap_installed", False):
+            raise ValueError("EAP hooks are already installed.")
         prefix, suffix, owner = core.embed_prefix, core.embed_suffix, self
 
         def wrapped_prefix(_core, *args, **kwargs):
@@ -252,10 +251,14 @@ class ZevaPBD(nn.Module):
 
         core.embed_prefix = MethodType(wrapped_prefix, core)
         core.embed_suffix = MethodType(wrapped_suffix, core)
-        core._zeva_behavior_effect_installed = True
+        core._zeva_eap_installed = True
 
     @staticmethod
     def prior_loss(prior, normalized_actions):
         if normalized_actions.shape[:2] != prior.loc.shape[:2]:
             raise ValueError("Gaussian NLL requires the full H50 target, not an H15 surrogate.")
         return -0.01 * prior.log_prob(normalized_actions[..., :16]).sum(-1).mean()
+
+
+# Compatibility alias for old checkpoints/scripts. New code uses EAP.
+ZevaPBD = ZevaEffectActionPrior

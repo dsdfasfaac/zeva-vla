@@ -1,0 +1,31 @@
+{
+  "schema": "zeva-cte-eap-pim-experiment-v1",
+  "stage1": {"train": false, "source": "frozen validated CTE epoch40 lineage used by the 61.0% parent"},
+  "pim_pairing": {
+    "source_subset": "train-only",
+    "positive_scope": "same task and different episode",
+    "matched_fraction": 0.5,
+    "same_condition_far_fraction": 0.2,
+    "cross_condition_fraction": 0.1,
+    "pim_off_fraction": 0.2,
+    "matching_feature": "frozen CTE initial phase cosine",
+    "success_labels": false,
+    "max_attempts": 4,
+    "max_entries_per_attempt": 64
+  },
+  "stage2": {
+    "initialize_from": "validated CTE+BIT+EAP step5000",
+    "steps": 2000,
+    "warmup_pim_only_steps": 500,
+    "global_batch": 256,
+    "pi_lr_after_warmup": 1e-6,
+    "eap_lr_after_warmup": 1e-5,
+    "pim_lr": 5e-5,
+    "frozen": ["cte", "task_memory", "language_retrieval"]
+  },
+  "reset_contract": {
+    "attempt": "commit current BIT trace to PIM; clear CTE recurrence and current BIT",
+    "episode": "clear CTE recurrence, BIT, and PIM"
+  },
+  "protocol": {"action_dim": 16, "state_dim": 14, "output_horizon": 50, "execution_horizon": 15, "camera_resolution": [640, 480], "episode_oracle": false}
+}

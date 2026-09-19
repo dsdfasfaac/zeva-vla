@@ -132,19 +132,35 @@ class ZevaModel:
         if not self._baseline_only and not stage2_checkpoint and not self._candidate_selector:
             raise ValueError("ZeVA evaluation requires stage2_checkpoint.")
         method = args.get("zeva_method", "legacy")
-        if method not in {"legacy", "behavior_effect"}:
-            raise ValueError(f"Unknown ZeVA method: {method}")
         if method == "behavior_effect":
-            from openpi.zeva.behavior_effect_policy import ZevaBehaviorEffectPolicy
+            # Compatibility for archived evaluation configs.
+            method = "cte_eap"
+        if method not in {"legacy", "cte_eap", "cte_eap_pim"}:
+            raise ValueError(f"Unknown ZeVA method: {method}")
+        if method in {"cte_eap", "cte_eap_pim"}:
+            from openpi.zeva.cte_eap_policy import ZevaCTEEAPPolicy
 
             if self._baseline_only or self._candidate_selector or self._consensus_tasks:
-                raise ValueError("CTE+effect is a separate policy, not a legacy selector/baseline mode.")
-            self.policy = ZevaBehaviorEffectPolicy.from_handoff(
-                args["handoff_root"], args["foundation_checkpoint"], args["zte_checkpoint"],
-                args["behavior_effect_artifacts"], args["retrieval_checkpoint"],
-                device=args.get("device", "cuda"), stage2_checkpoint=stage2_checkpoint,
-                exploratory_epoch40=bool(args.get("exploratory_epoch40", False)),
-            )
+                raise ValueError("CTE+EAP is separate from legacy selector/baseline modes.")
+            cte_artifacts = args.get("cte_artifacts", args.get("behavior_effect_artifacts"))
+            if cte_artifacts is None:
+                raise ValueError("CTE+EAP evaluation requires cte_artifacts.")
+            if method == "cte_eap_pim":
+                from openpi.zeva.pim_policy import ZevaPIMPolicy
+
+                self.policy = ZevaPIMPolicy.load_trained(
+                    args["handoff_root"], args["foundation_checkpoint"], args["zte_checkpoint"],
+                    cte_artifacts, args["retrieval_checkpoint"], stage2_checkpoint,
+                    device=args.get("device", "cuda"),
+                    exploratory_epoch40=bool(args.get("exploratory_epoch40", False)),
+                )
+            else:
+                self.policy = ZevaCTEEAPPolicy.from_handoff(
+                    args["handoff_root"], args["foundation_checkpoint"], args["zte_checkpoint"],
+                    cte_artifacts, args["retrieval_checkpoint"],
+                    device=args.get("device", "cuda"), stage2_checkpoint=stage2_checkpoint,
+                    exploratory_epoch40=bool(args.get("exploratory_epoch40", False)),
+                )
         else:
             self.policy = RobotWinZevaPolicy.from_handoff(
                 args["handoff_root"],
@@ -208,7 +224,8 @@ class ZevaModel:
             if self._torch.cuda.is_available():
                 self._torch.cuda.manual_seed_all(seed)
             self._reset_proposal_rng(seed)
-        self.policy.reset(scope="episode")
+        scope = "episode" if payload is None else str(payload.get("scope", "episode"))
+        self.policy.reset(scope=scope)
         self._previous_commands = None
         self._trace_replan_index = 0
         self._last_decision_trace = None

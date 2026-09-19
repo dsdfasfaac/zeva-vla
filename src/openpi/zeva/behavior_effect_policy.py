@@ -1,4 +1,4 @@
-"""RoboTwin deployment/training interface for the isolated CTE+effect experiment."""
+"""RoboTwin deployment/training interface for ZeVA CTE + BIT + EAP."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -9,7 +9,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from openpi.zeva.behavior_effect import SCHEMA, ZevaCTE, ZevaCTEConfig, ZevaPBD
+from openpi.zeva.behavior_effect import SCHEMA, ZevaCTE, ZevaCTEConfig, ZevaEffectActionPrior
 from openpi.zeva.retrieval import CausalRetrievalHead
 from openpi.zeva.robotwin_contract import ROBOTWIN_CAMERA_KEYS
 
@@ -97,15 +97,18 @@ class TaskLanguageMemory(nn.Module):
         if (task < 0).any():
             raise ValueError("Language retrieved a task outside the frozen ten-task memory.")
         query = self.new_task_keys[task]
-        # Same top5 cosine/softmax value aggregation as BehaviorVLA. Restrict to
-        # the language-retrieved task, never to the current trajectory.
+        # Top-5 cosine/softmax aggregation is restricted to the
+        # language-retrieved task, never to the current trajectory.
         scores = query @ F.normalize(self.keys, dim=-1).T
         scores = scores.masked_fill(self.entry_task[None] != task[:, None], -torch.inf)
         values, indices = scores.topk(min(5, scores.shape[1]), dim=-1)
         return (values.softmax(-1).unsqueeze(-1) * self.values[indices]).sum(1)
 
 
-class ZevaBehaviorEffectPolicy(nn.Module):
+class ZevaCTEEAPPolicy(nn.Module):
+    POLICY_SCHEMA = SCHEMA
+    ACTION_PRIOR_CLASS = ZevaEffectActionPrior
+
     def __init__(self, loader, cte, bank, retrieval):
         super().__init__()
         self.foundation = loader.foundation
@@ -115,7 +118,7 @@ class ZevaBehaviorEffectPolicy(nn.Module):
         self.register_buffer("language_table", loader.frozen_goal_embedding_table, persistent=False)
         self.cte = cte
         self.memory = TaskLanguageMemory(bank, retrieval)
-        self.pbd = ZevaPBD(dim=cte.config.d_model)
+        self.pbd = self.ACTION_PRIOR_CLASS(dim=cte.config.d_model)
         self.pbd.install(self.foundation.model)
         self.foundation.requires_grad_(True)
         self.reset()
@@ -135,7 +138,7 @@ class ZevaBehaviorEffectPolicy(nn.Module):
                                                install_injection_hooks=False, device=device)
         retrieval = torch.load(retrieval_checkpoint, map_location="cpu", weights_only=False)
         policy = cls(loader, cte, bank, retrieval).to(device)
-        policy.identity = {"schema": SCHEMA, "cte_sha256": file_sha(cte_checkpoint),
+        policy.identity = {"schema": cls.POLICY_SCHEMA, "cte_sha256": file_sha(cte_checkpoint),
                            "artifacts_sha256": file_sha(artifacts), "retrieval_sha256": file_sha(retrieval_checkpoint),
                            "foundation_sha256": file_sha(Path(foundation_checkpoint)/"model.safetensors")}
         if stage2_checkpoint:
@@ -188,7 +191,7 @@ class ZevaBehaviorEffectPolicy(nn.Module):
 
     @torch.inference_mode()
     def extract_vlm_features(self, batch):
-        # Reuse the baseline trace extractor with inactive PBD, not a second
+        # Reuse the baseline trace extractor with inactive EAP, not a second
         # encoder or a different tokenizer/state/image preparation path.
         from openpi.zeva.robotwin_policy import RobotWinZevaPolicy
         if self.pbd._active is not None:
@@ -222,3 +225,7 @@ class ZevaBehaviorEffectPolicy(nn.Module):
             return self.foundation.predict_action_chunk(processed)
         finally:
             self.pbd.clear()
+
+
+# Backward-compatible import name. New manifests/docs use ZevaCTEEAPPolicy.
+ZevaBehaviorEffectPolicy = ZevaCTEEAPPolicy
