@@ -188,13 +188,15 @@ def main(args: Args) -> None:
     preprocess, language = policy.preprocessor, policy.language
     policy, optimizer, loader = accelerator.prepare(policy, optimizer, loader)
     schedule = manifest["sampling_schedule"]
+    warmup_schedule = ["matched"] * 5 + ["same_condition_far"] * 2 + ["cross_condition"]
     step = epoch = 0
     while step < args.steps:
         for item in loader:
             if step == args.warmup_steps and not args.smoke_test:
                 for group in optimizer.param_groups:
                     group["lr"] = group["target_lr"]
-            mode = schedule[step % len(schedule)]
+            active_schedule = warmup_schedule if step < args.warmup_steps else schedule
+            mode = active_schedule[step % len(active_schedule)]
             raw = item["raw"]
             processed = preprocess(raw)
             lang = language(raw["task"])

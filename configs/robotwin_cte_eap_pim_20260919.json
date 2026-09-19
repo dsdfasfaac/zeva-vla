@@ -21,6 +21,7 @@
     "pi_lr_after_warmup": 1e-6,
     "eap_lr_after_warmup": 1e-5,
     "pim_lr": 5e-5,
+    "pim_off_starts_after_warmup": true,
     "frozen": ["cte", "task_memory", "language_retrieval"]
   },
   "reset_contract": {
