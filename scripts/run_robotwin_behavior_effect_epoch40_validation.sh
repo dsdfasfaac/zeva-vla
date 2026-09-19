@@ -3,6 +3,7 @@
 set -euo pipefail
 zeva_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 [[ $(hostname -s) == aigc28 ]] || { echo 'Audited validation launcher requires aigc28' >&2; exit 2; }
+cd "$zeva_root"
 run=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-behavior-effect-20260918
 handoff=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1
 runtime=$handoff/runtime

@@ -70,6 +70,8 @@ epoch40探索分支已开始导出：aigc28 GPU1上的PID `3239175`，日志`/mn
 
 **正式Stage1已完成并通过固定epoch80 gate**：epoch80/step52320，validation5 action/vision/effect相对基线改善分别为97.00%/26.89%/38.49%，5604 transitions且全部finite。原训练PID已退出，GPU0释放。正式epoch80 memory/H15 cache导出已在GPU0启动（PID `3524967`，日志`epoch80-export.log`）；导出完成后仍须执行正式独立preflight。因为GPU1–4正在训练epoch40探索分支，正式epoch80 Stage2不会提前争抢GPU或启动。
 
+epoch40探索Stage2已完成固定5000步，最终目录包含完整model/adapter/optimizer和四rank RNG；validation5首次启动在读取plan中的相对task路径时因未进入项目根目录而失败，发生在模型加载和结果目录创建前。失败日志保留为`epoch40-validation.log`；启动器已修复为显式`cd`到快照根目录，将用全新日志重启，不改模型、数据、噪声或gate。
+
 首次epoch5验证：action相对零动作改善93.63%，effect相对零effect改善30.11%，vision相对persistence改善3.43%，finite。当前vision未到预声明5%，但本轮只在固定epoch80决定通过与否，不提前提升、不放宽门槛，训练正常继续。
 
 epoch10同一validation5：action 0.014655 对零动作0.312295（改善95.31%）；effect 0.005010 对零effect0.007447（改善32.73%）；direct vision 0.007167 对persistence0.007447（改善3.76%）。三者finite，vision仍未过本轮5%门槛。因为`target_next = target_current + target_effect`，effect head的低误差表明潜在表示已包含部分转移信息；direct vision head却没有同等提升。这提示绝对未来视觉预测头的参数化或优化可能是瓶颈，但两头分别使用`z`与视觉流`v`，不能据此断定原因。现有Stage1/门槛保持原样；若固定epoch80最终失败，再基于验证集做有边界的新方法实验，而非改写本轮判定。
