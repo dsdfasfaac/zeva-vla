@@ -1,6 +1,6 @@
 # ZeVA：BehaviorVLA 对齐的 CTE + effect
 
-更新：2026-09-18。用户指定以 BehaviorVLA 为骨架，增加 effect 预测和 effect token。本页取代旧双门控、冻结 PI 输出残差等方法纵览；[历史实验完整保留](ZEVA_ROBOTWIN_METHOD_HISTORY_TO_20260918.md)。
+更新：2026-09-19。用户指定以 BehaviorVLA 为骨架，增加 effect 预测和 effect token。本页取代旧双门控、冻结 PI 输出残差等方法纵览；[历史实验完整保留](ZEVA_ROBOTWIN_METHOD_HISTORY_TO_20260918.md)。
 
 ## 方法纵览
 
@@ -62,6 +62,6 @@ Stage2 **全量训练PI0.5＋PBD**，冻结新CTE/memory/语言检索；global25
 
 ## 证据状态
 
-新路线无成功率结果。上一正式Base111/200=55.5%、旧ZeVA106/200=53.0%仍是失败。之后两个旧输出残差试验均未过验证gate，无新闭环结果。见[机制记录](ZTEV2_POST_H15_MECHANISM_20260917.md)和[本轮工程记录](ZEVA_BEHAVIOR_EFFECT_20260918.md)。
+新路线尚无闭环成功率结果。上一正式Base111/200=55.5%、旧ZeVA106/200=53.0%仍是失败。之后两个旧输出残差试验均未过验证gate。见[机制记录](ZTEV2_POST_H15_MECHANISM_20260917.md)和[本轮工程记录](ZEVA_BEHAVIOR_EFFECT_20260918.md)。
 
-新Stage1在aigc28 GPU0运行，已完成epoch10并继续epoch11；train5230/validation270、固定80epochs/batch8。epoch10 action/effect验证改善95.31%/32.73%，direct vision改善3.76%尚未到5%，不提前提升或改门槛。真实PI双卡global256容量测试、早期CTE→语言检索→PI的H15在线/cache一致性测试已通过；后者仅微型train-only fixture，不是正式memory或成功率。Stage2和新闭环尚未开始。
+固定80 epoch Stage1已通过预声明gate，正式train-only memory/H15 cache及独立preflight均PASS。用户授权的epoch40探索Stage2已完成5000步；冻结validation5共同噪声评估中，对齐ZeVA的H15 sampled-action MSE相对Base改善18.03%，10/10任务非劣，并在全局平均上优于同任务错位和effect-off。它是离线expert-history证据且明确不可作为epoch80正式checkpoint提升。当前正在aigc29运行预声明的disjoint 10×8 Base/ZeVA开发pair；只有该闭环ZeVA多至少4次成功，才允许运行原冻结10×20一次正式pair。

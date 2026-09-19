@@ -2,13 +2,20 @@
 
 用户2026-09-18指定改法；不再继续旧输出残差候选。方法见[纵览](ZEVA_ROBOTWIN_METHOD_CN.md)。
 
+## 当前状态（2026-09-19）
+
+- 固定80 epoch的正式Stage1已完成并通过预声明gate：action/vision/effect相对各自基线改善97.00%/26.89%/38.49%。epoch80 train-only memory与H15 cache已完整导出，artifact SHA为`4cb214347c9d2f957e4aabc4d6daf9c0e198310b9b9f84b3a344d19518dd815d`；独立preflight覆盖113408个train决策和5874个validation决策并PASS。正式epoch80 Stage2尚未启动。
+- 用户授权的epoch40探索Stage2已完成固定5000步、global256的full PI+PBD；末步含完整model、adapter、optimizer及四rank RNG。探索artifact SHA为`b78d0f0993296e162fa88e6784fa940fc237268e71598d89b668a94614aabed0`。
+- epoch40末步在冻结validation5的5874个决策上完成共同噪声H15 sampled-action评估：Base/对齐/同任务错位/effect-off MSE分别为0.01050672/0.00861226/0.00868223/0.00870932；对Base改善18.03%，10/10任务非劣，四项预声明离线检查均通过。该分支明确`formal_promotion_eligible=false`，这里只支持进入开发闭环，不是成功率。
+- 预声明的disjoint 10任务×8开发pair已在aigc29启动，launcher PID `3749858`；从absolute seed 1000000起筛选逐任务最早8个expert-valid seeds，Base和ZeVA使用完全相同的seed/instruction并保存全部视频。当前先运行正常Base；结果出来前没有新的闭环成功率，也不会启动原冻结10×20正式测试。
+
 ## 入口
 
 - `src/openpi/zeva/behavior_effect.py`：CTE、五损失、APN、global/effect prefix和prior suffix。
 - `src/openpi/zeva/behavior_effect_policy.py`：新schema/SHA、语言检索、新memory、训练和在线接口。
 - `scripts/train_robotwin_behavior_effect_cte.py`：train95完整序列、80epochs/batch8、验证和optimizer保存。
 - `scripts/export_robotwin_behavior_effect.py`：重建train-only memory及真实H15递归cache。
-- `scripts/train_robotwin_behavior_effect_policy.py`：Stage2 full PI＋PBD、global256/5000steps、完整model/adapter/optimizer/RNG；尚未启动，须等固定epoch80 gate及完整产物检查通过。
+- `scripts/train_robotwin_behavior_effect_policy.py`：Stage2 full PI＋PBD、global256/5000steps、完整model/adapter/optimizer/RNG；epoch40探索分支已完成，正式epoch80分支尚未启动。
 - `scripts/test_robotwin_behavior_effect.py`：真实CUDA/Mamba测试。
 - `scripts/smoke_robotwin_behavior_effect_pi.py`：真实PI/真实数据单卡推理反传及双卡AdamW/梯度累积测试；不保存可提升的训练权重。
 - `scripts/smoke_robotwin_behavior_effect_pipeline.py`：早期CTE、十任务train-only微型fixture memory、真实PI的两次H15边界端到端检查；不会保存或提升正式产物。

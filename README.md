@@ -64,15 +64,17 @@ global256, PI LR5e-6/new modules5e-5) → validation ablations → disjoint deve
 pair → audited frozen formal pair. See [current method](docs/ZEVA_ROBOTWIN_METHOD_CN.md),
 [implementation/status](docs/ZEVA_BEHAVIOR_EFFECT_20260918.md), and
 [fixed configuration](configs/robotwin_behavior_effect_20260918.json).
-Core real-Mamba and real-data smoke tests passed; new Stage1 is running on
-aigc28 GPU0 (train5230/validation270, fixed 80-epoch endpoint) and passed its
-predeclared action/vision/effect gate. The formal epoch80 memory/cache export is
-now running before independent audit. At the user's
-request, an isolated **epoch40 exploratory Stage2 branch** passed full memory/
-H15-cache export and independent source audit, and is now training full PI/PBD
-on four idle GPUs at global batch 256 toward the fixed 5000 steps. This does not replace the original
-epoch80 gate or count as formal checkpoint promotion. The complete new pipeline
-has not yet been evaluated. Last formal evidence remains
+Core real-Mamba and real-data smoke tests passed. The fixed 80-epoch Stage1
+finished and passed its preregistered action/vision/effect gate; its complete
+train-only memory/H15 cache export and independent pre-Stage2 audit also passed.
+Formal epoch80 Stage2 has not started. At the user's request, an isolated
+**epoch40 exploratory Stage2 branch** completed full PI/PBD at global256 for
+5000 steps. Its complete 5,874-decision matched-noise validation5 report showed
+18.03% lower aligned H15 sampled-action MSE than Base, 10/10 nonworse tasks, and
+passed the global alignment/effect ablations. This offline result does not count
+as formal checkpoint promotion or success rate. The preregistered disjoint 10x8
+paired development rollout is now running on aigc29; only a gain of at least four
+successes permits the original 10x20 formal pair. Last formal evidence remains
 Base111/200 vs old ZeVA106/200: goal not met.
 
 ### Historical experiment snapshots (not current architecture or launch instructions)
