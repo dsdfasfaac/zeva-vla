@@ -1,0 +1,50 @@
+{
+  "schema": "zeva-behavior-effect-development-paired-summary-v1",
+  "status": "PASS",
+  "task_count": 10,
+  "episodes_per_task": 8,
+  "paired_episodes": 80,
+  "baseline_successes": 44,
+  "baseline_success_rate": 0.55,
+  "zeva_successes": 51,
+  "zeva_success_rate": 0.6375,
+  "extra_successes": 7,
+  "absolute_delta": 0.0875,
+  "required_extra_successes": 4,
+  "discordant_pairs": {
+    "baseline_only": 11,
+    "zeva_only": 18
+  },
+  "exact_mcnemar_p": 0.26493089646101,
+  "paired_bootstrap_95ci": [
+    -0.0375,
+    0.225
+  ],
+  "seed_rule": "first-eight-expert-valid-per-task-from-1000000",
+  "seed_manifest_sha256": "8e99c20ca5d67e023d50d7cc18a39e7863b01616268e4669ecd73b96689ae1b6",
+  "formal_seed_overlap": 0,
+  "video_count": {
+    "baseline": 80,
+    "zeva": 80
+  },
+  "report_sha256": {
+    "baseline": "3270381753b71518df4124bd55b1b28ebb5da351530c08be47f87f58ef1167db",
+    "zeva": "9d0da95b60a4efa328cdcd780e4298c9b01baf2c2d3044b9940c329567d94689",
+    "paired": "08d221fa58e232670f0e21fabf40e5665af8888e3d31086ea9533d22fe9040ec",
+    "gate": "824d58f80fd9c30d9faf1376b6c739db2e627ad953362dd56a8ec8fcc236e696"
+  },
+  "per_task": {
+    "beat_block_hammer": {"baseline": 8, "zeva": 8},
+    "blocks_ranking_rgb": {"baseline": 4, "zeva": 5},
+    "blocks_ranking_size": {"baseline": 2, "zeva": 3},
+    "handover_block": {"baseline": 2, "zeva": 4},
+    "hanging_mug": {"baseline": 1, "zeva": 3},
+    "pick_dual_bottles": {"baseline": 7, "zeva": 8},
+    "put_bottles_dustbin": {"baseline": 2, "zeva": 2},
+    "scan_object": {"baseline": 7, "zeva": 4},
+    "stack_bowls_three": {"baseline": 5, "zeva": 6},
+    "stamp_seal": {"baseline": 6, "zeva": 8}
+  },
+  "next": "frozen_formal_once",
+  "warning": "Development evidence passes the preregistered engineering gate but is not the frozen 10x20 formal result."
+}

@@ -73,9 +73,13 @@ Formal epoch80 Stage2 has not started. At the user's request, an isolated
 18.03% lower aligned H15 sampled-action MSE than Base, 10/10 nonworse tasks, and
 passed the global alignment/effect ablations. This offline result does not count
 as formal checkpoint promotion or success rate. The preregistered disjoint 10x8
-paired development rollout is now running on aigc29; only a gain of at least four
-successes permits the original 10x20 formal pair. Last formal evidence remains
-Base111/200 vs old ZeVA106/200: goal not met.
+paired development rollout completed with Base44/80 and ZeVA51/80 (+7 successes,
++8.75pp), passing its preregistered +4-success engineering gate with all 160
+videos and zero overlap with the frozen formal seeds. The one-shot original
+10x20 formal pair is now running on aigc29, reusing the fully audited normal
+Base1000 111/200 evidence and evaluating ZeVA on exactly the same 200
+seed/instruction pairs. Until that finishes, the final +4pp goal is not claimed;
+the historical old-ZeVA formal result remains 106/200 and must be disclosed.
 
 ### Historical experiment snapshots (not current architecture or launch instructions)
 

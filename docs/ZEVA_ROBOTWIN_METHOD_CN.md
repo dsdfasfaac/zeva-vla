@@ -64,4 +64,4 @@ Stage2 **全量训练PI0.5＋PBD**，冻结新CTE/memory/语言检索；global25
 
 新路线尚无闭环成功率结果。上一正式Base111/200=55.5%、旧ZeVA106/200=53.0%仍是失败。之后两个旧输出残差试验均未过验证gate。见[机制记录](ZTEV2_POST_H15_MECHANISM_20260917.md)和[本轮工程记录](ZEVA_BEHAVIOR_EFFECT_20260918.md)。
 
-固定80 epoch Stage1已通过预声明gate，正式train-only memory/H15 cache及独立preflight均PASS。用户授权的epoch40探索Stage2已完成5000步；冻结validation5共同噪声评估中，对齐ZeVA的H15 sampled-action MSE相对Base改善18.03%，10/10任务非劣，并在全局平均上优于同任务错位和effect-off。它是离线expert-history证据且明确不可作为epoch80正式checkpoint提升。当前正在aigc29运行预声明的disjoint 10×8 Base/ZeVA开发pair；只有该闭环ZeVA多至少4次成功，才允许运行原冻结10×20一次正式pair。
+固定80 epoch Stage1已通过预声明gate，正式train-only memory/H15 cache及独立preflight均PASS。用户授权的epoch40探索Stage2已完成5000步；冻结validation5共同噪声评估中，对齐ZeVA的H15 sampled-action MSE相对Base改善18.03%，10/10任务非劣，并在全局平均上优于同任务错位和effect-off。它是离线expert-history证据且明确不可作为epoch80正式checkpoint提升。随后disjoint 10×8开发pair中Base为44/80、ZeVA为51/80，+7次成功超过预声明的+4 gate，160个视频及seed零交叉审计通过。当前已按协议启动原冻结10×20的一次正式pair；未完成前不声称达到最终+4pp目标。
