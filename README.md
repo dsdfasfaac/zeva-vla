@@ -76,10 +76,13 @@ as formal checkpoint promotion or success rate. The preregistered disjoint 10x8
 paired development rollout completed with Base44/80 and ZeVA51/80 (+7 successes,
 +8.75pp), passing its preregistered +4-success engineering gate with all 160
 videos and zero overlap with the frozen formal seeds. The one-shot original
-10x20 formal pair is now running on aigc29, reusing the fully audited normal
-Base1000 111/200 evidence and evaluating ZeVA on exactly the same 200
-seed/instruction pairs. Until that finishes, the final +4pp goal is not claimed;
-the historical old-ZeVA formal result remains 106/200 and must be disclosed.
+10x20 frozen pair then completed: normal Base1000 was 111/200 (55.5%) and ZeVA
+was 122/200 (61.0%), **+11 successes / +5.5pp**, passing the declared +8/200
+gate. All 400 paired videos and seed/instruction/result records passed the
+independent audit. McNemar p=0.2543 and paired-bootstrap 95% CI=[-3,+14]pp, so
+this is a passed engineering gate, not a claim of statistical significance.
+The formal set had historical exposure and the prior old-ZeVA failure
+106/200 (53.0%) remains disclosed. See the [complete paired result](docs/ROBOTWIN_BEHAVIOR_EFFECT_PAIRED_RESULTS_20260919.md).
 
 ### Historical experiment snapshots (not current architecture or launch instructions)
 

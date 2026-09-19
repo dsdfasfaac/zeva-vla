@@ -8,7 +8,7 @@
 - 用户授权的epoch40探索Stage2已完成固定5000步、global256的full PI+PBD；末步含完整model、adapter、optimizer及四rank RNG。探索artifact SHA为`b78d0f0993296e162fa88e6784fa940fc237268e71598d89b668a94614aabed0`。
 - epoch40末步在冻结validation5的5874个决策上完成共同噪声H15 sampled-action评估：Base/对齐/同任务错位/effect-off MSE分别为0.01050672/0.00861226/0.00868223/0.00870932；对Base改善18.03%，10/10任务非劣，四项预声明离线检查均通过。该分支明确`formal_promotion_eligible=false`，这里只支持进入开发闭环，不是成功率。
 - 预声明的disjoint 10任务×8开发pair已完整通过：Base 44/80=55.0%，ZeVA 51/80=63.75%，差值+7/80=+8.75pp，达到“至少多4次成功”的开发gate。seed从absolute 1000000起逐任务取最早8个expert-valid，与原正式manifest零交叉；Base/ZeVA各80个视频均通过结果核对。paired bootstrap 95% CI为[-3.75,+22.5]pp、McNemar p=0.2649，因此这是进入一次冻结正式评测的工程门槛，不作为显著性结论。
-- 原冻结10任务×20 manifest的一次正式评测已在aigc29启动，launcher PID `3922204`。它复用此前完整审计的正常Base1000 111/200视频/结果，ZeVA只对完全相同的200个seed/instruction重新闭环；manifest SHA仍为`1b9dbf74bd9d9b8871647a00d6557f84884685d4459065f004bd600a86b1679b`。该正式集合已有历史曝光，最终报告必须连同旧失败Base111/200、旧ZeVA106/200一起披露。
+- 原冻结10任务×20 manifest的一次正式评测已完成：正常Base1000 111/200=55.5%，epoch40探索ZeVA 122/200=61.0%，即+11/200、+5.5pp，超过预声明+8/200 gate。Base-only/ZeVA-only为33/44，McNemar `p=0.2543`，paired bootstrap 95% CI为[-3,+14]pp；这是工程gate通过而非统计显著性结论。manifest SHA保持`1b9dbf74bd9d9b8871647a00d6557f84884685d4459065f004bd600a86b1679b`，Base/ZeVA逐episode seed和instruction完全配对。Base/ZeVA各200视频及progress/result/config通过独立审计，400/400视频经ffprobe确认H.264、640×480、非空且正时长。该正式集合已有历史曝光，旧失败Base111/200、旧ZeVA106/200仍完整披露；完整报告见[正式配对结果](ROBOTWIN_BEHAVIOR_EFFECT_PAIRED_RESULTS_20260919.md)。
 
 ## 入口
 
@@ -62,7 +62,7 @@ aigc28真实H100/Mamba测试PASS：整段/逐步phase+effect一致、SOS/reset�
 
 GPU3完整policy接口smoke已exit0：使用真实epoch5 CTE（SHA `49524b87f046c77e6ca6406fca18129f0ee49f353333d6d175e3dc864d4f47db`）、每任务一个train episode形成的十任务微型fixture memory、冻结语言分类器和真实best-v1 PI。在独立validation episode的frame0/15，在线CTE与导出式递归特征最大误差≤1.08e-6，在线/缓存条件下H50动作逐位一致，episode reset通过；显式相同噪声的effect-off采样在改变全局RNG后仍逐位一致。耗时122.76秒，peak10.18GiB，报告`cte-pipeline-smoke.json`明确`promotable=false`，没有保存memory/模型，也没有绕过正式epoch80 gate。此测试不代表全部5230条memory产物或训练后的策略验收。
 
-**仍未验证**：报告生成器真实完整权重/数据运行；epoch80正式全量memory/cache产物；正式八rank拓扑；Stage2精确断点恢复。不能把单元测试、容量测试或早期fixture集成测试当成这些验收通过。Stage1尚须固定epoch80通过gate，才能导出正式新memory并开始Stage2；当前继续训练，无新成功率。报告命令从项目根目录运行，提供`--dataset-root --cte-checkpoint --artifacts --retrieval-checkpoint --foundation-checkpoint --checkpoint --output-dir --expected-decisions`；随后将`report.json`和`expected-decisions.json`交给独立selector，禁止用中间`rows.partial.jsonl`作选择。
+**当前边界**：epoch40分支的完整权重/数据报告、冻结validation5、四卡global256 Stage2及八卡闭环评测均已实际运行；epoch80正式memory/cache及独立preflight也已完成。仍未验证的是epoch80正式Stage2和Stage2精确断点恢复。不能把epoch40结果改称epoch80正式Stage2。报告命令从项目根目录运行，提供`--dataset-root --cte-checkpoint --artifacts --retrieval-checkpoint --foundation-checkpoint --checkpoint --output-dir --expected-decisions`；随后将`report.json`和`expected-decisions.json`交给独立selector，禁止用中间`rows.partial.jsonl`作选择。
 
 独立validation5 ID枚举现已在aigc28完成：固定split270个episode，H15边界共5874个决策，清单SHA `169145aa28b70bd14396904fd0a15e02a216e46ef4d07337fb17ee84b65b1466`，来源adapter/任务配置/Stage1 manifest SHA均记录在`validation5-expected-audit.json`，完整清单`validation5-expected-decisions.json`。第一次尝试导入旧训练包装器时因CPU不可初始化Triton失败，没有生成清单；改为仅导入原始adapter metadata后重新执行exit0，未使用GPU或任何模型输出。正式Stage2入口必须见到该冻结清单及同源adapter哈希；Stage2之后报告生成器再次独立重算并逐项核对。报告命令还必须传`--expected-decisions`，selector检查清单SHA。该清单是离线验证数据索引，与正式闭环seed/成功标签无关。
 

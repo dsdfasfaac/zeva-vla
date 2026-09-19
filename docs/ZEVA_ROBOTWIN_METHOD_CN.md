@@ -62,6 +62,6 @@ Stage2 **全量训练PI0.5＋PBD**，冻结新CTE/memory/语言检索；global25
 
 ## 证据状态
 
-新路线尚无闭环成功率结果。上一正式Base111/200=55.5%、旧ZeVA106/200=53.0%仍是失败。之后两个旧输出残差试验均未过验证gate。见[机制记录](ZTEV2_POST_H15_MECHANISM_20260917.md)和[本轮工程记录](ZEVA_BEHAVIOR_EFFECT_20260918.md)。
+固定80 epoch Stage1已通过预声明gate，正式train-only memory/H15 cache及独立preflight均PASS。用户授权的epoch40探索Stage2完成5000步；冻结validation5共同噪声评估中，对齐ZeVA的H15 sampled-action MSE相对Base改善18.03%，10/10任务非劣，并在全局平均上优于同任务错位和effect-off。它是离线expert-history证据且不能被改称epoch80正式checkpoint。
 
-固定80 epoch Stage1已通过预声明gate，正式train-only memory/H15 cache及独立preflight均PASS。用户授权的epoch40探索Stage2已完成5000步；冻结validation5共同噪声评估中，对齐ZeVA的H15 sampled-action MSE相对Base改善18.03%，10/10任务非劣，并在全局平均上优于同任务错位和effect-off。它是离线expert-history证据且明确不可作为epoch80正式checkpoint提升。随后disjoint 10×8开发pair中Base为44/80、ZeVA为51/80，+7次成功超过预声明的+4 gate，160个视频及seed零交叉审计通过。当前已按协议启动原冻结10×20的一次正式pair；未完成前不声称达到最终+4pp目标。
+随后disjoint 10×8开发pair为Base44/80、ZeVA51/80，+7次成功超过预声明+4 gate，160个视频及seed零交叉审计通过。原冻结10×20一次正式pair最终为Base111/200=55.5%、ZeVA122/200=61.0%，**+11次成功、+5.5pp**，超过+8/200目标；400个视频、逐episode seed/instruction/result和配置独立审计通过。McNemar `p=0.2543`、paired bootstrap 95% CI为[-3,+14]pp，故这是本次工程gate通过，不是统计显著性结论。正式集合已有历史曝光；上一正式旧ZeVA106/200=53.0%、−2.5pp的失败仍完整披露。见[正式配对结果](ROBOTWIN_BEHAVIOR_EFFECT_PAIRED_RESULTS_20260919.md)、[机制记录](ZTEV2_POST_H15_MECHANISM_20260917.md)和[本轮工程记录](ZEVA_BEHAVIOR_EFFECT_20260918.md)。

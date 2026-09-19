@@ -1,0 +1,27 @@
+{
+  "bad": [],
+  "conditions": {
+    "baseline": {
+      "bytes": 130983473,
+      "codecs": ["h264"],
+      "count": 200,
+      "duration_seconds": 12127.7
+    },
+    "zeva": {
+      "bytes": 127557014,
+      "codecs": ["h264"],
+      "count": 200,
+      "duration_seconds": 11485.9
+    }
+  },
+  "expected_videos": 400,
+  "passed": true,
+  "probed_videos": 400,
+  "requirements": {
+    "positive_duration": true,
+    "positive_size": true,
+    "resolution": "640x480",
+    "video_stream": true
+  },
+  "schema": "zeva-behavior-effect-formal-video-ffprobe-audit-v1"
+}
