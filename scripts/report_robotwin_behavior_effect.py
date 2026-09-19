@@ -31,6 +31,8 @@ def main():
     parser.add_argument("--tasks", type=Path, default=Path("configs/robotwin_zeva_advantage10.json"))
     parser.add_argument("--handoff", type=Path, default=Path(
         "/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1"))
+    parser.add_argument("--exploratory-epoch40", action="store_true",
+                        help="Evaluate the isolated epoch40 branch without making it epoch80-promotion eligible.")
     args = parser.parse_args()
     import torch
     from openpi.zeva.behavior_effect import SCHEMA
@@ -57,6 +59,8 @@ def main():
     state = torch.load(args.checkpoint / "training_state.pth", map_location="cpu", weights_only=False)
     if state["step"] != 5000 or state["manifest"]["global_batch"] != 256:
         raise ValueError("Only fixed step5000/global256 is eligible.")
+    if bool(state["manifest"]["args"].get("exploratory_epoch40", False)) != args.exploratory_epoch40:
+        raise ValueError("Requested evaluation mode differs from checkpoint exploratory lineage.")
     del state
     args.output_dir.mkdir(parents=True, exist_ok=False)
     dataset_path = args.dataset_root / "adapter.json"
@@ -94,7 +98,8 @@ def main():
             raise ValueError("Non-finite recurrent features.")
     policy = ZevaBehaviorEffectPolicy.from_handoff(
         args.handoff, args.foundation_checkpoint, args.cte_checkpoint, args.artifacts,
-        args.retrieval_checkpoint, stage2_checkpoint=args.checkpoint, device="cuda").eval()
+        args.retrieval_checkpoint, stage2_checkpoint=args.checkpoint, device="cuda",
+        exploratory_epoch40=args.exploratory_epoch40).eval()
     base = RobotWinZevaPolicy.from_handoff(
         args.handoff, foundation_checkpoint=args.foundation_checkpoint,
         stage2_checkpoint=baseline_path, install_injection_hooks=False, device="cuda").eval()
@@ -165,6 +170,8 @@ def main():
                 print(json.dumps({"completed": len(rows), "total": len(decisions)}), flush=True)
     report = {"schema": "zeva-behavior-effect-validation5-v1", "split": "validation",
               "formal_labels_used": False, "checkpoint_step": 5000, "checkpoint": str(args.checkpoint.resolve()),
+              "exploratory_epoch40": args.exploratory_epoch40,
+              "formal_promotion_eligible": not args.exploratory_epoch40,
               "output_horizon": 50, "execution_horizon": 15,
               "metric": "sample_mean_normalized_executed_h15_action_mse", "matched_noise": True,
               "noise_contract": "explicit identical FP32 H50x32 noise, 10 denoising steps, TF32 disabled",
@@ -179,7 +186,9 @@ def main():
     gate = select(report, expected, plan, tasks)
     write_json(args.output_dir / "report.json", report)
     print(json.dumps({"report": str(args.output_dir / "report.json"), "passed": gate["passed"],
-                      "next": "run independent selector; no automatic promotion"}), flush=True)
+                      "next": ("exploratory diagnosis only; epoch80 selector rejects this branch"
+                               if args.exploratory_epoch40 else
+                               "run independent selector; no automatic promotion")}), flush=True)
 
 
 if __name__ == "__main__":
