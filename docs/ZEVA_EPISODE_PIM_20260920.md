@@ -26,3 +26,13 @@
 7项因果/路由单元测试通过。真实Parent与真实train95数据的单卡global8两步反传通过；8×H100、batch32/卡、global256的两步容量测试也通过，PIM梯度finite且非零。容量测试checkpoint含8份rank RNG，冻结Foundation模型SHA与Parent完全一致，Parent EAP的23个tensor逐位一致。证据见 `docs/results/robotwin-episode-pim-20260920/runtime-smoke.json`。
 
 第一次单卡smoke在更新前被数据guard拒绝：原始adapter包含50任务，而冻结CTE artifact有本轮10任务。失败目录完整保留；guard已改为跳过无关40任务，同时反向验证artifact内5230条train episode全部存在。该修复没有改变模型、训练数据或gate。
+
+## 已完成结果
+
+固定step2000训练已完成。`000500/001000/001500/002000` 四个checkpoint均包含完整模型、adapter、optimizer/training state、`COMPLETE`及8份rank RNG；最终Foundation SHA保持 `6b0380679cff27507d969a10c7467ebb8ee05490714b34d1b365c4756da3e9f4`，Parent EAP的23个tensor仍逐位一致。
+
+冻结validation5覆盖5874个决策并通过预声明检查：Parent `0.0086122569`、aligned Episode-PIM `0.0085086074`、同episode phase/BIT错位 `0.0085235141`、PIM-off `0.0086122569`；270个episode起点均与Parent精确一致。这里是离线H15动作MSE，不是闭环成功率。
+
+新的disjoint单次开发集从absolute seed `3000000`起逐任务冻结最早8个expert-valid样本，manifest SHA为 `3160b039b7c571850ef8187f61818c0aaeaa0a8ebc88c8c189b1cd8fcdc86103`，与原formal、seed1000000开发集和seed2000000 PIM开发集均零交叉。三路在完全相同的80个seed/instruction上各执行一次并保存80个视频：Base `40/80=50.0%`，Parent `42/80=52.5%`，Episode-PIM `49/80=61.25%`。Episode-PIM相对Base为 `+9/80=+11.25pp`，相对Parent为 `+7/80=+8.75pp`，通过“严格高于Base和Parent”的固定开发gate。
+
+独立三方审计报告保存为 `/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-episode-pim-20260920/eval/development-singleattempt-three-way-seed3000000.json`。该结果仍是post-formal开发证据，不能改写此前正式结论，也未使用正式成功标签选择checkpoint、任务、seed或gate。
