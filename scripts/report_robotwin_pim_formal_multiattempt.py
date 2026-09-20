@@ -82,6 +82,13 @@ def curve(rows: list[dict]) -> dict:
     return {
         "attempted": attempted,
         "successes_at_attempt": exact,
+        "independent_success_rates": [
+            successes / count if count else None
+            for successes, count in zip(exact, attempted)
+        ],
+        "exact_success_contribution_over_all_episodes": [
+            successes / len(rows) for successes in exact
+        ],
         "cumulative_successes": cumulative,
         "cumulative_success_rates": [value / len(rows) for value in cumulative],
     }
@@ -147,9 +154,16 @@ def main() -> None:
             raise RuntimeError(f"seed/instruction mismatch for {key}")
 
     base_curve, parent_curve, pim_curve = map(curve, (base, parent, pim))
-    goal_delta = pim_curve["cumulative_successes"][3] - base_curve["cumulative_successes"][3]
+    independent_deltas = [
+        100 * (pim - base)
+        for pim, base in zip(
+            pim_curve["independent_success_rates"],
+            base_curve["independent_success_rates"],
+        )
+    ]
+    cumulative_delta = pim_curve["cumulative_successes"][3] - base_curve["cumulative_successes"][3]
     payload = {
-        "schema": "zeva-pim-user-authorized-formal-three-way-v1",
+        "schema": "zeva-pim-user-authorized-formal-three-way-v2",
         "authorization": {
             "user_authorized_after_development_gate_failure": True,
             "development_gate_passed": False,
@@ -201,13 +215,22 @@ def main() -> None:
             "parent_minus_base": paired_delta(parent, base),
             "pim_minus_parent": paired_delta(pim, parent),
         },
-        "primary_goal": {
-            "comparison": "pim_minus_normally_trained_base_at_attempt4",
-            "required_extra_successes": 8,
-            "required_percentage_points": 4.0,
-            "observed_extra_successes": goal_delta,
-            "observed_percentage_points": 100 * goal_delta / 200,
-            "passed": goal_delta >= 8,
+        "independent_attempt_interpretation": {
+            "primary_metric": "successes_at_attempt_divided_by_episodes_reaching_that_attempt",
+            "cumulative_success_is_not_an_independent_attempt_rate": True,
+            "later_attempt_cohorts_are_survivor_sets": True,
+            "pim_minus_base_percentage_points_by_attempt": independent_deltas,
+            "meets_plus_4pp_by_attempt": [delta >= 4.0 for delta in independent_deltas],
+            "consistent_plus_4pp_across_all_attempts": all(
+                delta >= 4.0 for delta in independent_deltas
+            ),
+            "attempt1_plus_4pp_goal_passed": independent_deltas[0] >= 4.0,
+        },
+        "cumulative_four_attempt_diagnostic": {
+            "comparison": "pim_minus_normally_trained_base_after_up_to_four_attempts",
+            "observed_extra_successes": cumulative_delta,
+            "observed_percentage_points": 100 * cumulative_delta / 200,
+            "not_used_as_independent_attempt_success_rate": True,
         },
         "historical_disclosure": {
             "old_failed_formal": {"base": 111, "old_zeva": 106, "episodes": 200},

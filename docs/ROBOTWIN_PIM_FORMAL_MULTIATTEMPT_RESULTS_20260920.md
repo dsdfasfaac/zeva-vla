@@ -8,17 +8,31 @@
 
 这里的 Base 仍是正常训练的 Base1000，没有换权重。历史 `111/200=55.5%` 是单 attempt 正式结果；本次重新执行的 Base attempt-1 是 `112/200=56.0%`，累计 4 attempts 后才是 `170/200=85.0%`。二者相差 1 次来自重新执行时的随机扩散轨迹，不应把 `170/200` 写成 Base 的单次成功率。
 
-## 完整审计结果
+## 完整审计结果（修订：以每次 attempt 的独立成功率为主）
 
-独立报告：`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-pim-20260919/eval/formal-multiattempt-three-way-original10x20-user-authorized-20260920.json`，SHA256 `d56a61892f2a08e296be84fae13d1947b356aab9754cfac36a3070806da55d04`。
+独立报告：`/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-pim-20260919/eval/formal-multiattempt-three-way-original10x20-user-authorized-20260920.json`，SHA256 `c805b7bd88c46a8722bab12a278ee7b21b2ae8aa8a636fe4da5da4dd05250e11`。报告已修订为 v2；此前把 attempt-4 累计成功率当成主要成功率的解释已撤回。
 
-| 条件 | attempt-1 | attempt-2累计 | attempt-3累计 | attempt-4累计 | 实际视频 |
+每次 attempt 的独立成功率，以“该 attempt 成功数 / 实际进入该 attempt 的 episode 数”为分母：
+
+| 条件 | attempt-1 | attempt-2 | attempt-3 | attempt-4 |
+|---|---:|---:|---:|---:|
+| 正常训练 Base1000 | 112/200 (56.00%) | 29/88 (32.95%) | 24/59 (40.68%) | 5/35 (14.29%) |
+| CTE+BIT+EAP parent | 126/200 (63.00%) | 27/74 (36.49%) | 13/47 (27.66%) | 10/34 (29.41%) |
+| CTE+BIT+PIM+EAP | 116/200 (58.00%) | 37/84 (44.05%) | 13/47 (27.66%) | 12/34 (35.29%) |
+
+PIM 相比 Base 的独立成功率差为 attempt1 `+2.00pp`、attempt2 `+11.09pp`、attempt3 `-13.02pp`、attempt4 `+21.01pp`。PIM 相比 parent 为 attempt1 `-5.00pp`、attempt2 `+7.56pp`、attempt3 `0.00pp`、attempt4 `+5.88pp`。因此结果是混合的：PIM 对失败后的第2和第4次恢复有正信号，但第一次明显退化、第三次无增益；不能宣称每次 attempt 均达到 +4pp，也不能宣称 PIM 稳定优于 parent。
+
+后续 attempt 的分母是前序失败留下的 survivor cohort，三路 cohort 大小并不总相同，条件成功率不是完全同质样本上的直接因果比较。必须同时报告成功数和分母。
+
+仅作辅助诊断的 4-attempt 累计曲线如下，不作为“每次 attempt 成功率”：
+
+| 条件 | attempt-1累计 | attempt-2累计 | attempt-3累计 | attempt-4累计 | 实际视频 |
 |---|---:|---:|---:|---:|---:|
-| 正常训练 Base1000 | 112/200 (56.0%) | 141/200 (70.5%) | 165/200 (82.5%) | 170/200 (85.0%) | 382 |
-| CTE+BIT+EAP parent | 126/200 (63.0%) | 153/200 (76.5%) | 166/200 (83.0%) | 176/200 (88.0%) | 355 |
-| CTE+BIT+PIM+EAP | 116/200 (58.0%) | 153/200 (76.5%) | 166/200 (83.0%) | 178/200 (89.0%) | 365 |
+| 正常训练 Base1000 | 112/200 | 141/200 | 165/200 | 170/200 | 382 |
+| CTE+BIT+EAP parent | 126/200 | 153/200 | 166/200 | 176/200 | 355 |
+| CTE+BIT+PIM+EAP | 116/200 | 153/200 | 166/200 | 178/200 | 365 |
 
-PIM 相比 Base 最终多 `8/200=+4.0pp`，恰好达到项目目标；配对分解为 PIM-only 成功 19、Base-only 成功 11、共同成功 159、共同失败 11。PIM 相比 parent 只多 `2/200=+1.0pp`，且 attempt-1 少 10 次；因此正式结果支持“完整 CTE+BIT+PIM+EAP 相比正常训练 Base 在最多4次 attempt 的新协议上达到 +4pp”，但不支持“PIM 模块本身已稳定优于 parent”或“单 attempt 提升”。
+累计到4次时 PIM 相比 Base 的确是 `+8/200=+4.0pp`，但这只是“最多4次内最终解决率”，不能用来证明独立 attempt 成功率达到 +4pp。按独立 attempt 口径，项目的统一 `+4pp` 结论 **不成立**；attempt-1 仅为 `+2.0pp`，且四次结果不一致。
 
 逐任务 attempt-4 累计成功数：
 
