@@ -1,5 +1,7 @@
 {
   "schema": "zeva-cte-bit-episode-pim-eap-preregistration-v1",
+  "setting_id": "within-episode",
+  "status": "current",
   "date": "2026-09-20",
   "method": {
     "bit": "current H15 boundary short-term interaction state",
@@ -10,7 +12,7 @@
     "cross_episode": false
   },
   "training": {
-    "parent": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-behavior-effect-20260918/stage2-fullpi-pbd-effect-epoch040-exploratory/005000",
+    "parent": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-cte-bit-eap-20260918/stage2-fullpi-pbd-effect-epoch040-exploratory/005000",
     "source_subset": "train-only",
     "history_source": "same episode, timesteps [0,t)",
     "success_labels_used": false,

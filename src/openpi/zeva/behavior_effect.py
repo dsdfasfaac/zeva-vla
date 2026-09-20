@@ -169,7 +169,7 @@ def cte_loss(outputs, actions, valid_mask, task_ids, *, effect_weight=0.2):
 
 
 class ZevaActionPrior(nn.Module):
-    """BehaviorVLA APN, unchanged apart from H50/EEF16 dimensions."""
+    """ZeVA action-prior network for the H50/EEF16 policy contract."""
     def __init__(self, dim=256, horizon=50, action_dim=16):
         super().__init__()
         self.horizon, self.action_dim = horizon, action_dim

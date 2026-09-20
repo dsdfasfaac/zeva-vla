@@ -8,7 +8,7 @@ zeva_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 run=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-pim-20260919
 output=$run/eval/development-multiattempt-base-seed2000000
 formal_seed=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-fixed-anchor-pair-20260914/seed_manifest.json
-prior_dev_seed=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-behavior-effect-20260918/eval/development-epoch040-step5000-a29-20260919/seed_manifest.json
+prior_dev_seed=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-cte-bit-eap-20260918/eval/development-epoch040-step5000-a29-20260919/seed_manifest.json
 task_manifest=$zeva_root/configs/robotwin_zeva_advantage10.json
 old_formal=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/formal-h15-route-selected-000500-a29-20260917/manifest.json
 loader_dir=/mnt/100T/users/dingxin/VLA/runtime/zeva-vulkan-loader-a28-20260916
@@ -25,7 +25,7 @@ expected_uuids=(
 
 for required in "$formal_seed" "$prior_dev_seed" "$task_manifest" "$old_formal" \
   "$loader_dir/libvulkan.so.1" "$loader_dir/libEGL.so.1" \
-  "$zeva_root/scripts/robotwin_eval/baseline_base1000_behavior_effect_dev.yml" \
+  "$zeva_root/scripts/robotwin_eval/base1000_dev.yml" \
   "$zeva_root/scripts/robotwin_eval/pim_step2000_multiattempt.yml"; do
   [[ -s "$required" ]] || { echo "Missing development input: $required" >&2; exit 2; }
 done
@@ -64,7 +64,7 @@ export SHARED_RUNTIME=/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin 
 export RENDER_VULKAN_ICD=/etc/vulkan/icd.d/nvidia_icd.json RENDER_SAPIEN_DEVICE=cuda:0
 export RENDER_LD_LIBRARY_PATH=$loader_dir:/usr/lib/x86_64-linux-gnu RENDER_WARP_CACHE_ROOT=$output/warp-cache
 export TASK_MANIFEST=$task_manifest
-export BASELINE_CONFIG=$zeva_root/scripts/robotwin_eval/baseline_base1000_behavior_effect_dev.yml
+export BASELINE_CONFIG=$zeva_root/scripts/robotwin_eval/base1000_dev.yml
 export ZEVA_CONFIG=$zeva_root/scripts/robotwin_eval/pim_step2000_multiattempt.yml
 export BASELINE_LABEL=base1000-multiattempt-development ZEVA_LABEL=cte-bit-pim-eap-step2000-development
 export OUTPUT_ROOT=$output OMP_NUM_THREADS=8 MKL_NUM_THREADS=8

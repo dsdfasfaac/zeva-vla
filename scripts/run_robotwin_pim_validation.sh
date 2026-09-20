@@ -5,7 +5,7 @@ zeva_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 [[ $(hostname -s) == aigc28 ]] || { echo 'PIM validation launcher is audited for aigc28' >&2; exit 2; }
 
 run=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-pim-20260919
-parent_run=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-behavior-effect-20260918
+parent_run=${ZEVA_PARENT_RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-cte-bit-eap-20260918}
 handoff=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1
 dataset=/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/data
 output=$run/validation5-pim-step2000-8shard

@@ -20,7 +20,7 @@ if [[ "$condition" == parent ]]; then
   expected_host=aigc29
   model_ip=172.16.80.163
   base_port=20020
-  config=$zeva_root/scripts/robotwin_eval/behavior_effect_epoch040_step5000_dev.yml
+  config=$zeva_root/scripts/robotwin_eval/cte_bit_eap_parent_step5000_dev.yml
   label=cte-bit-eap-parent-step5000-singleattempt-development
   output=$run/eval/development-singleattempt-parent-seed3000000
   expected_uuids=(
@@ -128,7 +128,7 @@ export RENDER_RUNTIME=/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin
 export RENDER_VULKAN_ICD=/etc/vulkan/icd.d/nvidia_icd.json RENDER_SAPIEN_DEVICE=cuda:0
 export RENDER_LD_LIBRARY_PATH=$loader_dir:/usr/lib/x86_64-linux-gnu RENDER_WARP_CACHE_ROOT=$output/warp-cache
 export TASK_MANIFEST=$task_manifest
-export BASELINE_CONFIG=$zeva_root/scripts/robotwin_eval/baseline_base1000_behavior_effect_dev.yml
+export BASELINE_CONFIG=$zeva_root/scripts/robotwin_eval/base1000_dev.yml
 export ZEVA_CONFIG=$config BASELINE_LABEL=base1000-singleattempt-development ZEVA_LABEL=$label
 export OUTPUT_ROOT=$output OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
 

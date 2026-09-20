@@ -20,7 +20,8 @@ from openpi.zeva.cte_eap_policy import ZevaCTEEAPPolicy, file_sha, load_cte
 from openpi.zeva.robotwin_contract import ROBOTWIN_CAMERA_KEYS
 
 
-PIM_POLICY_SCHEMA = "zeva-cte-eap-pim-v1"
+PIM_POLICY_SCHEMA = "zeva-cte-eap-pim-v1"  # Legacy checkpoint schema.
+CROSS_ATTEMPT_PIM_POLICY_SCHEMA = PIM_POLICY_SCHEMA
 EPISODE_PIM_POLICY_SCHEMA = "zeva-cte-bit-episode-pim-eap-v1"
 
 
@@ -217,7 +218,7 @@ class ZevaPIMEAP(ZevaEffectActionPrior):
 class ZevaPIMPolicy(ZevaCTEEAPPolicy):
     """Stage2-only PIM extension initialized from a trained CTE+EAP policy."""
 
-    POLICY_SCHEMA = PIM_POLICY_SCHEMA
+    POLICY_SCHEMA = CROSS_ATTEMPT_PIM_POLICY_SCHEMA
     ACTION_PRIOR_CLASS = ZevaPIMEAP
 
     def __init__(self, loader, cte, bank, retrieval, *, max_attempts: int = 4):
@@ -465,3 +466,7 @@ class ZevaEpisodePIMPolicy(ZevaPIMPolicy):
         # Causal order: the action at this boundary cannot read its own BIT.
         self.pim.append_bit(phase, bit)
         return actions
+
+
+# Canonical public name. Keep ZevaPIMPolicy for loading historical checkpoints.
+ZevaCrossAttemptPIMPolicy = ZevaPIMPolicy

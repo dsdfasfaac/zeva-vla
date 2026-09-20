@@ -1,5 +1,7 @@
 {
   "schema": "zeva-cte-eap-pim-experiment-v1",
+  "setting_id": "cross-attempt",
+  "status": "historical-ablation",
   "stage1": {"train": false, "source": "frozen validated CTE epoch40 lineage used by the 61.0% parent"},
   "pim_pairing": {
     "source_subset": "train-only",

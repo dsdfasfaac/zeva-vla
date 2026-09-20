@@ -5,7 +5,7 @@ zeva_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 [[ $(hostname -s) == aigc28 ]] || { echo 'Audited PIM run is restricted to aigc28' >&2; exit 2; }
 
 run=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-pim-20260919
-parent_run=/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-behavior-effect-20260918
+parent_run=${ZEVA_PARENT_RUN_ROOT:-/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-cte-bit-eap-20260918}
 handoff=/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1
 dataset=/data1/dingxin/robotwin-lerobot-sidney-eef16-v1/data
 cte=$parent_run/stage1/cte_epoch_040.pth
@@ -64,7 +64,7 @@ done
 export CUDA_VISIBLE_DEVICES=$(IFS=,; echo "${visible[*]}")
 
 exec /usr/bin/python3 -m torch.distributed.run --standalone --nproc_per_node=8 \
-  "$zeva_root/scripts/train_robotwin_pim_policy.py" \
+  "$zeva_root/scripts/train_robotwin_cross_attempt_pim.py" \
   --dataset-root "$dataset" --cte-checkpoint "$cte" --cte-artifacts "$cte_artifacts" \
   --pim-artifacts "$pim_artifacts" --retrieval-checkpoint "$retrieval" \
   --foundation-checkpoint "$foundation" --parent-stage2-checkpoint "$parent" \

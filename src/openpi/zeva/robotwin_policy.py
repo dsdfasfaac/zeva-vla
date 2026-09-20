@@ -120,7 +120,7 @@ def gaussian_action_prior_nll(
     prior: RobotWinGaussianActionPrior,
     target: torch.Tensor,
 ) -> torch.Tensor:
-    """BehaviorVLA-style NLL: sum over EEF16, then mean over batch and horizon."""
+    """ZeVA EEF16 NLL: sum coordinates, then mean over batch and horizon."""
     if prior.mean.shape != target.shape or prior.log_std.shape != target.shape:
         raise ValueError(
             "Gaussian action-prior tensors and target must have identical shapes, got "
@@ -1845,7 +1845,7 @@ class RobotWinZevaPolicy(nn.Module):
         self.reset(scope="episode")
 
     def configure_full_finetune_stage2(self) -> list[nn.Parameter]:
-        """Freeze ZTE and full-finetune PI0.5 plus Zeva, matching BehaviorVLA."""
+        """Freeze CTE and full-finetune PI0.5 plus ZeVA."""
         self.requires_grad_(False)
         self.foundation.requires_grad_(True)
         modules = (
@@ -2086,7 +2086,7 @@ class RobotWinZevaPolicy(nn.Module):
         """Train the action-prior branch at its deployed strength with PI0.5 frozen.
 
         The causal-context projector is kept identically zero, so this mode
-        isolates the BehaviorVLA-style action-prior residual.  The prior gate
+        isolates the ZeVA action-prior residual.  The prior gate
         is fixed rather than optimized: the zero-initialized prior projector
         still makes step zero exactly equal to the untouched PI0.5, while all
         subsequent projector gradients are trained at the same magnitude used
@@ -2139,7 +2139,7 @@ class RobotWinZevaPolicy(nn.Module):
         prior_gate_probability: float = 0.5,
         prior_injection_horizon: int = ROBOTWIN_ACTION_HORIZON,
     ) -> list[nn.Parameter]:
-        """Tune the PI action path plus only the BehaviorVLA prior residual.
+        """Tune the PI action path plus only the ZeVA prior residual.
 
         This is the conservative v11 variant.  PaliGemma and all Stage 1
         causal/retrieval modules stay frozen; the action expert is allowed to

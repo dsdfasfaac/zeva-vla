@@ -23,7 +23,7 @@ import json
 import math
 from pathlib import Path
 
-from scripts.behavior_effect_validation_contract import (
+from scripts.cte_eap_validation_contract import (
     check_cache_coverage,
     decision_noise_seed,
     enumerate_decisions,

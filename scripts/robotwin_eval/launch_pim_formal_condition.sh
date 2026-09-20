@@ -17,7 +17,7 @@ formal_sha=1b9dbf74bd9d9b8871647a00d6557f84884685d4459065f004bd600a86b1679b
 case "$condition" in
   base)
     expected_host=aigc29; model_ip=172.16.80.163; base_port=19900; reset_scope=episode
-    config=$zeva_root/scripts/robotwin_eval/baseline_base1000_behavior_effect_dev.yml
+    config=$zeva_root/scripts/robotwin_eval/base1000_dev.yml
     label=base1000-formal-multiattempt-user-authorized
     output=$run/eval/formal-multiattempt-base-original10x20-user-authorized-20260920
     physical_ids=(0 1 2 3)

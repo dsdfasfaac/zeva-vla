@@ -1,4 +1,4 @@
-"""Stage2-only training for ZeVA cross-attempt PIM.
+"""Stage2-only training for the ZeVA cross-attempt PIM setting.
 
 The frozen CTE supplies the current BIT exactly as in the validated CTE+EAP
 policy.  PIM is initialized from that policy and trained with label-free,
@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader, Dataset
 import tyro
 
 from openpi.zeva.cte_eap_policy import file_sha
-from openpi.zeva.pim_policy import PIM_POLICY_SCHEMA, ZevaPIMPolicy
+from openpi.zeva.pim_policy import CROSS_ATTEMPT_PIM_POLICY_SCHEMA, ZevaCrossAttemptPIMPolicy
 from openpi.zeva.robotwin_contract import ROBOTWIN_CAMERA_KEYS, prepare_robotwin_pi_image
 from scripts.build_robotwin_pim_artifacts import PIM_ARTIFACT_SCHEMA
 from scripts.train_robotwin_zte import TorchCodecRoboTwinDataset
@@ -62,7 +62,7 @@ def _bounded_trace(row: dict, capacity: int) -> tuple[torch.Tensor, torch.Tensor
     return padded_phase, padded_bit, mask
 
 
-class PIMDecisions(Dataset):
+class CrossAttemptPIMDecisions(Dataset):
     def __init__(self, manifest: Path, cte: dict, pim: dict, split: str):
         if cte["adapter_sha256"] != file_sha(manifest):
             raise ValueError("Dataset adapter differs from the CTE cache.")
@@ -147,14 +147,14 @@ def main(args: Args) -> None:
     pim = torch.load(args.pim_artifacts, map_location="cpu", weights_only=False)
     if pim.get("cte_artifacts_sha256") != cte_sha or not pim.get("label_free"):
         raise ValueError("PIM artifact provenance mismatch.")
-    policy = ZevaPIMPolicy.from_parent_handoff(
+    policy = ZevaCrossAttemptPIMPolicy.from_parent_handoff(
         args.handoff_root, args.foundation_checkpoint, args.cte_checkpoint,
         args.cte_artifacts, args.retrieval_checkpoint, args.parent_stage2_checkpoint,
         device=str(accelerator.device), exploratory_epoch40=args.exploratory_epoch40,
     )
     policy.foundation.model.gradient_checkpointing_enable()
     policy.train()
-    dataset = PIMDecisions(Path(args.dataset_root) / "adapter.json", cte, pim, "train")
+    dataset = CrossAttemptPIMDecisions(Path(args.dataset_root) / "adapter.json", cte, pim, "train")
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers,
                         pin_memory=True, drop_last=True, persistent_workers=args.workers > 0)
     pim_prefixes = ("pim_phase.", "pim_bit.", "pim_query.", "pim_projector.", "pim_to_global.")
@@ -173,7 +173,9 @@ def main(args: Args) -> None:
     accelerator.wait_for_everyone()
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
-        "schema": PIM_POLICY_SCHEMA + "-training-v1", "args": dataclasses.asdict(args),
+        "schema": CROSS_ATTEMPT_PIM_POLICY_SCHEMA + "-training-v1",
+        "setting_id": "cross-attempt",
+        "args": dataclasses.asdict(args),
         "lineage": policy.identity, "global_batch": global_batch, "decision_count": len(dataset),
         "cte_artifacts_sha256": cte_sha, "pim_artifacts_sha256": file_sha(args.pim_artifacts),
         "sampling_schedule": ["matched"] * 5 + ["same_condition_far"] * 2

@@ -192,6 +192,7 @@ def main(args: Args) -> None:
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         "schema": EPISODE_PIM_POLICY_SCHEMA + "-training-v1",
+        "setting_id": "within-episode",
         "args": dataclasses.asdict(args),
         "lineage": policy.identity,
         "global_batch": global_batch,

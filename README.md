@@ -49,24 +49,26 @@ PYTHONPATH=src python3 scripts/verify_robotwin_handoff.py
 
 Current direction: **ZeVA CTE + BIT + PIM + EAP**. CTE is a three-stream causal
 Mamba over vision, the previously executed H15 action and causal state. BIT is
-the current attempt's predicted boundary effect token. PIM retains BIT traces
-from completed attempts in the same episode. EAP supplies a Gaussian mean
-residual inside action-expert embeddings. Full PI0.5 and EAP are trained while
-CTE/task memory/language retrieval remain frozen. The old
-dual-gate/post-diffusion output-residual experiments are not this route.
+the current H15-boundary interaction token. The current PIM retains strictly
+earlier BITs in the same episode, reads them causally before action prediction,
+and appends the current BIT only afterward. EAP supplies a Gaussian mean
+residual inside action-expert embeddings. The validated Parent PI/EAP, CTE,
+task memory, and language retrieval are frozen while Episode-PIM trains. The
+older cross-attempt PIM remains as an explicit historical ablation.
 RoboTwin H50/H15, three cameras, baseline normalization and task-language
-retrieval/true recurrence remain explicit adaptations. Architecture is
-source attribution is separated into [third-party notices](THIRD_PARTY_NOTICES.md).
+retrieval/true recurrence remain explicit adaptations. Source attribution is
+separated into [third-party notices](THIRD_PARTY_NOTICES.md).
 
 Pipeline: fresh pretrained Stage1 (80epochs, batch8) → validation5 gate →
 new train-only memory/recurrent cache → full PI0.5/EAP Stage2 (5000steps,
 global256, PI LR5e-6/new modules5e-5) → validation ablations → disjoint development
 pair → audited frozen formal pair. See [current method](docs/ZEVA_ROBOTWIN_METHOD_CN.md),
-[implementation/status](docs/ZEVA_BEHAVIOR_EFFECT_20260918.md), and
-[fixed configuration](configs/robotwin_behavior_effect_20260918.json). The PIM
-extension is Stage2-only: it starts from the validated 61.0% CTE+BIT+EAP model,
-uses label-free same-task cross-episode BIT pairings, and trains for a fixed
-2000 steps under [its own frozen configuration](configs/robotwin_cte_eap_pim_20260919.json).
+[the two PIM training settings](docs/ZEVA_PIM_TRAINING_SETTINGS.md), and the
+[machine-readable setting registry](configs/robotwin_pim_training_settings.json).
+The current within-episode PIM starts from the validated 61.0% CTE+BIT+EAP
+model, uses label-free causal prefixes from the same train-only episode, and
+trains only PIM for a fixed 2000 steps. The historical cross-attempt setting
+uses separate label-free cross-episode pairings and is retained for reproduction.
 Core real-Mamba and real-data smoke tests passed. The fixed 80-epoch Stage1
 finished and passed its preregistered action/vision/effect gate; its complete
 train-only memory/H15 cache export and independent pre-Stage2 audit also passed.
@@ -85,7 +87,7 @@ gate. All 400 paired videos and seed/instruction/result records passed the
 independent audit. McNemar p=0.2543 and paired-bootstrap 95% CI=[-3,+14]pp, so
 this is a passed engineering gate, not a claim of statistical significance.
 The formal set had historical exposure and the prior old-ZeVA failure
-106/200 (53.0%) remains disclosed. See the [complete paired result](docs/ROBOTWIN_BEHAVIOR_EFFECT_PAIRED_RESULTS_20260919.md).
+106/200 (53.0%) remains disclosed. See the [complete paired result](docs/ROBOTWIN_CTE_BIT_EAP_PAIRED_RESULTS_20260919.md).
 
 ### Historical experiment snapshots (not current architecture or launch instructions)
 
@@ -189,8 +191,8 @@ delta is zero (paired 95% CI −7.5 to +8.0 percentage points); Base is below
 the declared 57% reference floor. Acceptance is false. See the
 [complete ten-task results](docs/ROBOTWIN_FIXED_ANCHOR_PAIRED_RESULTS_20260915.md).
 Stage1's four auxiliary
-metrics still clear their configured reference lines and are not official
-BehaviorVLA gates. The preservation hinge is expert-loss reweighting, not
+metrics still clear their configured reference lines and are not delivery
+gates. The preservation hinge is expert-loss reweighting, not
 teacher-action distillation or a guarantee of preserved success rate. See the
 [evidence and next-step boundaries](docs/ZTEV2_POST_EVAL_DIAGNOSIS_20260912.md).
 
@@ -206,8 +208,7 @@ audit also showed that the former Stage 1 representation did not add candidate
 ranking information. These results reject that implementation and proxy, not
 the goal of learning an action-effect representation.
 
-ZTE v2 follows the three-stream temporal factorization of BehaviorVLA while
-retaining ZeVA's action-effect semantics:
+ZTE v2 uses ZeVA's three-stream temporal factorization and action-effect semantics:
 
 - Separate causal Mamba streams encode visual state, the ordered H15 EEF16
   chunk, and the observed visual effect. The action stream may not mean-pool the
@@ -218,7 +219,7 @@ retaining ZeVA's action-effect semantics:
   after-image is already available at that replanning boundary, but future
   images/actions are not. Legacy checkpoints and the `pre` control retain the
   old next-action head. This new supervision path is a hypothesis under test,
-  not a demonstrated improvement or a verbatim BehaviorVLA implementation.
+  not a demonstrated improvement.
 - The representation is factorized into an episode-level task prototype,
   recurrent local phase, and action-effect token. Language is permitted in
   `B0`, but every sensorimotor representation claim must also pass a
@@ -229,8 +230,7 @@ retaining ZeVA's action-effect semantics:
 - The current integration target retains the existing action-expert-side dual
   residual: memory/context conditioning and a phase-conditioned Gaussian prior
   modify action-expert inputs, not final EEF16 outputs. The before-VLM prefix
-  engineering smoke is a separate candidate, not the selected route or proof
-  of BehaviorVLA-equivalent injection.
+  engineering smoke is a separate candidate, not the selected route.
 - PI0.5 still returns H50 and RoboTwin still executes H15 before replanning.
 
 Stage 1 diagnostics guide representation improvements; the delivery criterion
@@ -247,8 +247,8 @@ training-mode test. These are correctness tests, not a Stage 1 capability pass.
 The v2 smoke entry point is `scripts/run_robotwin_zte_v2.sh`; the historical
 Stage 1/2 commands below do not launch the redesigned method.
 
-The active loss audit found another non-equivalence with BehaviorVLA: its
-prediction losses sum coordinates before averaging valid times, while earlier
+The active loss audit found that the selected reference reduction sums
+coordinates before averaging valid times, while earlier
 v2 pilots averaged coordinate-wise SmoothL1. The explicit `vector_mse` control
 now sums feature/EEF coordinates and averages valid transitions (and H15 for
 actions), retaining the same external weights. It is not a capability pass.
@@ -263,7 +263,7 @@ Use the exact LeRobot source and dependency overlays contained in the handoff.
 Install only the bundled Mamba kernels into the Zeva-owned dependency directory:
 
 ```bash
-cd /mnt/100T/users/dingxin/VLA/zeva-vla/ICML26-BehaviorVLA
+cd /mnt/100T/users/dingxin/VLA/zeva-vla
 bash scripts/setup_robotwin_zeva_runtime.sh
 ```
 
@@ -308,9 +308,9 @@ manifest.
 ## Historical three-stage training pipeline (before 2026-09-18)
 
 The commands and variants in this section are retained for reproduction of old
-results, not for the current BehaviorVLA+effect run. The current entrypoints,
+results, not for the current CTE+BIT+EAP run. The current entrypoints,
 fixed Stage1/Stage2 settings and progress are in
-[the new experiment record](docs/ZEVA_BEHAVIOR_EFFECT_20260918.md).
+[the current method record](docs/ZEVA_ROBOTWIN_METHOD_CN.md).
 
 Latest completed paired evaluation (2026-09-12): **Base 54.5% (109/200),
 ZeVA 55.0% (110/200), Anchor 50.5% (101/200)**. All 600 videos and exact
@@ -453,7 +453,7 @@ CUDA_VISIBLE_DEVICES=0 python3 scripts/export_robotwin_goal_embeddings.py \
 The formal 8-H100 Stage 1 run is:
 
 ```bash
-cd /mnt/100T/users/dingxin/VLA/zeva-vla/ICML26-BehaviorVLA
+cd /mnt/100T/users/dingxin/VLA/zeva-vla
 bash scripts/train_robotwin_zte_8gpu.sh \
   --goal-embeddings /data1/dingxin/zeva-runs/robotwin-v5-h15-tasklang/pi05_task_embeddings.pt \
   --save-dir /data1/dingxin/zeva-runs/robotwin-v5-h15-tasklang/stage1-zte \
@@ -922,7 +922,7 @@ retraining instead of another blind shared-scale sweep.
 
 v6 followed that preregistered diagnosis.  It exactly zeroed the context
 projector and restores the Gaussian action prior to an absolute `0.5` gate,
-matching BehaviorVLA's inference guidance magnitude while retaining the
+matching the selected reference guidance magnitude while retaining the
 trained task/phase router, task-language retrieval, and recurrent H15 phase.
 PI0.5, ZTE/Mamba, the causal bank, and retrieval remain frozen.  On two
 disjoint closed-loop validation splits the global candidate scored `50/80`
@@ -1184,7 +1184,7 @@ tasks use scale zero.  The subsequent formal run is stored in
 `114/200` Base evidence.
 
 ```bash
-cd /mnt/100T/users/dingxin/VLA/zeva-vla/ICML26-BehaviorVLA
+cd /mnt/100T/users/dingxin/VLA/zeva-vla
 nohup bash scripts/robotwin_eval/launch_closed_loop_residual_calibration_v5.sh \
   > /mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-v5-h15-tasklang/eval/advantage10-safe-router-v5-multisplit/launcher.log \
   2>&1 < /dev/null &
