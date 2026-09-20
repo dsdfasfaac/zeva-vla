@@ -35,4 +35,4 @@
 
 新的disjoint单次开发集从absolute seed `3000000`起逐任务冻结最早8个expert-valid样本，manifest SHA为 `3160b039b7c571850ef8187f61818c0aaeaa0a8ebc88c8c189b1cd8fcdc86103`，与原formal、seed1000000开发集和seed2000000 PIM开发集均零交叉。三路在完全相同的80个seed/instruction上各执行一次并保存80个视频：Base `40/80=50.0%`，Parent `42/80=52.5%`，Episode-PIM `49/80=61.25%`。Episode-PIM相对Base为 `+9/80=+11.25pp`，相对Parent为 `+7/80=+8.75pp`，通过“严格高于Base和Parent”的固定开发gate。
 
-独立三方审计报告保存为 `/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-episode-pim-20260920/eval/development-singleattempt-three-way-seed3000000.json`。该结果仍是post-formal开发证据，不能改写此前正式结论，也未使用正式成功标签选择checkpoint、任务、seed或gate。
+独立三方审计报告保存为 `/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-episode-pim-20260920/eval/development-singleattempt-three-way-seed3000000.json`，SHA256为 `17fdf8d5156c5b97673152d5f5fb6924fb7a147145e8f7c5df60112359a1a86e`。该结果仍是post-formal开发证据，不能改写此前正式结论，也未使用正式成功标签选择checkpoint、任务、seed或gate。
