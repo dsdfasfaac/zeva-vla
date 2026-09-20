@@ -87,7 +87,7 @@ class SelfAttention(nn.Module):
             if query.is_cuda:
                 # PyTorch 2.7.1's automatic Flash path is unstable for the
                 # large batched shapes used here. The efficient fused backend
-                # remains linear-memory and is stable on H100.
+                # remains linear-memory and is stable on modern accelerators.
                 with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
                     attended = self._scaled_dot_product_attention(
                         query,

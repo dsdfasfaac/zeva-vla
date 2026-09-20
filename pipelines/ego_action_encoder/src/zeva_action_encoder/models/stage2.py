@@ -6,10 +6,12 @@ import copy
 from dataclasses import dataclass
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
+from torch import nn
 
 from zeva_action_encoder.models.stage1 import Stage1Model
-from zeva_action_encoder.models.univla_blocks import SpatialTransformer, SpatioTemporalTransformer
+from zeva_action_encoder.models.univla_blocks import SpatialTransformer
+from zeva_action_encoder.models.univla_blocks import SpatioTemporalTransformer
 
 
 @dataclass(frozen=True)
@@ -352,9 +354,7 @@ class Stage2Model(nn.Module):
             self.TASK,
             task_queries,
         )
-        encoded = self.task_encoder(
-            torch.cat([environment_queries, visual, task_queries], dim=2)
-        )
+        encoded = self.task_encoder(torch.cat([environment_queries, visual, task_queries], dim=2))
         visual_length = visual.shape[2]
         future_environment = encoded[:, 1, : self.config.num_environment_tokens]
         task_start = self.config.num_environment_tokens + visual_length
@@ -462,9 +462,7 @@ class Stage2Model(nn.Module):
         elif environment_tokens is None:
             raise ValueError("external-teacher Stage 2 requires environment_tokens")
         decoder_environment = (
-            environment_tokens.detach()
-            if self.config.environment_mode == "joint_query_v1"
-            else environment_tokens
+            environment_tokens.detach() if self.config.environment_mode == "joint_query_v1" else environment_tokens
         )
         reconstructed = self.decode_future(start_features, decoder_environment, task_tokens)
         return Stage2Output(
@@ -513,9 +511,7 @@ class Stage2Model(nn.Module):
         )
         environments = torch.cat([environment_ab, environment_bc, environment_ac], dim=0)
         decoder_environments = (
-            environments.detach()
-            if self.config.environment_mode == "joint_query_v1"
-            else environments
+            environments.detach() if self.config.environment_mode == "joint_query_v1" else environments
         )
         reconstructed = self.decode_future(starts, decoder_environments, tasks)
         reconstructed_ab, reconstructed_bc, reconstructed_ac = reconstructed.split(batch_size, dim=0)
@@ -551,8 +547,7 @@ class Stage2Model(nn.Module):
         mismatches = [name for name, (actual, source) in expected.items() if actual != source]
         if mismatches:
             details = ", ".join(
-                f"{name}: stage2={expected[name][0]}, stage1={expected[name][1]}"
-                for name in mismatches
+                f"{name}: stage2={expected[name][0]}, stage1={expected[name][1]}" for name in mismatches
             )
             raise ValueError(f"Stage 1 encoder is incompatible with Stage 2: {details}")
         if stage1.vector_quantizer is not None:
@@ -594,6 +589,16 @@ class Stage2Model(nn.Module):
         self.environment_up.load_state_dict(stage1.environment_up.state_dict())
         self.decoder.load_state_dict(stage1.decoder.state_dict())
         self.decoder_modality_embedding.weight.copy_(stage1.modality_embedding.weight)
+
+    def initialize_encoder_from_environment_encoder(self, encoder: Stage1Model) -> None:
+        """Initialize the task encoder from the released environment encoder."""
+
+        self.initialize_encoder_from_stage1(encoder)
+
+    def initialize_decoder_from_environment_encoder(self, encoder: Stage1Model) -> None:
+        """Initialize the task decoder from the released environment encoder."""
+
+        self.initialize_decoder_from_stage1(encoder)
 
     def _validate_visual_pair(
         self,

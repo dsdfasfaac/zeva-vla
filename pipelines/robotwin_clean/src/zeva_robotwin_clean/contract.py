@@ -71,8 +71,12 @@ def absolute_to_chunk_start_eef16(
         result[..., output_position] = (
             targets[..., source_position] - current[..., source_position][..., None, :]
         )
-        start_rotation = quaternion_xyzw_to_rotation_matrix(current[..., source_quaternion])
-        future_rotation = quaternion_xyzw_to_rotation_matrix(targets[..., source_quaternion])
+        start_rotation = quaternion_xyzw_to_rotation_matrix(
+            current[..., source_quaternion]
+        ).astype(np.float64)
+        future_rotation = quaternion_xyzw_to_rotation_matrix(
+            targets[..., source_quaternion]
+        ).astype(np.float64)
         spatial_delta = future_rotation @ np.swapaxes(start_rotation, -1, -2)[..., None, :, :]
         result[..., output_quaternion] = rotation_matrix_to_quaternion_xyzw(spatial_delta)
         result[..., output_gripper] = targets[..., source_gripper]

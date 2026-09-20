@@ -1,34 +1,82 @@
-# Ego action encoder
+# Zeva-Ego action encoder
 
-This package contains the model, objective, and inference logic for ZeVA's
-two-stage visual action encoder. It is intentionally independent of the ICCL
-implementation in `src/openpi/zeva`.
+This package contains the two-stage visual action encoder used for Zeva-Ego
+egocentric mid-training. It is independent of the ICCL implementation in
+`src/openpi/zeva`.
 
-The public boundary is code-only. This directory does not include video
-datasets, dataset acquisition or cleaning tools, checkpoints, optimizer state,
-or machine-specific launch files.
+The public boundary is code-only. It excludes video datasets, data acquisition
+and cleaning tools, checkpoints, optimizer state, and machine-specific launch
+files.
 
-## Interfaces
+## Method contract
 
-- Stage 1 consumes an RGB transition `[B,2,3,H,W]`, an action chunk
-  `[B,L,D]`, and boolean step/dimension masks. It learns an environment
-  bottleneck by reconstructing the future visual features.
-- Stage 2 consumes triplets `[B,3,3,H,W]` and three aligned action chunks
-  `[B,3,L,D]`. It learns task tokens while preserving the Stage-1 environment
-  representation.
-- Inference consumes already-sampled RGB frame pairs and returns task tokens
-  plus environment tokens. Frame selection, temporal slowdown, and resizing
-  remain the caller's responsibility.
+The **environment encoding stage** consumes an RGB transition
+`[B,2,3,H,W]`, an action chunk `[B,L,D]`, and boolean step/dimension masks. It
+learns four environment tokens while reconstructing the future visual
+features.
 
-For Ego videos, we recommend a one-second interval **after temporal slowdown**.
-DODO is not slowed down, so one second is one second in the original clip.
-These tokens are learned transition representations, not robot commands.
+The **task encoding stage** consumes aligned frame triplets
+`[B,3,3,H,W]` and transition actions `[B,3,L,D]`. It learns 16 task tokens
+while preserving the environment representation learned by the first stage.
+
+Inference consumes already-selected RGB frame pairs and returns task and
+environment tokens. Frame selection, temporal resampling, and resizing remain
+the caller's responsibility. A one-second interval after temporal resampling
+is the recommended default. The tokens represent visual transitions; they are
+not executable robot commands.
 
 ## Installation
 
 ```bash
 python -m pip install -e 'pipelines/ego_action_encoder[vision,test]'
 ```
+
+The verified release environment uses Python 3.11, PyTorch 2.7.1, and DINOv2
+ViT-B/14 with registers. The configuration files pin the DINOv2 source
+revision used by the release recipe.
+
+## Dataset hook
+
+Training deliberately does not assume a storage format. Provide a callable
+using `package.module:function`:
+
+```python
+def make_dataset(data_config: dict, stage: str):
+    # Return a torch Dataset. Stage is either environment_encoding or
+    # task_encoding. See zeva_action_encoder.contracts for required tensors.
+    return dataset
+```
+
+The CLI adds `distributed_rank` and `distributed_world_size` to `data_config`
+before calling the factory. Multi-source task training should assign one source
+to each rank group so every local minibatch remains source-homogeneous.
+
+Environment-encoding samples follow `EnvironmentEncodingBatch`.
+Task-encoding samples follow `TaskEncodingBatch`; they must additionally
+contain an integer `source_index`. Every task-encoding minibatch must be
+homogeneous in `source_index`.
+
+## Train
+
+The release recipes contain model, loss, optimizer, scheduler, batch, and
+checkpoint settings without data paths:
+
+```bash
+export ZEVA_EGO_DATASET_FACTORY=my_project.ego_data:make_dataset
+
+torchrun --standalone --nproc-per-node=8 \
+  pipelines/ego_action_encoder/scripts/train_environment_encoder.py \
+  --config pipelines/ego_action_encoder/configs/environment_encoding.release.json
+
+torchrun --standalone --nproc-per-node=16 \
+  pipelines/ego_action_encoder/scripts/train_task_encoder.py \
+  --config pipelines/ego_action_encoder/configs/task_encoding.release.json \
+  --environment-checkpoint /path/to/environment-encoding-step.pt
+```
+
+Pass `--resume /path/to/checkpoint.pt` to restore model, optimizer, scheduler,
+and optimizer-step state. Checkpoints use the versioned
+`zeva-ego-action-encoder-v1` schema and contain no host or dataset identity.
 
 ## Encode RGB pairs
 
@@ -37,30 +85,10 @@ Prepare a uint8 NPY array shaped `[N,2,H,W,3]` or `[N,2,3,H,W]`, then run:
 ```bash
 python pipelines/ego_action_encoder/scripts/encode_pairs.py \
   --input /path/to/rgb_pairs.npy \
-  --checkpoint /path/to/stage2_checkpoint.pt \
+  --checkpoint /path/to/task-encoding-checkpoint.pt \
   --output /path/to/new_output
 ```
 
-The checkpoint must contain `model` and `stage2_model_config`. DINOv2 is
-loaded by the vision wrapper; applications that need offline loading can set
-PyTorch's model cache or inject a backbone through the Python API.
-
-## Training integration
-
-The package deliberately does not prescribe a dataset format. Convert each
-prepared batch to `Stage1Batch` or `Stage2Batch`, call `stage1_train_step` or
-`stage2_train_step`, then pass the returned `.total` tensor to
-`optimize_one_step`. This keeps the learned method reproducible without
-embedding private storage layouts or data engineering infrastructure.
-
-```python
-from zeva_action_encoder.training import optimize_one_step, stage1_train_step
-
-losses = stage1_train_step(
-    model=model,
-    visual_encoder=vision,
-    batch=batch,
-    loss_config=loss_config,
-)
-value = optimize_one_step(loss=losses.total, model=model, optimizer=optimizer)
-```
+The entry point does not crop, resize, temporally resample, or select frames.
+DINOv2 is loaded by the vision wrapper; offline applications can populate
+PyTorch's hub cache or inject a backbone through the Python API.

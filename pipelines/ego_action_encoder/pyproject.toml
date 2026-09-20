@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zeva-action-encoder"
 version = "0.1.0"
-description = "Action-token encoder models and training logic used by ZeVA"
+description = "Action-token encoder models and training logic used by Zeva-Ego"
 requires-python = ">=3.10"
 dependencies = [
-    "numpy>=1.24",
-    "torch>=2.2",
+    "numpy>=1.24,<2.0",
+    "torch==2.7.1",
 ]
 
 [project.optional-dependencies]

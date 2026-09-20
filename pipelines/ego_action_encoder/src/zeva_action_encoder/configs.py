@@ -39,3 +39,7 @@ class Stage1AuxiliaryTargetStats:
     action_endpoint_std: tuple[float, ...]
     camera_motion_mean: tuple[float, ...] | None = None
     camera_motion_std: tuple[float, ...] | None = None
+
+
+EnvironmentEncodingLossConfig = Stage1LossConfig
+EnvironmentEncodingAuxiliaryTargetStats = Stage1AuxiliaryTargetStats

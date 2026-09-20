@@ -7,13 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import torch
 from numpy.typing import NDArray
+import torch
 from torch import Tensor
 
-from zeva_action_encoder.models.stage2 import Stage2Model, Stage2ModelConfig
-from zeva_action_encoder.models.vision import DinoV2Config, FrozenDinoV2
-
+from zeva_action_encoder.models import TaskEncoder
+from zeva_action_encoder.models import TaskEncoderConfig
+from zeva_action_encoder.models.vision import DinoV2Config
+from zeva_action_encoder.models.vision import FrozenDinoV2
 
 DEFAULT_IMAGE_SIZES = (
     (196, 350),
@@ -39,10 +40,10 @@ def load_encoder(
     dino_config: DinoV2Config | None = None,
     dino_backbone: torch.nn.Module | None = None,
     allowed_image_sizes: tuple[tuple[int, int], ...] = DEFAULT_IMAGE_SIZES,
-) -> tuple[Stage2Model, FrozenDinoV2]:
-    """Load a Stage-2 checkpoint and its frozen visual backbone.
+) -> tuple[TaskEncoder, FrozenDinoV2]:
+    """Load a task-encoding checkpoint and its frozen visual backbone.
 
-    The checkpoint must contain ``model`` and ``stage2_model_config``. The
+    The versioned checkpoint contains ``model`` and ``model_config``. The
     caller controls where the checkpoint and optional DINO checkout live.
     """
 
@@ -55,27 +56,38 @@ def load_encoder(
     )
     if not isinstance(payload, dict):
         raise TypeError("encoder checkpoint must be a dictionary")
-    raw_config = payload.get("stage2_model_config")
+    if payload.get("schema") == "zeva-ego-action-encoder-v1":
+        if payload.get("stage") != "task_encoding":
+            raise ValueError("inference requires a task-encoding checkpoint")
+        raw_config = payload.get("model_config")
+    else:
+        # Compatibility with the inference-only checkpoint released before the
+        # versioned public training contract.
+        raw_config = payload.get("stage2_model_config")
     state = payload.get("model")
     if not isinstance(raw_config, dict) or not isinstance(state, dict):
-        raise ValueError("checkpoint must contain model and stage2_model_config")
-    config = Stage2ModelConfig(**raw_config)
-    model = Stage2Model(config)
+        raise ValueError("checkpoint must contain model and task-encoding model configuration")
+    config = TaskEncoderConfig(**raw_config)
+    model = TaskEncoder(config)
     model.load_state_dict(state, strict=True)
     model.configure_execution(attention_backend="sdpa", activation_checkpointing=False)
     model.to(target).eval()
-    vision = FrozenDinoV2(
-        dino_config or DinoV2Config(),
-        backbone=dino_backbone,
-        allowed_image_sizes=allowed_image_sizes,
-    ).to(target).eval()
+    vision = (
+        FrozenDinoV2(
+            dino_config or DinoV2Config(),
+            backbone=dino_backbone,
+            allowed_image_sizes=allowed_image_sizes,
+        )
+        .to(target)
+        .eval()
+    )
     return model, vision
 
 
 def encode_tensor_pairs(
     pairs: Tensor,
     *,
-    model: Stage2Model,
+    model: TaskEncoder,
     vision: FrozenDinoV2,
 ) -> EncodedTransitions:
     """Encode float RGB pairs shaped ``[B,2,3,H,W]`` in ``[0,1]``."""

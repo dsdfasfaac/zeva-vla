@@ -23,7 +23,11 @@ def test_chunk_start_relative_action() -> None:
     result = absolute_to_chunk_start_eef16(state, future)
     np.testing.assert_allclose(result[0, :3], (0.1, -0.2, 0.3), atol=1e-6)
     np.testing.assert_allclose(result[1, 7:10], (-0.4, 0.5, 0.6), atol=1e-6)
-    np.testing.assert_allclose(result[:, 3:7], (0.0, 0.0, 0.0, 1.0), atol=1e-6)
+    np.testing.assert_allclose(
+        result[:, 3:7],
+        np.tile((0.0, 0.0, 0.0, 1.0), (2, 1)),
+        atol=1e-6,
+    )
 
 
 def test_gripper_direction() -> None:
