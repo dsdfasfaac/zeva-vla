@@ -55,7 +55,7 @@ class Policy(BasePolicy):
         self._metadata = metadata or {}
         self._is_pytorch_model = is_pytorch
         self._pytorch_device = pytorch_device
-        self.replan_steps = 5 # 5 for libero
+        self.replan_steps = 5
         self._action_norm_stats = action_norm_stats
 
         if self._is_pytorch_model:

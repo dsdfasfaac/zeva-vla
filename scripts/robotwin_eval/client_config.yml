@@ -1,6 +1,0 @@
-policy_name: zeva_policy
-task_name: adjust_bottle
-task_config: zeva_clean
-ckpt_setting: stage3-best-stage2-027000
-instruction_type: unseen
-seed: 0

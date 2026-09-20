@@ -29,8 +29,5 @@ def main(handoff_root: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--handoff-root",
-        default="/mnt/100T/users/huangbingjia/egoscalecausalclip/handoffs/robotwin-memory-baseline-v1",
-    )
+    parser.add_argument("--handoff-root", required=True)
     main(parser.parse_args().handoff_root)

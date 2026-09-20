@@ -58,11 +58,6 @@ def load_model(config: _config.TrainConfig, ckpt_path: str, device: str):
             schema_memory_path=None,
             causal_encoder_ckpt=None,
             causal_adapter_ckpt=None,
-            use_behavior=None,
-            use_apn=None,
-            retrieval_ckpt=None,
-            behavior_encoder_ckpt=None,
-            memory_bank_path=None,
         )
 
     model = _pi0_pytorch.PI0Pytorch(model_cfg).to(device)
@@ -231,12 +226,3 @@ def main(args: Args):
 
 if __name__ == "__main__":
     main(tyro.cli(Args))
-
-
-''''
-CUDA_VISIBLE_DEVICES=2 python scripts/extract_source.py \
-    --config-name pi05_libero \
-    --ckpt-path /path/to/zeva/checkpoint \
-    --batch-size 32 \
-    --save-path /path/to/libero/source_features.pt
-'''

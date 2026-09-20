@@ -1,4 +1,0 @@
-/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin/.venv_robotwin/lib/python3.10/site-packages/sapien/__init__.py:2: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914/renderer-formal-health-20260914T1534/formal-renderer-smoke.py:30: DeprecationWarning: Engine is deprecated. use sapien.Scene() directly.
-  engine = sapien_core.Engine()

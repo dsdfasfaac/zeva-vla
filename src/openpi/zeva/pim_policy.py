@@ -1,9 +1,8 @@
 """Persistent interaction memory variants for ZeVA CTE + BIT + EAP.
 
-The current method uses :class:`ZevaEpisodePIMPolicy`: BIT is short-term state
-at the current H15 boundary, while PIM is a causal long-term history of earlier
-BITs from the same episode.  The older cross-attempt policy remains loadable so
-that historical checkpoints and negative results stay reproducible.
+The within-episode policy treats BIT as short-term boundary state and PIM as a
+causal long-term history of earlier BITs. The cross-attempt variant commits a
+completed attempt's BIT trace and exposes it to the next attempt.
 """
 from __future__ import annotations
 
@@ -236,7 +235,6 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         parent_stage2_checkpoint,
         *,
         device="cuda",
-        exploratory_epoch40=False,
     ):
         """Create a new PIM policy from the already validated Stage2 parent."""
         from openpi.zeva.robotwin_policy import RobotWinZevaPolicy
@@ -244,7 +242,7 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         bank = torch.load(artifacts, map_location="cpu", weights_only=False)
         if bank["cte_sha256"] != file_sha(cte_checkpoint):
             raise ValueError("CTE and task memory SHA differ.")
-        cte = load_cte(cte_checkpoint, device, exploratory_epoch40=exploratory_epoch40)
+        cte = load_cte(cte_checkpoint, device)
         loader = RobotWinZevaPolicy.from_handoff(
             handoff,
             foundation_checkpoint=foundation_checkpoint,
@@ -265,10 +263,10 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         adapter = torch.load(parent / "zeva_adapter.pth", map_location=device, weights_only=False)
         if adapter.get("identity") != expected_parent_identity:
             raise ValueError("Parent Stage2 is not the validated CTE+EAP lineage.")
-        parent_state = adapter.get("eap", adapter.get("pbd"))
+        parent_state = adapter.get("eap")
         if parent_state is None:
             raise ValueError("Parent Stage2 has no EAP adapter state.")
-        incompatible = policy.pbd.load_state_dict(parent_state, strict=False)
+        incompatible = policy.eap.load_state_dict(parent_state, strict=False)
         allowed = ("pim_phase.", "pim_bit.", "pim_query.", "pim_projector.", "pim_to_global.")
         if incompatible.unexpected_keys or any(not key.startswith(allowed) for key in incompatible.missing_keys):
             raise ValueError(f"Unexpected parent adapter mismatch: {incompatible}")
@@ -294,12 +292,11 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         stage2_checkpoint,
         *,
         device="cuda",
-        exploratory_epoch40=False,
     ):
         from openpi.zeva.robotwin_policy import RobotWinZevaPolicy
 
         bank = torch.load(artifacts, map_location="cpu", weights_only=False)
-        cte = load_cte(cte_checkpoint, device, exploratory_epoch40=exploratory_epoch40)
+        cte = load_cte(cte_checkpoint, device)
         loader = RobotWinZevaPolicy.from_handoff(
             handoff,
             foundation_checkpoint=foundation_checkpoint,
@@ -321,7 +318,7 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         }
         if any(identity.get(key) != value for key, value in expected_core.items()):
             raise ValueError("PIM Stage2 lineage mismatch.")
-        policy.pbd.load_state_dict(adapter["eap"], strict=True)
+        policy.eap.load_state_dict(adapter["eap"], strict=True)
         load_model(policy.foundation, str(folder / "model.safetensors"), strict=True)
         policy.identity = identity
         return policy.eval()
@@ -338,7 +335,7 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         self._cache = None
         self._global_token = None
         self.memory.last_diagnostics = []
-        self.pbd.clear()
+        self.eap.clear()
         self.foundation.reset()
 
     def forward(
@@ -354,7 +351,7 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         include_pim=True,
     ):
         global_token = self.memory(task_language)
-        prior = self.pbd.activate(
+        prior = self.eap.activate(
             global_token,
             phase.detach(),
             effect.detach(),
@@ -366,10 +363,10 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         try:
             output = self.foundation(processed)
             flow = output[0] if isinstance(output, tuple) else output
-            nll = self.pbd.prior_loss(prior, processed["action"])
+            nll = self.eap.prior_loss(prior, processed["action"])
             return flow.mean() + nll, {"flow": flow.mean().detach(), "nll": nll.detach()}
         finally:
-            self.pbd.clear()
+            self.eap.clear()
 
     @torch.no_grad()
     def predict_action_chunk(self, processed, *, task, executed_actions=None, include_pim=True):
@@ -393,7 +390,7 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         if self._global_token is None:
             self._global_token = self.memory(self.language(task))
         pim_phase, pim_bit = self.pim.entries()
-        self.pbd.activate(
+        self.eap.activate(
             self._global_token,
             phase,
             bit,
@@ -404,7 +401,7 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         try:
             actions = self.foundation.predict_action_chunk(processed)
         finally:
-            self.pbd.clear()
+            self.eap.clear()
         self.pim.append_bit(phase, bit)
         return actions
 
@@ -433,7 +430,7 @@ class ZevaEpisodePIMPolicy(ZevaPIMPolicy):
         self._cache = None
         self._global_token = None
         self.memory.last_diagnostics = []
-        self.pbd.clear()
+        self.eap.clear()
         self.foundation.reset()
 
     @torch.no_grad()
@@ -455,18 +452,18 @@ class ZevaEpisodePIMPolicy(ZevaPIMPolicy):
         if self._global_token is None:
             self._global_token = self.memory(self.language(task))
         pim_phase, pim_bit = self.pim.entries()
-        self.pbd.activate(
+        self.eap.activate(
             self._global_token, phase, bit,
             pim_phase=pim_phase, pim_bit=pim_bit, include_pim=include_pim,
         )
         try:
             actions = self.foundation.predict_action_chunk(processed)
         finally:
-            self.pbd.clear()
+            self.eap.clear()
         # Causal order: the action at this boundary cannot read its own BIT.
         self.pim.append_bit(phase, bit)
         return actions
 
 
-# Canonical public name. Keep ZevaPIMPolicy for loading historical checkpoints.
+# Explicit names for the two supported PIM scopes.
 ZevaCrossAttemptPIMPolicy = ZevaPIMPolicy

@@ -1,9 +1,0 @@
-{
-  "schema": "zeva-robotwin-task-subset-v1",
-  "name": "zeva-native-runtime-closed-loop-gate3",
-  "task_names": [
-    "beat_block_hammer",
-    "pick_dual_bottles",
-    "stamp_seal"
-  ]
-}

@@ -191,9 +191,6 @@ class PI0Pytorch(nn.Module):
 
         self.use_zeva = config.use_zeva
         self.use_action_prior = config.use_action_prior
-        # Compatibility for external OpenPI callers that inspect these flags.
-        self.use_behavior = self.use_zeva
-        self.use_apn = self.use_action_prior
         self.schema_dim = config.schema_dim
         self.action_horizon = config.action_horizon
 
@@ -298,7 +295,7 @@ class PI0Pytorch(nn.Module):
             raise KeyError(f"Schema entry is missing {primary!r}: {item.keys()}")
 
         keys = torch.stack([get_field(item, "schema_key", "retrieval_key") for item in memory])
-        values = torch.stack([get_field(item, "task_schema", "behavior_value") for item in memory])
+        values = torch.stack([get_field(item, "task_schema", "interaction_value") for item in memory])
         if values.shape[-1] != self.schema_dim:
             raise ValueError(f"Task-schema dimension {values.shape[-1]} does not match {self.schema_dim}.")
         max_episode = max(item["episode_idx"] for item in memory)
