@@ -1202,6 +1202,17 @@ calibration evidence, and an independent final audit under:
 
 ## Code map
 
+Two method components are kept outside the ICCL implementation so they can be
+used independently:
+
+- [`pipelines/ego_action_encoder`](pipelines/ego_action_encoder): the two-stage
+  visual action encoder, training objectives, and RGB-pair inference API.
+- [`pipelines/robotwin_clean`](pipelines/robotwin_clean): the clean-only
+  RoboTwin Joint14 / chunk-start-relative EEF16 training boundary.
+
+Both directories are code-only. They expect caller-provided checkpoints and
+already-prepared data, and do not change `src/openpi/zeva`.
+
 ```text
 src/openpi/zeva/robotwin_contract.py       frozen handoff and mean-std validation
 src/openpi/zeva/robotwin_policy.py         exact PI0.5 wrapper and causal injection

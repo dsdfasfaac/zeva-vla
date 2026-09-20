@@ -1,0 +1,24 @@
+{
+  "dataset": {
+    "split": "Clean",
+    "state": "joint14",
+    "images": [
+      "cam_high",
+      "cam_left_wrist",
+      "cam_right_wrist"
+    ],
+    "action": "chunk_start_relative_eef16",
+    "action_horizon": 50,
+    "gripper": "absolute_1_open",
+    "sampling": "natural"
+  },
+  "policy": {
+    "initializer": "/path/to/pi05_or_ego_mid_trained_checkpoint",
+    "chunk_size": 50,
+    "n_action_steps": 50
+  },
+  "training": {
+    "steps": 60000,
+    "seed": 0
+  }
+}
