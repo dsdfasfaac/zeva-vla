@@ -68,7 +68,9 @@ torchrun --standalone --nproc-per-node=8 \
   pipelines/ego_action_encoder/scripts/train_environment_encoder.py \
   --config pipelines/ego_action_encoder/configs/environment_encoding.release.json
 
-torchrun --standalone --nproc-per-node=16 \
+# Run this command on both 8-GPU nodes, with node rank 0 and 1 respectively.
+torchrun --nnodes=2 --nproc-per-node=8 \
+  --node-rank=<0-or-1> --master-addr=<node-0-address> --master-port=29500 \
   pipelines/ego_action_encoder/scripts/train_task_encoder.py \
   --config pipelines/ego_action_encoder/configs/task_encoding.release.json \
   --environment-checkpoint /path/to/environment-encoding-step.pt

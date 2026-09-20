@@ -63,12 +63,20 @@ output paths. It records the complete 60k-step training recipe.
 
 ```bash
 export ZEVA_ROBOTWIN_DATASET_FACTORY=my_project.robotwin:make_datasets
-python pipelines/robotwin_clean/scripts/train.py \
+python -m accelerate.commands.launch \
+  --num_machines 1 --num_processes 8 --mixed_precision no \
+  pipelines/robotwin_clean/scripts/train.py \
   --config_path=pipelines/robotwin_clean/configs/robotwin_clean.release.json
 ```
 
 Resume uses the upstream LeRobot checkpoint and `--resume=true`; no custom
 optimizer or checkpoint implementation is inserted.
+
+The initializer's policy preprocessor also owns its tokenizer reference. On
+offline clusters, cache that tokenizer in advance or replace its
+`tokenizer_name` with a local Transformers tokenizer directory. For faster
+distributed startup, stage the initializer and resume checkpoint on node-local
+storage before launching all ranks.
 
 ## Evaluate
 
