@@ -1,46 +1,39 @@
 {
-  "schema": "zeva-pim-training-settings-v1",
-  "default_setting": "within-episode",
-  "shared_parent": "CTE+BIT+EAP step5000",
-  "settings": {
-    "cross-attempt": {
-      "status": "historical-ablation",
-      "memory_scope": "completed attempts in the same episode",
-      "read_contract": "attempt 1 has empty PIM; later attempts read committed BIT traces",
-      "write_contract": "commit the current attempt BIT trace only at attempt reset",
-      "reset_contract": "clear PIM at episode reset",
-      "training_pairs": "label-free train-only same-task histories from different episodes",
-      "trainable": ["PI", "EAP", "PIM after warmup"],
+  "schema": "zeva-robotwin-training-v1",
+  "parent": {
+    "components": ["CTE", "BIT", "EAP"],
+    "steps": 5000,
+    "global_batch": 256,
+    "foundation_lr": 0.000005,
+    "eap_lr": 0.00005,
+    "entrypoint": "scripts/robotwin/train_cte_eap.py"
+  },
+  "pim": {
+    "cross_attempt": {
+      "memory_scope": "completed attempts in the current episode",
+      "read": "empty on the first attempt; later attempts read committed BIT traces",
+      "write": "commit the current BIT trace at attempt reset",
+      "reset": "clear at episode reset",
       "steps": 2000,
       "warmup_steps": 500,
       "global_batch": 256,
-      "pim_lr": 0.00005,
-      "pi_lr_after_warmup": 0.000001,
+      "foundation_lr_after_warmup": 0.000001,
       "eap_lr_after_warmup": 0.00001,
-      "entrypoint": "scripts/run_robotwin_cross_attempt_pim_stage2.sh",
-      "trainer": "scripts/train_robotwin_cross_attempt_pim.py",
-      "artifact_builder": "scripts/build_robotwin_cross_attempt_pim_artifacts.py",
-      "config": "configs/robotwin_cte_eap_pim_20260919.json",
-      "result": "development gate failed; retained for reproducibility"
+      "pim_lr": 0.00005,
+      "artifact_builder": "scripts/robotwin/build_cross_attempt_pim.py",
+      "entrypoint": "scripts/robotwin/train_cross_attempt_pim.py"
     },
-    "within-episode": {
-      "status": "current",
+    "within_episode": {
       "memory_scope": "strictly earlier H15 boundaries in the current episode",
-      "read_contract": "read PIM[0:t), predict action, then append the current BIT",
-      "write_contract": "append one detached BIT after each action prediction",
-      "reset_contract": "clear BIT recurrence and PIM only at episode reset",
-      "training_pairs": "label-free train-only causal prefixes from the same episode",
-      "trainable": ["PIM only"],
-      "frozen": ["CTE", "BIT", "task memory", "language retrieval", "PI", "EAP"],
+      "read": "read PIM[0:t) before predicting boundary t",
+      "write": "append the detached current BIT after action prediction",
+      "reset": "clear at episode reset",
       "steps": 2000,
-      "warmup_steps": 0,
       "global_batch": 256,
       "pim_lr": 0.00005,
       "capacity": 64,
-      "entrypoint": "scripts/run_robotwin_episode_pim_stage2.sh",
-      "trainer": "scripts/train_robotwin_episode_pim.py",
-      "config": "configs/robotwin_episode_pim_20260920.json",
-      "result": "single-attempt development gate passed"
+      "frozen": ["CTE", "BIT", "task_memory", "language_retrieval", "foundation_policy", "EAP"],
+      "entrypoint": "scripts/robotwin/train_within_episode_pim.py"
     }
   }
 }

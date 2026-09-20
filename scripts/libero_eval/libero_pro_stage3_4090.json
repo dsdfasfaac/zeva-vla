@@ -1,9 +1,0 @@
-{
-  "mode": "stage3",
-  "tokenizer_path": "/mnt/huangbingjia/eval/libero/zeva-artifacts/libero-v3-h5-lang/tokenizer",
-  "zte_checkpoint": "/mnt/huangbingjia/eval/libero/zeva-artifacts/libero-v3-h5-lang/stage1-zte/zte_best.pth",
-  "stage2_checkpoint": "/mnt/huangbingjia/eval/libero/zeva-artifacts/libero-v3-h5-lang/stage2a-adapter/005000",
-  "stage3_checkpoint": "/mnt/huangbingjia/eval/libero/zeva-artifacts/libero-v3-h5-lang/stage3-selective-action/002000",
-  "retrieval_checkpoint": "/mnt/huangbingjia/eval/libero/zeva-artifacts/libero-v3-h5-lang/stage1.5-task-retrieval/task_retrieval.pth",
-  "causal_bank": "/mnt/huangbingjia/eval/libero/zeva-artifacts/libero-v3-h5-lang/stage1-zte/train_causal_bank.pt"
-}

@@ -1,6 +1,0 @@
-/mnt/100T/users/dingxin/WAM/playground/Benchmark/RoboTwin/.venv_robotwin/lib/python3.10/site-packages/sapien/__init__.py:2: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914/renderer-formal-health-20260914T1534/formal-renderer-smoke.py:30: DeprecationWarning: Engine is deprecated. use sapien.Scene() directly.
-  engine = sapien_core.Engine()
-Using explicit SAPIEN renderer device 'cuda:0' (CUDA_VISIBLE_DEVICES='GPU-18077766-169d-96b9-2d53-55d11349ddd5')
-{"cuda_visible_devices": "GPU-18077766-169d-96b9-2d53-55d11349ddd5", "device_cuda_id": 0, "device_pci": "0000:ba:00.0", "dtype": "float32", "finite": true, "frame_shape": [480, 640, 4], "hook_path": "/mnt/100T/users/dingxin/VLA/fixed-anchor-pair-20260914-P8hRUO/scripts/robotwin_eval/eval_policy_client.py", "passed": true, "pid": 1656141, "renderer_device": "cuda:0", "vk_icd_exists": true, "vk_icd_filenames": "/etc/vulkan/icd.d/nvidia_icd.json"}

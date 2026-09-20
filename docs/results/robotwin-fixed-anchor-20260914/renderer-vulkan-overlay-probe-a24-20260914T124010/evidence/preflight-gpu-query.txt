@@ -1,6 +1,0 @@
-preflight_utc=2026-09-14T12:40:10Z
-gpu2=GPU-4e851e19-19df-1b0c-cba8-4e0a81c08425 pci=00000000:3A:00.0 memory=34MiB util=0
-gpu6=GPU-2e145d56-44e7-7643-311c-be4bdfb69eb0 pci=00000000:BA:00.0 memory=34MiB util=0
-gpu2_process=/usr/lib/xorg/Xorg type=G memory=23MiB
-gpu6_process=/usr/lib/xorg/Xorg type=G memory=23MiB
-compute_apps_gpu2_or_gpu6=none

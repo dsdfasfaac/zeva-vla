@@ -1,27 +1,23 @@
-# Contributing to BehaviorVLA
+# Contributing to ZeVA
 
-We welcome bug reports, documentation improvements, and focused pull requests.
+Contributions should preserve the public RoboTwin and real-robot scope.
 
-## Issues
+## Development
 
-Before opening an issue, search the existing
-[issues](https://github.com/iLearn-Lab/ICML26-BehaviorVLA/issues). For bug
-reports, include:
+1. Create a focused branch.
+2. Add or update tests for behavioral changes.
+3. Run formatting, lint, and the relevant test subset.
+4. Keep datasets, checkpoints, logs, videos, credentials, cluster paths, and experiment reports out of commits.
+5. Update method or reproduction documentation when a public contract changes.
 
-- Operating system, Python, PyTorch, and CUDA versions.
-- The command and configuration used to reproduce the problem.
-- The complete traceback and relevant logs.
-- Dataset and checkpoint formats, without uploading private data or weights.
+## Design rules
 
-## Pull requests
+- Keep causal boundaries explicit.
+- Do not let CTE consume future actions or images as inputs.
+- Keep PIM scope and reset semantics visible in APIs.
+- Prefer one canonical implementation over compatibility wrappers.
+- Do not add simulator-specific code outside the RoboTwin integration.
+- Preserve third-party notices and licenses.
 
-Keep changes scoped and explain their motivation and behavioral impact. Before
-submitting a pull request:
+Please describe the motivation, affected interfaces, and validation performed in each pull request.
 
-1. Run `pre-commit run --all-files`.
-2. Run the tests relevant to the changed code.
-3. Update documentation when commands, configuration, or public behavior changes.
-4. Do not commit datasets, checkpoints, credentials, logs, or machine-specific paths.
-
-By contributing, you agree that your contribution will be licensed under this
-repository's Apache-2.0 license.

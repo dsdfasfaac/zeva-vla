@@ -61,15 +61,6 @@ class Pi0Config(_model.BaseModelConfig):
     use_brief_memory: bool = True
     use_persistent_memory: bool = True
 
-    # Deprecated aliases retained so earlier checkpoints can be migrated
-    # without rewriting serialized configs.
-    use_behavior: bool | None = None
-    use_apn: bool | None = None
-    retrieval_ckpt: str | None = None
-    behavior_encoder_ckpt: str | None = None
-    memory_bank_path: str | None = None
-    behavior_dim: int | None = None
-
     num_bases: int = 4
 
     def __post_init__(self):
@@ -77,16 +68,6 @@ class Pi0Config(_model.BaseModelConfig):
             object.__setattr__(self, "max_token_len", 200 if self.pi05 else 48)
         if self.discrete_state_input is None:
             object.__setattr__(self, "discrete_state_input", self.pi05)
-        if self.use_behavior is not None:
-            object.__setattr__(self, "use_zeva", self.use_behavior)
-        if self.use_apn is not None:
-            object.__setattr__(self, "use_action_prior", self.use_apn)
-        if self.retrieval_ckpt is not None and self.schema_retrieval_ckpt is None:
-            object.__setattr__(self, "schema_retrieval_ckpt", self.retrieval_ckpt)
-        if self.memory_bank_path is not None and self.schema_memory_path is None:
-            object.__setattr__(self, "schema_memory_path", self.memory_bank_path)
-        if self.behavior_dim is not None:
-            object.__setattr__(self, "schema_dim", self.behavior_dim)
         if self.causal_action_dim <= 0 or self.causal_action_dim > self.action_dim:
             raise ValueError("causal_action_dim must be within the PI0.5 padded action dimension.")
         if self.causal_action_normalization not in {"mean_std", "quantile"}:

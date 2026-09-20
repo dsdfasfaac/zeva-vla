@@ -1,3 +1,0 @@
-actual_pid=not_observed
-reason=renderer exited with ErrorDeviceLost before smoke JSON emission and before nvidia-smi sampling
-smoke_exit_code=1
