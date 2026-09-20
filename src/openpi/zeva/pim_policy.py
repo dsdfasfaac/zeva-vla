@@ -1,10 +1,9 @@
-"""Cross-attempt persistent interaction memory for ZeVA CTE + EAP.
+"""Persistent interaction memory variants for ZeVA CTE + BIT + EAP.
 
-BIT is the existing per-boundary effect token. During an attempt we retain the
-detached ``(phase, BIT)`` pairs. ``reset(scope="attempt")`` commits those pairs
-to PIM, clears attempt-local CTE/BIT state, and preserves PIM. An episode reset
-clears both. The first attempt therefore follows the existing CTE+EAP policy
-exactly; PIM is only materialized after a completed attempt.
+The current method uses :class:`ZevaEpisodePIMPolicy`: BIT is short-term state
+at the current H15 boundary, while PIM is a causal long-term history of earlier
+BITs from the same episode.  The older cross-attempt policy remains loadable so
+that historical checkpoints and negative results stay reproducible.
 """
 from __future__ import annotations
 
@@ -22,6 +21,7 @@ from openpi.zeva.robotwin_contract import ROBOTWIN_CAMERA_KEYS
 
 
 PIM_POLICY_SCHEMA = "zeva-cte-eap-pim-v1"
+EPISODE_PIM_POLICY_SCHEMA = "zeva-cte-bit-episode-pim-eap-v1"
 
 
 def directory_checkpoint_sha(path: str | Path) -> str:
@@ -109,8 +109,42 @@ class AttemptPersistentMemory:
         }
 
 
+class EpisodePersistentMemory:
+    """Bounded causal BIT history inside one episode.
+
+    A decision reads only entries written by earlier decisions.  The current
+    BIT is appended after action prediction, and an episode reset clears all
+    entries.  No attempt or cross-episode state exists in this memory.
+    """
+
+    def __init__(self, *, max_entries: int = 64):
+        if max_entries <= 0:
+            raise ValueError("Episode PIM capacity must be positive.")
+        self.max_entries = int(max_entries)
+        self._entries: list[tuple[torch.Tensor, torch.Tensor]] = []
+
+    def append_bit(self, phase: torch.Tensor, bit: torch.Tensor) -> None:
+        phase_value = AttemptPersistentMemory._batch_one(phase, "phase")
+        bit_value = AttemptPersistentMemory._batch_one(bit, "BIT")
+        self._entries.append((phase_value, bit_value))
+        del self._entries[:-self.max_entries]
+
+    def reset_episode(self) -> None:
+        self._entries.clear()
+
+    def entries(self) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        if not self._entries:
+            return None, None
+        phase = torch.stack([item[0] for item in self._entries]).unsqueeze(0)
+        bit = torch.stack([item[1] for item in self._entries]).unsqueeze(0)
+        return phase, bit
+
+    def snapshot(self) -> dict[str, int]:
+        return {"episode_pim_entries": len(self._entries)}
+
+
 class ZevaPIMEAP(ZevaEffectActionPrior):
-    """Existing EAP plus a phase-retrieved cross-attempt PIM token."""
+    """Existing EAP plus a phase-retrieved PIM token."""
 
     def __init__(self, dim: int = 256, prefix_dim: int = 2048, expert_dim: int = 1024):
         super().__init__(dim=dim, prefix_dim=prefix_dim, expert_dim=expert_dim)
@@ -145,7 +179,7 @@ class ZevaPIMEAP(ZevaEffectActionPrior):
             else pim_mask.to(device=pim_phase.device, dtype=torch.bool)
         )
         if valid.shape != pim_phase.shape[:2] or not valid.any(dim=1).all():
-            raise ValueError("Each PIM sample needs at least one valid cross-attempt BIT.")
+            raise ValueError("Each PIM sample needs at least one valid historical BIT.")
         query = F.normalize(self.pim_query(phase), dim=-1)
         keys = F.normalize(self.pim_phase(pim_phase), dim=-1)
         scores = torch.einsum("bd,bnd->bn", query, keys).masked_fill(~valid, -torch.inf)
@@ -239,7 +273,7 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
             raise ValueError(f"Unexpected parent adapter mismatch: {incompatible}")
         load_model(policy.foundation, str(parent / "model.safetensors"), strict=True)
         policy.identity = {
-            "schema": PIM_POLICY_SCHEMA,
+            "schema": cls.POLICY_SCHEMA,
             "cte_sha256": file_sha(cte_checkpoint),
             "artifacts_sha256": file_sha(artifacts),
             "retrieval_sha256": file_sha(retrieval_checkpoint),
@@ -278,7 +312,7 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         adapter = torch.load(folder / "zeva_adapter.pth", map_location=device, weights_only=False)
         identity = adapter.get("identity", {})
         expected_core = {
-            "schema": PIM_POLICY_SCHEMA,
+            "schema": cls.POLICY_SCHEMA,
             "cte_sha256": file_sha(cte_checkpoint),
             "artifacts_sha256": file_sha(artifacts),
             "retrieval_sha256": file_sha(retrieval_checkpoint),
@@ -378,3 +412,56 @@ class ZevaPIMPolicy(ZevaCTEEAPPolicy):
         if diagnostics:
             diagnostics[0] = {**diagnostics[0], **self.pim.snapshot()}
         return diagnostics
+
+
+class ZevaEpisodePIMPolicy(ZevaPIMPolicy):
+    """BIT short-term state plus causal, within-episode long-term PIM."""
+
+    POLICY_SCHEMA = EPISODE_PIM_POLICY_SCHEMA
+
+    def __init__(self, loader, cte, bank, retrieval, *, max_entries: int = 64):
+        self._episode_pim_max_entries = int(max_entries)
+        super().__init__(loader, cte, bank, retrieval, max_attempts=1)
+
+    def reset(self, *, scope="episode"):
+        if scope != "episode":
+            raise ValueError("Episode PIM resets only at complete episode boundaries.")
+        if not hasattr(self, "pim") or not isinstance(self.pim, EpisodePersistentMemory):
+            self.pim = EpisodePersistentMemory(max_entries=self._episode_pim_max_entries)
+        self.pim.reset_episode()
+        self._cache = None
+        self._global_token = None
+        self.memory.last_diagnostics = []
+        self.pbd.clear()
+        self.foundation.reset()
+
+    @torch.no_grad()
+    def predict_action_chunk(self, processed, *, task, executed_actions=None, include_pim=True):
+        if self.training:
+            raise RuntimeError("Deployment must use policy.eval().")
+        views = torch.stack(
+            [
+                F.interpolate(
+                    processed[key].float(), (224, 224), mode="bilinear",
+                    align_corners=False, antialias=True,
+                ).mul(2).sub(1)
+                for key in ROBOTWIN_CAMERA_KEYS
+            ],
+            dim=1,
+        )
+        previous = None if executed_actions is None else self.action_normalizer.normalize(executed_actions)
+        phase, bit, self._cache = self.cte.step(views, previous, self._cache)
+        if self._global_token is None:
+            self._global_token = self.memory(self.language(task))
+        pim_phase, pim_bit = self.pim.entries()
+        self.pbd.activate(
+            self._global_token, phase, bit,
+            pim_phase=pim_phase, pim_bit=pim_bit, include_pim=include_pim,
+        )
+        try:
+            actions = self.foundation.predict_action_chunk(processed)
+        finally:
+            self.pbd.clear()
+        # Causal order: the action at this boundary cannot read its own BIT.
+        self.pim.append_bit(phase, bit)
+        return actions

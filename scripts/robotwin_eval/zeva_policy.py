@@ -135,9 +135,9 @@ class ZevaModel:
         if method == "behavior_effect":
             # Compatibility for archived evaluation configs.
             method = "cte_eap"
-        if method not in {"legacy", "cte_eap", "cte_eap_pim"}:
+        if method not in {"legacy", "cte_eap", "cte_eap_pim", "cte_eap_episode_pim"}:
             raise ValueError(f"Unknown ZeVA method: {method}")
-        if method in {"cte_eap", "cte_eap_pim"}:
+        if method in {"cte_eap", "cte_eap_pim", "cte_eap_episode_pim"}:
             from openpi.zeva.cte_eap_policy import ZevaCTEEAPPolicy
 
             if self._baseline_only or self._candidate_selector or self._consensus_tasks:
@@ -145,10 +145,13 @@ class ZevaModel:
             cte_artifacts = args.get("cte_artifacts", args.get("behavior_effect_artifacts"))
             if cte_artifacts is None:
                 raise ValueError("CTE+EAP evaluation requires cte_artifacts.")
-            if method == "cte_eap_pim":
-                from openpi.zeva.pim_policy import ZevaPIMPolicy
+            if method in {"cte_eap_pim", "cte_eap_episode_pim"}:
+                from openpi.zeva.pim_policy import ZevaEpisodePIMPolicy, ZevaPIMPolicy
 
-                self.policy = ZevaPIMPolicy.load_trained(
+                policy_class = (
+                    ZevaEpisodePIMPolicy if method == "cte_eap_episode_pim" else ZevaPIMPolicy
+                )
+                self.policy = policy_class.load_trained(
                     args["handoff_root"], args["foundation_checkpoint"], args["zte_checkpoint"],
                     cte_artifacts, args["retrieval_checkpoint"], stage2_checkpoint,
                     device=args.get("device", "cuda"),

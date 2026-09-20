@@ -5,11 +5,33 @@ import unittest
 import torch
 
 from openpi.zeva.cte_eap import ZevaEffectActionPrior
-from openpi.zeva.pim_policy import AttemptPersistentMemory, ZevaPIMEAP
+from openpi.zeva.pim_policy import AttemptPersistentMemory, EpisodePersistentMemory, ZevaPIMEAP
+from scripts.train_robotwin_episode_pim import causal_episode_history
 from scripts.build_robotwin_pim_artifacts import build_pairings
 
 
 class PIMMemoryTest(unittest.TestCase):
+    def test_training_history_is_same_episode_and_strictly_earlier(self):
+        phase = torch.arange(5 * 256, dtype=torch.float32).reshape(5, 256)
+        row = {"phase": phase, "effect": phase + 1000}
+        history_phase, history_bit, mask = causal_episode_history(row, timestep=3, capacity=4)
+        self.assertEqual(mask.tolist(), [True, True, True, False])
+        self.assertTrue(torch.equal(history_phase[:3], phase[:3]))
+        self.assertTrue(torch.equal(history_bit[:3], phase[:3] + 1000))
+        self.assertFalse(any(torch.equal(value, phase[3]) for value in history_phase[mask]))
+
+    def test_episode_pim_is_causal_and_clears_only_at_episode_reset(self):
+        memory = EpisodePersistentMemory(max_entries=2)
+        self.assertIsNone(memory.entries()[0])
+        for value in range(3):
+            memory.append_bit(torch.full((1, 256), value), torch.full((1, 256), value + 10))
+        phase, bit = memory.entries()
+        self.assertEqual(tuple(phase.shape), (1, 2, 256))
+        self.assertEqual(phase[0, :, 0].tolist(), [1, 2])
+        self.assertEqual(bit[0, :, 0].tolist(), [11, 12])
+        memory.reset_episode()
+        self.assertEqual(memory.snapshot(), {"episode_pim_entries": 0})
+
     def test_attempt_and_episode_reset_contract(self):
         memory = AttemptPersistentMemory(max_attempts=2, max_entries_per_attempt=2)
         self.assertEqual(memory.snapshot(), {"bit_entries": 0, "pim_attempts": 0, "pim_entries": 0})

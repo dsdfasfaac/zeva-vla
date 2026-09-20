@@ -1,0 +1,35 @@
+{
+  "schema": "zeva-cte-bit-episode-pim-eap-preregistration-v1",
+  "date": "2026-09-20",
+  "method": {
+    "bit": "current H15 boundary short-term interaction state",
+    "pim": "causal long-term history of strictly earlier BITs in the same episode",
+    "write_order": "read prior PIM, predict action, append current BIT",
+    "reset": "clear BIT recurrence and PIM only at episode boundary",
+    "cross_attempt": false,
+    "cross_episode": false
+  },
+  "training": {
+    "parent": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-behavior-effect-20260918/stage2-fullpi-pbd-effect-epoch040-exploratory/005000",
+    "source_subset": "train-only",
+    "history_source": "same episode, timesteps [0,t)",
+    "success_labels_used": false,
+    "trainable": ["pim_phase", "pim_bit", "pim_query", "pim_projector", "pim_to_global"],
+    "frozen": ["CTE", "BIT", "task memory", "language retrieval", "PI", "EAP"],
+    "steps": 2000,
+    "global_batch": 256,
+    "pim_lr": 0.00005,
+    "pim_capacity": 64,
+    "checkpoint_interval": 500
+  },
+  "selection": {
+    "endpoint_only": 2000,
+    "offline_before_closed_loop": true,
+    "closed_loop": "new disjoint 10x8 single-attempt paired evaluation",
+    "development_seed_start": 3000000,
+    "gate": "Episode-PIM attempt1 success count must exceed both fixed Base and fixed Parent",
+    "formal_labels_used_for_selection": false,
+    "post_formal_candidate": true
+  },
+  "disclosure": "This candidate was defined after the original formal set had been evaluated; it cannot retroactively replace that result."
+}

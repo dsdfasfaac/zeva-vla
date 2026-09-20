@@ -1,0 +1,48 @@
+{
+  "schema": "zeva-episode-pim-runtime-smoke-v1",
+  "date": "2026-09-20",
+  "source_snapshot": "/mnt/100T/users/dingxin/VLA/zeva-episode-pim-20260920",
+  "run_root": "/mnt/100T/users/dingxin/VLA/zeva-runs/robotwin-episode-pim-20260920",
+  "decision_count": 108178,
+  "unit_tests": {
+    "status": "PASS",
+    "count": 7,
+    "coverage": [
+      "same-episode strictly-earlier history",
+      "bounded episode PIM and episode reset",
+      "PIM-off exact Parent path",
+      "nonzero PIM gradients"
+    ]
+  },
+  "initial_failed_smoke": {
+    "path": "smoke-single-global8-2step",
+    "status": "SAFE_FAIL_BEFORE_UPDATE",
+    "reason": "The first dataset guard treated the 40 adapter tasks outside the frozen 10-task CTE artifact as missing. The run was preserved and not resumed or overwritten."
+  },
+  "single_gpu": {
+    "path": "smoke-single-global8-2step-v2",
+    "status": "PASS",
+    "global_batch": 8,
+    "optimizer_updates": 2,
+    "losses": [-0.0995635837316513, -0.14366072416305542],
+    "pim_grad_norms": [0.2170882225036621, 0.2509140372276306]
+  },
+  "eight_gpu_capacity": {
+    "path": "smoke-8gpu-global256-2step",
+    "status": "PASS",
+    "topology": "8xH100, batch32/rank, no accumulation",
+    "global_batch": 256,
+    "optimizer_updates": 2,
+    "losses": [-0.1452787220478058, -0.06935938447713852],
+    "pim_grad_norms": [0.14035843312740326, 0.11772565543651581],
+    "rank_rng_files": 8
+  },
+  "frozen_parent_audit": {
+    "status": "PASS",
+    "foundation_model_sha256": "6b0380679cff27507d969a10c7467ebb8ee05490714b34d1b365c4756da3e9f4",
+    "parent_foundation_bit_exact": true,
+    "parent_eap_tensor_count": 23,
+    "parent_eap_bit_exact": true
+  },
+  "promotable": false
+}
