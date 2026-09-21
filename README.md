@@ -1,10 +1,12 @@
-# ZeVA
+# Zeva-Ego
 
-ZeVA is a memory-augmented vision-language-action stack for RoboTwin and real-robot manipulation. The public release focuses on method implementation and training reproducibility.
+Zeva-Ego is a memory-augmented vision-language-action stack for RoboTwin and real-robot manipulation. The public release focuses on method implementation and training reproducibility.
+
+[![Zeva-Ego overview](assets/zeva_ego_teaser.png)](assets/zeva_ego_teaser.pdf)
 
 ## Method
 
-ZeVA adds four components to a foundation policy:
+Zeva-Ego adds four components to a foundation policy:
 
 - **CTE — Causal Transition Encoder:** recurrently encodes camera observations and the previously executed H15 action chunk.
 - **BIT — Boundary Interaction Token:** the short-term state produced at the current replanning boundary.
@@ -54,26 +56,7 @@ pipelines/
 
 The two `pipelines/` packages are code-only and independent of the ICCL implementation. They expect caller-provided checkpoints and already-prepared data, and do not modify `src/openpi/zeva`.
 
-## Installation
-
-Python 3.11 and a CUDA 12 environment are recommended.
-
-```bash
-git clone https://github.com/dsdfasfaac/zeva-vla.git
-cd zeva-vla
-git submodule update --init --recursive
-GIT_LFS_SKIP_SMUDGE=1 uv sync
-uv pip install -e third_party/aloha
-```
-
-Install the local Mamba and causal-convolution packages if they are not already available in the environment:
-
-```bash
-uv pip install -e causal-conv1d
-uv pip install -e mamba
-```
-
-## RoboTwin training
+## Training and evaluation
 
 The public recipe has four stages:
 
@@ -84,16 +67,14 @@ The public recipe has four stages:
 
 Every path is provided explicitly on the command line; the repository contains no cluster-specific paths or credentials.
 
-See [RoboTwin reproduction](docs/ROBOTWIN_REPRODUCTION.md) for commands and data contracts.
-
-## Zeva-Ego pipelines
+See the [documentation index](docs/README.md) for installation and the ICCL training and deployment guides. Pipeline-specific commands live with their corresponding packages:
 
 - [Ego action encoder](pipelines/ego_action_encoder/README.md) provides the two-stage visual action encoder, release training recipes, and RGB-pair inference API.
 - [RoboTwin Clean](pipelines/robotwin_clean/README.md) provides the Joint14 / chunk-start-relative EEF16 clean post-training and randomized evaluation boundary.
 
 ## Real-robot deployment
 
-Start a policy server on the GPU host and query it from the robot process using `openpi-client`. See [real-robot deployment](docs/REAL_ROBOT_DEPLOYMENT.md).
+The policy server and lightweight robot client are documented in [real-robot deployment](docs/REAL_ROBOT_DEPLOYMENT.md).
 
 ## Reproducibility and safety
 

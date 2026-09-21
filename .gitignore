@@ -1,5 +1,7 @@
 # Data directories.
 assets/*
+!assets/zeva_ego_teaser.pdf
+!assets/zeva_ego_teaser.png
 checkpoints/
 data/
 wandb/
